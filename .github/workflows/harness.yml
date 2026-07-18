@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v8
+      - uses: astral-sh/setup-uv@v8.3.2
       - run: uv sync --directory meta
       - run: uv run --directory meta pytest
       - run: uv run --directory meta python -m harness.rules_checker
