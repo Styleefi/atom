@@ -1,0 +1,55 @@
+<!--
+  CLAUDE.md template for child projects of atom.
+
+  How to use (in your new project cloned from atom):
+    1. Copy this file over the root CLAUDE.md, replacing atom's own.
+    2. Fill in every {{PLACEHOLDER}} below; delete optional sections that stay empty.
+    3. Delete these instruction comments. Keep the INHERITED FROM ATOM section as-is.
+    4. Clear atom's session records under docs/ (checklist.md, context-notes.md) and start your own.
+
+  On `git pull upstream main` conflicts: keep YOURS for CLAUDE.md / README.md / docs/,
+  take UPSTREAM'S for meta/ and .github/.
+-->
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project overview
+
+{{ONE_PARAGRAPH: what this project is, for whom, and its current phase}}
+
+<!-- ===== INHERITED FROM ATOM — do not edit; revised via `git pull upstream main` ===== -->
+## Rules (inherited)
+
+<!-- Kept in sync with atom's root CLAUDE.md: @meta/rules/ imports land here with atom's first rules PR. -->
+
+## Meta harness (inherited)
+
+<!-- Kept in sync with atom's root CLAUDE.md: `pytest` runs all meta harnesses once they land. -->
+<!-- ===== END INHERITED ===== -->
+
+## Commands
+
+- Build: {{BUILD_COMMAND}}
+- Lint: {{LINT_COMMAND}}
+- Test (all): {{TEST_COMMAND}}
+- Test (single): {{SINGLE_TEST_COMMAND}}
+
+## Toolchain & conventions
+
+- Language & version: {{LANGUAGE_AND_VERSION}}
+- Test runner: {{TEST_RUNNER}}
+- Formatter / linter: {{FORMATTER_AND_LINTER}}
+- Package manager: {{PACKAGE_MANAGER}}
+
+## Architecture
+
+{{BIG_PICTURE_ONLY: structure that requires reading multiple files to understand — data flow, module boundaries, key invariants. No file-by-file listing.}}
+
+## Code style delta
+
+{{ONLY_RULES_THAT_DIFFER: from language defaults and inherited rules. Delete this section if empty.}}
+
+## Gotchas
+
+{{NON_OBVIOUS: required env vars, environment quirks, known traps. Delete this section if empty.}}

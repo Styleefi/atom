@@ -1,12 +1,58 @@
 # atom
-Starting from 'A': The fundamental root and architectural skeleton for all future projects. Orchestrating personal Claude agents, automated harnesses, and modular skillsets.
 
-**Atom** is a centralized meta-repository designed to orchestrate, standardize, and empower a personal ecosystem of AI agents driven by Anthropic's Claude. It acts as the Single Source of Truth (SSOT) for foundational project architectures, ensuring consistent behavior, robust testing, and seamless scalability across all subsequent repositories.
+Starting from 'A': the root and architectural skeleton for all future projects — orchestrating personal Claude agents, automated harnesses, and modular skillsets.
 
-## 🎯 Core Objectives
+**Atom** is a meta-repository that acts as the Single Source of Truth (SSOT) for a personal ecosystem of Claude-driven projects. Every new project starts as a clone of atom, inherits its rules, agent configuration, and verification harnesses, and receives later revisions through `git pull upstream main`.
 
-- **`CLAUDE.md` & Declarative Rules:** A centralized registry of system prompts, behavioral guidelines, and coding standards that prevent prompt drift and maintain high-quality AI outputs.
-- **Modular Skillsets:** Highly cohesive, reusable capabilities and domain-specific knowledge bases that can be dynamically loaded into Claude for specialized tasks.
-- **Agent Pipelines:** Automated workflows and orchestration logic that connect individual skills and micro-agents to solve complex, multi-step engineering problems.
-- **Test Harnesses:** Robust execution environments and verification frameworks designed to evaluate agent performance, validate outputs, and ensure deterministic reliability before deploying to downstream projects.
-- **The Universal Skeleton:** The architectural root template from which all future personal repositories inherit their baseline structural and AI-assisted workflows.
+## Goals
+
+Each goal exists because of a recurring, real pain — not an aspiration:
+
+| # | Goal | Pain it removes |
+|---|------|-----------------|
+| 1 | **Configuration SSOT** — rules, agent roles, skills, hooks, and MCP config are versioned here, once | Corrections trapped in per-project memory; every machine and project configured differently |
+| 2 | **Project Bootstrap** — a new project starts fully equipped by cloning this skeleton | Rebuilding structure, settings, and tooling from scratch for every project |
+| 3 | **Enforced Quality Loop** — rules are promoted from advice to deterministic checks (harnesses, hooks, CI) | "Done" declared without verification; unrequested changes slipping through |
+| 4 | **Session Continuity** — decisions survive across sessions via standard artifacts (plan, checklist, context notes) | Context and rationale lost between sessions |
+| 5 | **Agent Pipelines** — standard workflows chaining agent roles (e.g. implement → review → test → docs) | Manual re-orchestration of proven multi-agent flows |
+
+Open questions (which agent roles, which pipelines, rule migration) are tracked in GitHub Issues, not in this file.
+
+## Repository layout
+
+```
+├── CLAUDE.md          # guidance for Claude Code in this repo
+├── meta/              # the meta layer every child project inherits
+│   ├── rules/         #   rule SSOT (frontmatter-declared deployment)
+│   ├── templates/     #   CLAUDE.template.md and other scaffolds
+│   └── harness/       #   verification harnesses (one subpackage each)
+├── docs/              # design docs + session artifacts
+└── (child projects add their product layer: services/, infra/, libs/ …)
+```
+
+## Getting started — creating a child project
+
+GitHub cannot fork a repository into the same account, and "Use this template" severs the upstream link (`git pull upstream main` stops working). Use the clone recipe instead:
+
+```bash
+# 1. create an empty repository on GitHub (e.g. myproject), then:
+git clone https://github.com/Styleefi/atom.git myproject
+cd myproject
+git remote rename origin upstream
+git remote add origin https://github.com/Styleefi/myproject.git
+git push -u origin main
+
+# 2. adapt the skeleton
+#    - copy meta/templates/CLAUDE.template.md over the root CLAUDE.md and fill it in
+#    - clear atom's session records under docs/ and start your own
+#    - rewrite this README for your project
+
+# 3. later, pull rule/harness revisions from atom
+git pull upstream main
+```
+
+Merge conflicts on upstream pulls are expected for the files you replaced: keep **yours** for `CLAUDE.md`, `README.md`, and `docs/`; take **upstream's** for `meta/` and `.github/`.
+
+## License
+
+[MIT](LICENSE)
