@@ -21,11 +21,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 <!-- ===== INHERITED FROM ATOM — do not edit; revised via `git pull upstream main` ===== -->
 ## Rules (inherited)
 
-<!-- Kept in sync with atom's root CLAUDE.md: @meta/rules/ imports land here with atom's first rules PR. -->
+@meta/rules/rule-deployment.md
+@meta/rules/python-stack.md
+@meta/rules/plan-deviation.md
+@meta/rules/answer-first.md
 
 ## Meta harness (inherited)
 
-<!-- Kept in sync with atom's root CLAUDE.md: `pytest` runs all meta harnesses once they land. -->
+- `uv run --directory meta pytest` — run all meta harnesses (their tests)
+- `uv run --directory meta python -m harness.rules_checker` — verify every rule is deployed as declared
 <!-- ===== END INHERITED ===== -->
 
 ## Commands

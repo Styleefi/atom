@@ -1,0 +1,13 @@
+[project]
+name = "atom-meta"
+version = "0.1.0"
+description = "Meta-layer harnesses for the atom skeleton (self-contained; isolated from the product environment)"
+requires-python = ">=3.12"
+dependencies = ["PyYAML>=6.0"]
+
+[dependency-groups]
+dev = ["pytest>=9.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["harness"]
+pythonpath = ["."]

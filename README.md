@@ -43,6 +43,7 @@ git remote add origin https://github.com/Styleefi/myproject.git
 git push -u origin main
 
 # 2. adapt the skeleton
+#    - install uv once per machine (https://docs.astral.sh/uv/) — runs the meta harnesses
 #    - copy meta/templates/CLAUDE.template.md over the root CLAUDE.md and fill it in
 #    - clear atom's session records under docs/ and start your own
 #    - rewrite this README for your project
