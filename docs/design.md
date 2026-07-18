@@ -26,13 +26,16 @@ Decisions confirmed on 2026-07-19 through a structured interview (see context-no
 ## Layout: meta layer isolated in `meta/`
 
 - `meta/` holds everything that exists to run the Claude ecosystem (rules, templates, harnesses), so a child project's root stays clean for its product layer (`services/`, `infra/`, `libs/`, …).
+- `meta/` is a **self-contained uv project** (own `pyproject.toml`, committed `uv.lock`, own `.venv`). The repo root deliberately has no `pyproject.toml` — that slot belongs to a child project's product. Meta and product environments are fully separate, so their dependency versions (e.g. pytest) can never conflict, no matter how far they drift. venv (manual multi-env, no lockfile) and Docker (overkill for second-long unit tests) were considered and rejected.
 - Files with fixed-path semantics stay at their required locations: root `CLAUDE.md`, `.claude/`, `.mcp.json`.
 - Harnesses grow as one subpackage each under `meta/harness/<name>/`, with their own `tests/` (each `tests/` contains `__init__.py` to avoid pytest module-name collisions between harnesses).
 - Never name a file exactly `CLAUDE.md` outside the repo root — Claude Code auto-loads child-directory `CLAUDE.md` files on demand, which would make template/reference content leak into sessions unpredictably.
 
 ## Scope decisions (2026-07-19)
 
-- Materialized now: foundation documents, first two rules (`rule-deployment`, `python-stack`), rules checker harness with CI.
+- Materialized now: foundation documents, first three rules (`rule-deployment`, `python-stack`, `plan-deviation`), rules checker harness with CI.
+- Checker strengthening (owner decision): vessels whose deployment verification is not implemented (`hook`, `skill`) are **rejected, never silently passed** — adding the first hook/skill rule requires implementing its verification first. This closes the "declared but unverifiable" loophole.
+- `plan-deviation` rule origin: during this work, an unplanned tool install (`uv`) was attempted without presenting options — corrected and codified as a rule the same day (the rule system's first live use).
 - Deferred to GitHub Issues: agent role catalog & standard pipelines (the 8 home-grown roles are *not* presumed to be the answer), legacy rule migration, hooks seed, `.mcp.json` canonicalization, personal global file slim-down.
 - `.claude/agents/` and `.claude/skills/` are intentionally **not** created yet: structure ahead of decided content is speculative design.
-- Python (>= 3.12, pytest) is the stack for the meta layer only; each child project declares its own product stack in its CLAUDE.md.
+- Python (>= 3.12, pytest, uv) is the stack for the meta layer only; each child project declares its own product stack in its CLAUDE.md. Dependency floors sit at the current major (e.g. `pytest>=9.0`): installs always resolve to the latest (no caps), while the floor states the oldest version the code is believed to work with.

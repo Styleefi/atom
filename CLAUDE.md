@@ -8,15 +8,21 @@ Atom is the meta-repository (SSOT) for a personal ecosystem of Claude-driven pro
 
 ## Current state
 
-Foundation phase: documents and structure only. The first rules (`meta/rules/`) and the rules checker (`meta/harness/rules_checker/`) land in the next PR. The work backlog lives in GitHub Issues (`gh issue list`), not in this file.
+Foundation phase: first rules (`meta/rules/`) and the rules checker are in place. The work backlog lives in GitHub Issues (`gh issue list`), not in this file.
 
 ## Commands
 
-<!-- Added when the harness lands: `pytest` (all harnesses), rules checker invocation. -->
+- `uv run --directory meta pytest` — run all meta harnesses (their tests)
+- `uv run --directory meta python -m harness.rules_checker` — verify every rule is deployed as declared
+
+`meta/` is a self-contained uv project (own `pyproject.toml`, `uv.lock`, `.venv`), isolated from any product-layer environment.
 
 ## Rules
 
-<!-- Replaced with @meta/rules/ imports (always-on rules only) once the first rules land. -->
+@meta/rules/rule-deployment.md
+@meta/rules/python-stack.md
+@meta/rules/plan-deviation.md
+@meta/rules/answer-first.md
 
 ## Repo-specific rules
 
