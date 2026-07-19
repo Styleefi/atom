@@ -23,6 +23,7 @@ Foundation phase: first rules (`meta/rules/`) and the rules checker are in place
 @meta/rules/python-stack.md
 @meta/rules/plan-deviation.md
 @meta/rules/answer-first.md
+@meta/rules/issue-workflow.md
 
 ## Repo-specific rules
 

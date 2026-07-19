@@ -8,7 +8,7 @@
     4. Clear atom's session records under docs/ (checklist.md, context-notes.md) and start your own.
 
   On `git pull upstream main` conflicts: keep YOURS for CLAUDE.md / README.md / docs/,
-  take UPSTREAM'S for meta/ and .github/.
+  take UPSTREAM'S for meta/, .github/, and .claude/.
 -->
 # CLAUDE.md
 
@@ -25,6 +25,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 @meta/rules/python-stack.md
 @meta/rules/plan-deviation.md
 @meta/rules/answer-first.md
+@meta/rules/issue-workflow.md
 
 ## Meta harness (inherited)
 
