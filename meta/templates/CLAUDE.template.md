@@ -5,7 +5,7 @@
     1. Copy this file over the root CLAUDE.md, replacing atom's own.
     2. Fill in every {{PLACEHOLDER}} below; delete optional sections that stay empty.
     3. Delete these instruction comments. Keep the INHERITED FROM ATOM section as-is.
-    4. Clear atom's session records under docs/ (checklist.md, context-notes.md) and start your own.
+    4. Replace atom's docs/design.md with your own: durable rationale lives in curated docs, progress context in issue comments (issue-workflow rule).
 
   On `git pull upstream main` conflicts: keep YOURS for CLAUDE.md / README.md / docs/,
   take UPSTREAM'S for meta/, .github/, and .claude/.

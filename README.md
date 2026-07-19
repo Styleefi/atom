@@ -13,7 +13,7 @@ Each goal exists because of a recurring, real pain — not an aspiration:
 | 1 | **Configuration SSOT** — rules, agent roles, skills, hooks, and MCP config are versioned here, once | Corrections trapped in per-project memory; every machine and project configured differently |
 | 2 | **Project Bootstrap** — a new project starts fully equipped by cloning this skeleton | Rebuilding structure, settings, and tooling from scratch for every project |
 | 3 | **Enforced Quality Loop** — rules are promoted from advice to deterministic checks (harnesses, hooks, CI) | "Done" declared without verification; unrequested changes slipping through |
-| 4 | **Session Continuity** — decisions survive across sessions via standard artifacts (plan, checklist, context notes) | Context and rationale lost between sessions |
+| 4 | **Session Continuity** — decisions survive across sessions: progress context in issue comments, durable rationale in curated docs | Context and rationale lost between sessions |
 | 5 | **Agent Pipelines** — standard workflows chaining agent roles (e.g. implement → review → test → docs) | Manual re-orchestration of proven multi-agent flows |
 
 Open questions (which agent roles, which pipelines, rule migration) are tracked in GitHub Issues, not in this file.
@@ -26,7 +26,7 @@ Open questions (which agent roles, which pipelines, rule migration) are tracked 
 │   ├── rules/         #   rule SSOT (frontmatter-declared deployment)
 │   ├── templates/     #   CLAUDE.template.md and other scaffolds
 │   └── harness/       #   verification harnesses (one subpackage each)
-├── docs/              # design docs + session artifacts
+├── docs/              # curated design docs
 └── (child projects add their product layer: services/, infra/, libs/ …)
 ```
 
