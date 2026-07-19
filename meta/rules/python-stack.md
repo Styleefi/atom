@@ -1,5 +1,6 @@
 ---
 id: python-stack
+tier: convention
 enforce: claude-md
 deployed-to: CLAUDE.md
 ---

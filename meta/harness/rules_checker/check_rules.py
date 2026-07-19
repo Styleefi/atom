@@ -3,15 +3,23 @@
 
 meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
 
-1. frontmatter 존재 및 필수 필드(id, enforce, deployed-to)
-2. enforce 값이 허용된 그릇(claude-md | skill | hook)인지
+1. frontmatter 존재 및 필수 필드(id, tier, enforce, deployed-to)
+2. tier 값이 허용된 등급(principle | convention)인지,
+   enforce 값이 허용된 그릇(claude-md | skill | hook)인지
 3. id가 파일명(stem)과 일치하는지
 4. deployed-to 대상 파일이 저장소에 실제 존재하는지
 5. 실배포 확인 — claude-md 그릇: 대상 파일이 `@meta/rules/<파일명>` import를
    실제로 포함하는지. hook 그릇: deployed-to(settings JSON)가 규칙 id에서
    도출한 harness 모듈(`harness.<id의 -를 _로>`)을 참조하고 그 harness
-   패키지가 실제 존재하는지. skill 그릇: 검증이 미구현이므로 **거부**한다
-   (선언만 있고 검증 불가능한 배포는 통과시키지 않는다는 강화 사양).
+   패키지가 실제 존재하는지. skill 그릇: deployed-to가 `.claude/skills/`
+   아래의 SKILL.md이고 그 SKILL.md가 `meta/rules/<파일명>`을 참조하는지
+   (규칙 본문의 SSOT는 meta/rules/, SKILL.md는 참조만 한다는 v1 규약).
+   검증 로직이 없는 그릇은 통과가 아니라 **거부**한다(강화 사양).
+
+규칙 단위 검사와 별개로 repo-level 검사 하나를 수행한다: root CLAUDE.md와
+child 템플릿(meta/templates/CLAUDE.template.md)의 `@meta/rules/` import
+집합이 동일한지 — 유일한 수동 동기화 지점의 침묵 드리프트를 양방향으로
+차단한다.
 
 경로는 실행 위치와 무관하게 이 파일의 고정 위치(meta/harness/rules_checker/)
 로부터 역산한 저장소 루트 기준으로 해석하므로 로컬과 CI에서 결과가 동일하다.
@@ -20,6 +28,7 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -27,9 +36,17 @@ import yaml
 
 # 허용되는 배포 그릇. 검증 로직이 구현된 그릇만 통과 대상이다.
 VALID_ENFORCE = {"claude-md", "skill", "hook"}
-VERIFIABLE_ENFORCE = {"claude-md", "hook"}
+VERIFIABLE_ENFORCE = {"claude-md", "skill", "hook"}
 
-REQUIRED_FIELDS = ("id", "enforce", "deployed-to")
+# 규칙 등급: principle(원칙 — 충돌 시 우선, 개정 문턱 높음) | convention(세칙).
+VALID_TIER = {"principle", "convention"}
+
+REQUIRED_FIELDS = ("id", "tier", "enforce", "deployed-to")
+
+# CLAUDE.md/템플릿에서 규칙 import 줄을 뽑는 패턴.
+IMPORT_RE = re.compile(r"@meta/rules/\S+\.md")
+
+TEMPLATE_PATH = Path("meta") / "templates" / "CLAUDE.template.md"
 
 
 def find_repo_root() -> Path:
@@ -97,6 +114,14 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
             f"{rel}: id '{data['id']}' does not match filename stem '{rule_path.stem}'"
         )
 
+    tier = data["tier"]
+    if tier not in VALID_TIER:
+        violations.append(
+            f"{rel}: invalid tier value '{tier}' "
+            f"(allowed: {', '.join(sorted(VALID_TIER))})"
+        )
+        return violations
+
     enforce = data["enforce"]
     if enforce not in VALID_ENFORCE:
         violations.append(
@@ -145,6 +170,23 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
                 f"{rel}: hook harness package "
                 f"'meta/harness/{rule_path.stem.replace('-', '_')}/' does not exist"
             )
+    elif enforce == "skill":
+        # skill 그릇 규약(v1): deployed-to는 .claude/skills/ 아래의 SKILL.md여야
+        # 하고, 그 SKILL.md가 규칙 파일을 참조해야 실배포로 본다. 규칙 본문의
+        # SSOT는 meta/rules/이고 SKILL.md는 참조만 한다(내용 드리프트 방지).
+        deployed = Path(str(data["deployed-to"]))
+        if deployed.parts[:2] != (".claude", "skills") or deployed.name != "SKILL.md":
+            violations.append(
+                f"{rel}: skill deployed-to '{data['deployed-to']}' must be a "
+                "SKILL.md under .claude/skills/"
+            )
+            return violations
+        reference = f"meta/rules/{rule_path.name}"
+        if reference not in target.read_text(encoding="utf-8"):
+            violations.append(
+                f"{rel}: '{data['deployed-to']}' does not reference "
+                f"'{reference}' — declared but not actually deployed"
+            )
     else:
         # 검증 미구현 그릇은 통과가 아니라 거부 — 검증 없는 배포 선언 금지.
         violations.append(
@@ -155,14 +197,51 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
     return violations
 
 
-def check_rules(root: Path) -> list[str]:
-    """meta/rules/ 전체를 검증하고 위반 목록을 돌려준다.
+def check_template_sync(root: Path) -> list[str]:
+    """root CLAUDE.md와 child 템플릿의 규칙 import 집합 동등성을 검증한다.
+
+    템플릿의 INHERITED 블록은 root CLAUDE.md Rules 섹션의 수동 복제본이라
+    체커 없이는 드리프트가 조용히 누적된다. 추가 누락(root에만 있는 import)과
+    제거 잔류(템플릿에만 남은 낡은 import)를 양방향으로 잡는다.
 
     Args:
         root: 저장소 루트.
 
     Returns:
-        전 규칙 파일의 위반 메시지 목록. README.md는 규칙이 아니므로 제외한다.
+        위반 메시지 목록. 두 파일 중 하나라도 없으면 검사할 동기화 지점이
+        없는 것이므로 빈 목록(개별 규칙의 deployed-to 검사가 부재를 잡는다).
+    """
+    claude_md = root / "CLAUDE.md"
+    template = root / TEMPLATE_PATH
+    if not claude_md.is_file() or not template.is_file():
+        return []
+
+    root_imports = set(IMPORT_RE.findall(claude_md.read_text(encoding="utf-8")))
+    template_imports = set(IMPORT_RE.findall(template.read_text(encoding="utf-8")))
+
+    violations: list[str] = []
+    for missing in sorted(root_imports - template_imports):
+        violations.append(
+            f"{TEMPLATE_PATH}: missing '{missing}' present in root CLAUDE.md "
+            "— sync the INHERITED FROM ATOM block"
+        )
+    for stale in sorted(template_imports - root_imports):
+        violations.append(
+            f"{TEMPLATE_PATH}: contains '{stale}' absent from root CLAUDE.md "
+            "— remove the stale import from the INHERITED FROM ATOM block"
+        )
+    return violations
+
+
+def check_rules(root: Path) -> list[str]:
+    """meta/rules/ 전체와 repo-level 동기화를 검증하고 위반 목록을 돌려준다.
+
+    Args:
+        root: 저장소 루트.
+
+    Returns:
+        전 규칙 파일 + 템플릿 동기화의 위반 메시지 목록.
+        README.md는 규칙이 아니므로 제외한다.
     """
     rules_dir = root / "meta" / "rules"
     if not rules_dir.is_dir():
@@ -173,6 +252,7 @@ def check_rules(root: Path) -> list[str]:
         if rule_path.name == "README.md":
             continue
         violations.extend(check_rule_file(rule_path, root))
+    violations.extend(check_template_sync(root))
     return violations
 
 

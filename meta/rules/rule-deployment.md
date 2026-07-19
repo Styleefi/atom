@@ -1,5 +1,6 @@
 ---
 id: rule-deployment
+tier: principle
 enforce: claude-md
 deployed-to: CLAUDE.md
 ---
