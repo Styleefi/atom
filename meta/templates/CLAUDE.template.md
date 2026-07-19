@@ -21,11 +21,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 <!-- ===== INHERITED FROM ATOM — do not edit; revised via `git pull upstream main` ===== -->
 ## Rules (inherited)
 
+Principles (constitutional — win conflicts with conventions; higher bar to amend):
+
 @meta/rules/rule-deployment.md
-@meta/rules/python-stack.md
 @meta/rules/plan-deviation.md
 @meta/rules/answer-first.md
+@meta/rules/coding-discipline.md
+@meta/rules/goal-verification.md
+
+Conventions:
+
+@meta/rules/python-stack.md
 @meta/rules/issue-workflow.md
+@meta/rules/korean-output.md
+@meta/rules/commit-discipline.md
 
 ## Meta harness (inherited)
 
