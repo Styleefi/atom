@@ -19,16 +19,24 @@ Foundation phase: first rules (`meta/rules/`) and the rules checker are in place
 
 ## Rules
 
+Principles (constitutional — win conflicts with conventions; higher bar to amend):
+
 @meta/rules/rule-deployment.md
-@meta/rules/python-stack.md
 @meta/rules/plan-deviation.md
 @meta/rules/answer-first.md
+@meta/rules/coding-discipline.md
+@meta/rules/goal-verification.md
+
+Conventions:
+
+@meta/rules/python-stack.md
 @meta/rules/issue-workflow.md
+@meta/rules/korean-output.md
+@meta/rules/commit-discipline.md
 
 ## Repo-specific rules
 
 - The meta layer lives in `meta/` (rules SSOT, templates, harnesses — one subpackage per harness). Never move root `CLAUDE.md`, `.claude/`, or `.mcp.json` into it; Claude Code only recognizes them at fixed locations.
-- Every rule file in `meta/rules/` MUST declare frontmatter: `id` (= filename), `enforce: claude-md | skill | hook`, `deployed-to`. A rule without a deployment target is not a rule — it is a wish.
+- Every rule file in `meta/rules/` MUST declare frontmatter: `id` (= filename), `tier: principle | convention`, `enforce: claude-md | skill | hook`, `deployed-to`. A rule without a deployment target is not a rule — it is a wish.
 - Never create a file named exactly `CLAUDE.md` outside the repo root: Claude Code auto-loads it when reading files in that directory. Templates use the name `CLAUDE.template.md`.
-- `meta/templates/CLAUDE.template.md` is the CLAUDE.md scaffold for child projects. When editing it, keep the "INHERITED FROM ATOM" section in sync with this file's Rules/Commands sections.
-- Work on feature branches and merge via PR only; never commit directly to main. Do not merge PRs yourself.
+- `meta/templates/CLAUDE.template.md` is the CLAUDE.md scaffold for child projects. When editing it, keep the "INHERITED FROM ATOM" section in sync with this file's Rules/Commands sections (the rules checker verifies the import lists match).

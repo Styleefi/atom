@@ -5,7 +5,7 @@
     1. Copy this file over the root CLAUDE.md, replacing atom's own.
     2. Fill in every {{PLACEHOLDER}} below; delete optional sections that stay empty.
     3. Delete these instruction comments. Keep the INHERITED FROM ATOM section as-is.
-    4. Clear atom's session records under docs/ (checklist.md, context-notes.md) and start your own.
+    4. Replace atom's docs/design.md with your own: durable rationale lives in curated docs, progress context in issue comments (issue-workflow rule).
 
   On `git pull upstream main` conflicts: keep YOURS for CLAUDE.md / README.md / docs/,
   take UPSTREAM'S for meta/, .github/, and .claude/.
@@ -21,11 +21,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 <!-- ===== INHERITED FROM ATOM — do not edit; revised via `git pull upstream main` ===== -->
 ## Rules (inherited)
 
+Principles (constitutional — win conflicts with conventions; higher bar to amend):
+
 @meta/rules/rule-deployment.md
-@meta/rules/python-stack.md
 @meta/rules/plan-deviation.md
 @meta/rules/answer-first.md
+@meta/rules/coding-discipline.md
+@meta/rules/goal-verification.md
+
+Conventions:
+
+@meta/rules/python-stack.md
 @meta/rules/issue-workflow.md
+@meta/rules/korean-output.md
+@meta/rules/commit-discipline.md
 
 ## Meta harness (inherited)
 

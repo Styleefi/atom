@@ -2,14 +2,18 @@
 """rules_checker 테스트.
 
 가짜 저장소(tmp_path)를 만들어 정상 규칙과 각 위반 유형(필드 누락, 잘못된
-enum, 깨진 YAML, 없는 배포 대상, 미배포 선언, 미검증 그릇 거부)을 검증하고,
-마지막에 실제 저장소의 규칙이 전부 통과하는지 통합 확인한다.
+enum, 깨진 YAML, 없는 배포 대상, 미배포 선언, 미검증 그릇 거부, 템플릿
+드리프트)을 검증하고, 마지막에 실제 저장소의 규칙이 전부 통과하는지 통합
+확인한다.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from harness.rules_checker import check_rules as check_rules_module
 from harness.rules_checker.check_rules import check_rules, find_repo_root
 
 
@@ -36,7 +40,8 @@ def write_rule(root: Path, name: str, body: str) -> Path:
 def valid_rule(rule_id: str) -> str:
     """유효한 claude-md 규칙 본문을 만든다."""
     return (
-        f"---\nid: {rule_id}\nenforce: claude-md\ndeployed-to: CLAUDE.md\n---\n\nbody\n"
+        f"---\nid: {rule_id}\ntier: principle\nenforce: claude-md\n"
+        "deployed-to: CLAUDE.md\n---\n\nbody\n"
     )
 
 
@@ -56,11 +61,40 @@ def test_readme_is_excluded(tmp_path: Path) -> None:
 
 def test_missing_required_field(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
-    write_rule(root, "no-target.md", "---\nid: no-target\nenforce: claude-md\n---\n")
+    write_rule(
+        root,
+        "no-target.md",
+        "---\nid: no-target\ntier: principle\nenforce: claude-md\n---\n",
+    )
     violations = check_rules(root)
     assert len(violations) == 1
     assert "missing required field" in violations[0]
     assert "deployed-to" in violations[0]
+
+
+def test_missing_tier_field(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(
+        root,
+        "no-tier.md",
+        "---\nid: no-tier\nenforce: claude-md\ndeployed-to: CLAUDE.md\n---\n",
+    )
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "missing required field" in violations[0]
+    assert "tier" in violations[0]
+
+
+def test_invalid_tier_enum(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(
+        root,
+        "bad-tier.md",
+        "---\nid: bad-tier\ntier: law\nenforce: claude-md\ndeployed-to: CLAUDE.md\n---\n",
+    )
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "invalid tier value 'law'" in violations[0]
 
 
 def test_invalid_enforce_enum(tmp_path: Path) -> None:
@@ -68,7 +102,7 @@ def test_invalid_enforce_enum(tmp_path: Path) -> None:
     write_rule(
         root,
         "bad-enum.md",
-        "---\nid: bad-enum\nenforce: cron\ndeployed-to: CLAUDE.md\n---\n",
+        "---\nid: bad-enum\ntier: convention\nenforce: cron\ndeployed-to: CLAUDE.md\n---\n",
     )
     violations = check_rules(root)
     assert len(violations) == 1
@@ -109,14 +143,22 @@ def test_declared_but_not_deployed(tmp_path: Path) -> None:
     assert "declared but not actually deployed" in violations[0]
 
 
-def test_unverifiable_vessels_are_rejected(tmp_path: Path) -> None:
-    # 강화 사양: 검증 미구현 그릇(현재 skill)은 통과가 아니라 거부.
+def test_unverifiable_vessels_are_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 강화 사양: 검증 미구현 그릇은 통과가 아니라 거부. 세 그릇 모두 검증이
+    # 구현된 뒤에는 정상 경로로 도달할 수 없으므로, 가상 그릇을 허용 enum에
+    # 주입해 방어 분기가 살아 있는지 확인한다.
+    monkeypatch.setattr(
+        check_rules_module, "VALID_ENFORCE", {*check_rules_module.VALID_ENFORCE, "webhook"}
+    )
     root = make_repo(tmp_path)
     (root / "CLAUDE.md").write_text("anything\n", encoding="utf-8")
     write_rule(
         root,
-        "skill-rule.md",
-        "---\nid: skill-rule\nenforce: skill\ndeployed-to: CLAUDE.md\n---\n",
+        "future-rule.md",
+        "---\nid: future-rule\ntier: convention\nenforce: webhook\n"
+        "deployed-to: CLAUDE.md\n---\n",
     )
     violations = check_rules(root)
     assert len(violations) == 1
@@ -126,7 +168,7 @@ def test_unverifiable_vessels_are_rejected(tmp_path: Path) -> None:
 def hook_rule(rule_id: str) -> str:
     """유효한 hook 규칙 본문을 만든다."""
     return (
-        f"---\nid: {rule_id}\nenforce: hook\n"
+        f"---\nid: {rule_id}\ntier: convention\nenforce: hook\n"
         "deployed-to: .claude/settings.json\n---\n\nbody\n"
     )
 
@@ -177,6 +219,105 @@ def test_hook_rule_without_harness_package(tmp_path: Path) -> None:
     assert len(violations) == 1
     assert "does not exist" in violations[0]
     assert "meta/harness/my_guard/" in violations[0]
+
+
+def skill_rule(rule_id: str, skill_name: str = "my-skill") -> str:
+    """유효한 skill 규칙 본문을 만든다."""
+    return (
+        f"---\nid: {rule_id}\ntier: convention\nenforce: skill\n"
+        f"deployed-to: .claude/skills/{skill_name}/SKILL.md\n---\n\nbody\n"
+    )
+
+
+def make_skill_deployment(root: Path, skill_name: str, skill_text: str) -> None:
+    """skill 규칙의 배포 대상(SKILL.md)을 만든다."""
+    skill_dir = root / ".claude" / "skills" / skill_name
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(skill_text, encoding="utf-8")
+
+
+def test_valid_skill_rule_passes(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-style.md", skill_rule("my-style"))
+    make_skill_deployment(root, "my-skill", "Apply meta/rules/my-style.md here.\n")
+    assert check_rules(root) == []
+
+
+def test_skill_rule_outside_skills_dir(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(
+        root,
+        "my-style.md",
+        "---\nid: my-style\ntier: convention\nenforce: skill\n"
+        "deployed-to: docs/SKILL.md\n---\n",
+    )
+    (root / "docs").mkdir()
+    (root / "docs" / "SKILL.md").write_text("meta/rules/my-style.md\n", encoding="utf-8")
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "must be a SKILL.md under .claude/skills/" in violations[0]
+
+
+def test_skill_rule_target_not_skill_md(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(
+        root,
+        "my-style.md",
+        "---\nid: my-style\ntier: convention\nenforce: skill\n"
+        "deployed-to: .claude/skills/my-skill/readme.md\n---\n",
+    )
+    skill_dir = root / ".claude" / "skills" / "my-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "readme.md").write_text("meta/rules/my-style.md\n", encoding="utf-8")
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "must be a SKILL.md under .claude/skills/" in violations[0]
+
+
+def test_skill_rule_without_reference(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-style.md", skill_rule("my-style"))
+    make_skill_deployment(root, "my-skill", "No reference here.\n")
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "does not reference" in violations[0]
+    assert "meta/rules/my-style.md" in violations[0]
+
+
+def write_template(root: Path, text: str) -> None:
+    """child 템플릿 파일을 만든다."""
+    template = root / "meta" / "templates" / "CLAUDE.template.md"
+    template.parent.mkdir(parents=True)
+    template.write_text(text, encoding="utf-8")
+
+
+def test_template_in_sync_passes(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    write_template(root, "@meta/rules/my-rule.md\n")
+    assert check_rules(root) == []
+
+
+def test_template_missing_import(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    write_template(root, "# no imports\n")
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "missing '@meta/rules/my-rule.md'" in violations[0]
+
+
+def test_template_stale_import(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    write_template(root, "@meta/rules/my-rule.md\n@meta/rules/removed-rule.md\n")
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "'@meta/rules/removed-rule.md'" in violations[0]
+    assert "stale" in violations[0]
 
 
 def test_real_repo_rules_all_pass() -> None:

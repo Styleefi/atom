@@ -1,5 +1,6 @@
 ---
 id: issue-duplicate-guard
+tier: convention
 enforce: hook
 deployed-to: .claude/settings.json
 ---

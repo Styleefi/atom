@@ -1,5 +1,6 @@
 ---
 id: answer-first
+tier: principle
 enforce: claude-md
 deployed-to: CLAUDE.md
 ---
