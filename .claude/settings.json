@@ -7,6 +7,10 @@
           {
             "type": "command",
             "command": "if command -v uv >/dev/null 2>&1; then exec uv run --directory \"$CLAUDE_PROJECT_DIR/meta\" python -m harness.issue_duplicate_guard; fi"
+          },
+          {
+            "type": "command",
+            "command": "if command -v uv >/dev/null 2>&1; then exec uv run --directory \"$CLAUDE_PROJECT_DIR/meta\" python -m harness.commit_guard; fi"
           }
         ]
       }
