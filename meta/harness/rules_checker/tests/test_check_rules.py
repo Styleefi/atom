@@ -110,18 +110,73 @@ def test_declared_but_not_deployed(tmp_path: Path) -> None:
 
 
 def test_unverifiable_vessels_are_rejected(tmp_path: Path) -> None:
-    # 강화 사양: 검증 미구현 그릇(hook/skill)은 통과가 아니라 거부.
+    # 강화 사양: 검증 미구현 그릇(현재 skill)은 통과가 아니라 거부.
     root = make_repo(tmp_path)
     (root / "CLAUDE.md").write_text("anything\n", encoding="utf-8")
-    for vessel in ("hook", "skill"):
-        write_rule(
-            root,
-            f"{vessel}-rule.md",
-            f"---\nid: {vessel}-rule\nenforce: {vessel}\ndeployed-to: CLAUDE.md\n---\n",
-        )
+    write_rule(
+        root,
+        "skill-rule.md",
+        "---\nid: skill-rule\nenforce: skill\ndeployed-to: CLAUDE.md\n---\n",
+    )
     violations = check_rules(root)
-    assert len(violations) == 2
-    assert all("is not implemented" in v for v in violations)
+    assert len(violations) == 1
+    assert "is not implemented" in violations[0]
+
+
+def hook_rule(rule_id: str) -> str:
+    """유효한 hook 규칙 본문을 만든다."""
+    return (
+        f"---\nid: {rule_id}\nenforce: hook\n"
+        "deployed-to: .claude/settings.json\n---\n\nbody\n"
+    )
+
+
+def make_hook_deployment(root: Path, rule_id: str, settings_text: str) -> None:
+    """hook 규칙의 배포 대상(settings + harness 패키지)을 만든다."""
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text(settings_text, encoding="utf-8")
+    (root / "meta" / "harness" / rule_id.replace("-", "_")).mkdir(parents=True)
+
+
+def test_valid_hook_rule_passes(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    settings = '{"hooks": {"PreToolUse": [{"hooks": [{"command": "uv run python -m harness.my_guard"}]}]}}'
+    make_hook_deployment(root, "my-guard", settings)
+    assert check_rules(root) == []
+
+
+def test_hook_rule_with_broken_settings_json(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    make_hook_deployment(root, "my-guard", "{not json")
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "is not valid JSON" in violations[0]
+
+
+def test_hook_rule_without_module_reference(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    make_hook_deployment(root, "my-guard", '{"hooks": {}}')
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "harness.my_guard" in violations[0]
+    assert "declared but not actually deployed" in violations[0]
+
+
+def test_hook_rule_without_harness_package(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text(
+        '{"hooks": {"PreToolUse": [{"hooks": [{"command": "python -m harness.my_guard"}]}]}}',
+        encoding="utf-8",
+    )
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "does not exist" in violations[0]
+    assert "meta/harness/my_guard/" in violations[0]
 
 
 def test_real_repo_rules_all_pass() -> None:

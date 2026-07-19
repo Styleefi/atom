@@ -11,7 +11,8 @@ deployed-to: <repo-root-relative path of the actual deployment location>
 ```
 
 - `enforce: claude-md`: the rule is imported into the root `CLAUDE.md` (`@meta/rules/<file>`) and loads every session — keep these few and terse (context budget). The checker verifies the import line actually exists in the target.
-- `enforce: skill` / `enforce: hook`: deployment verification is not implemented yet, so the checker **rejects** such rules. Implement the verification first (see docs/design.md) — declared-but-unverifiable deployment never passes.
+- `enforce: hook`: the rule's enforcement lives in a harness package `meta/harness/<id with - → _>/`, wired into the deployed-to settings JSON. The checker verifies the settings file parses as JSON, references the `harness.<id_with_underscores>` module in a hook command, and that the harness package exists (v1: substring reference check).
+- `enforce: skill`: deployment verification is not implemented yet, so the checker **rejects** such rules. Implement the verification first (see docs/design.md) — declared-but-unverifiable deployment never passes.
 - This README is not a rule and is excluded from checking.
 
 ## Revision procedure

@@ -1,0 +1,2 @@
+# 줄바꿈 정규화: 커밋 시 텍스트 파일은 항상 LF (Windows/WSL 도구의 CRLF 오염 방지)
+* text=auto

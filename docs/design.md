@@ -13,7 +13,7 @@ Decisions confirmed on 2026-07-19 through a structured interview (see context-no
   | `hook` | deterministic, outside context | actions that must happen every time |
 - Every rule file declares frontmatter: `id` (= filename stem), `enforce` (vessel), `deployed-to` (actual location). The rules checker (`meta/harness/rules_checker/`) verifies this mechanically.
 - Rationale: written-but-undeployed rules are worse than no rules — they create the illusion of enforcement. Pains 3/4/5 (unverified "done", lost context, overengineering) recurred *despite* written rules, proving advice alone does not work.
-- Checker v1 verifies the deployment reference only for the `claude-md` vessel (target file exists and imports/mentions the rule). Reference semantics for `hook`/`skill` vessels are deliberately undefined until the first such rule lands.
+- Checker v1 verified the deployment reference only for the `claude-md` vessel; reference semantics for `hook`/`skill` were deliberately undefined until the first such rule landed. The first hook rule (`issue-duplicate-guard`, 2026-07-19) fixed the hook convention: deployed-to is the settings JSON, which must reference the harness module derived from the rule id (`harness.<id_with_underscores>`), and that harness package must exist. `skill` remains undefined and is rejected.
 - Context budget: `claude-md` rules are loaded every session in full. When migrating legacy rules (global §1–11), re-classify most into `skill`/`hook`; do not default everything to `claude-md`.
 
 ## Propagation: git is the whole mechanism

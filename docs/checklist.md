@@ -25,6 +25,19 @@ Working checklist for the current effort (plan: 2026-07-19 interview → foundat
 - [x] Root CLAUDE.md and template: placeholder comments → real `@meta/rules/` imports, Commands filled
 - [x] Verify: `pytest` green (10/10); checker passes on real rules; failure paths covered by tests
 
+## PR 3 — `feat/issue-workflow` (this PR)
+
+- [x] Working tree normalized (CRLF churn from a Windows-side tool discarded; content-identical verified) + `.gitattributes` (`* text=auto`) against recurrence
+- [x] Issues registered with pre-creation duplicate search: #8 (this work), #9 (glab real-instance verification), #10 (dual-platform audit)
+- [x] `meta/harness/issue_duplicate_guard/` + `tests/` (token-stream detection, fail-open invariant, gh/glab adapters, `ATOM_DUP_REVIEWED=1` override)
+- [x] Rules checker: hook vessel verification (settings JSON references `harness.<id>`; harness package exists); skill still rejected
+- [x] `meta/rules/issue-workflow.md` (claude-md) + `meta/rules/issue-duplicate-guard.md` (hook) + `.claude/settings.json` wiring
+- [x] Root CLAUDE.md import + template sync (`.claude/` added to take-upstream conflict rule)
+- [x] Docs: rules README hook convention, design.md checker note, this checklist, context-notes
+- [ ] Verify: pytest green, checker green on 6 rules, manual hook stdin cases, latency measurement
+- [ ] PR opened (`Closes #8`, `Refs #4`); merge is the owner's call
+- [ ] Post-merge (tracked in issues): glab adapter real verification (#9), dual-platform audit (#10)
+
 ## Definition of done
 
-Both PRs merged by the owner; CI green on main; every box above checked.
+All PRs merged by the owner; CI green on main; every box above checked.

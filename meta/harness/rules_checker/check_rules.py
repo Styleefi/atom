@@ -8,7 +8,9 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
 3. id가 파일명(stem)과 일치하는지
 4. deployed-to 대상 파일이 저장소에 실제 존재하는지
 5. 실배포 확인 — claude-md 그릇: 대상 파일이 `@meta/rules/<파일명>` import를
-   실제로 포함하는지. skill/hook 그릇: 검증이 미구현이므로 **거부**한다
+   실제로 포함하는지. hook 그릇: deployed-to(settings JSON)가 규칙 id에서
+   도출한 harness 모듈(`harness.<id의 -를 _로>`)을 참조하고 그 harness
+   패키지가 실제 존재하는지. skill 그릇: 검증이 미구현이므로 **거부**한다
    (선언만 있고 검증 불가능한 배포는 통과시키지 않는다는 강화 사양).
 
 경로는 실행 위치와 무관하게 이 파일의 고정 위치(meta/harness/rules_checker/)
@@ -17,6 +19,7 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -24,7 +27,7 @@ import yaml
 
 # 허용되는 배포 그릇. 검증 로직이 구현된 그릇만 통과 대상이다.
 VALID_ENFORCE = {"claude-md", "skill", "hook"}
-VERIFIABLE_ENFORCE = {"claude-md"}
+VERIFIABLE_ENFORCE = {"claude-md", "hook"}
 
 REQUIRED_FIELDS = ("id", "enforce", "deployed-to")
 
@@ -109,13 +112,38 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         )
         return violations
 
-    if enforce in VERIFIABLE_ENFORCE:
+    if enforce == "claude-md":
         # claude-md 그릇: @import 줄의 존재가 곧 실배포다 (매 세션 자동 로드).
         import_line = f"@meta/rules/{rule_path.name}"
         if import_line not in target.read_text(encoding="utf-8"):
             violations.append(
                 f"{rel}: '{data['deployed-to']}' does not contain the "
                 f"'{import_line}' import — declared but not actually deployed"
+            )
+    elif enforce == "hook":
+        # hook 그릇 규약(v1): 규칙 id에서 harness 모듈명을 도출해
+        # (1) 대상 settings JSON이 그 모듈을 command로 참조하고
+        # (2) meta/harness/ 아래에 해당 패키지가 실존해야 실배포로 본다.
+        # 모듈 참조는 substring 검사이며 PreToolUse 위치까지는 보지 않는다.
+        module_name = "harness." + rule_path.stem.replace("-", "_")
+        target_text = target.read_text(encoding="utf-8")
+        try:
+            json.loads(target_text)
+        except ValueError:
+            violations.append(
+                f"{rel}: deployed-to target '{data['deployed-to']}' is not valid JSON"
+            )
+            return violations
+        if module_name not in target_text:
+            violations.append(
+                f"{rel}: '{data['deployed-to']}' does not reference the "
+                f"'{module_name}' hook module — declared but not actually deployed"
+            )
+        package_dir = root / "meta" / "harness" / rule_path.stem.replace("-", "_")
+        if not package_dir.is_dir():
+            violations.append(
+                f"{rel}: hook harness package "
+                f"'meta/harness/{rule_path.stem.replace('-', '_')}/' does not exist"
             )
     else:
         # 검증 미구현 그릇은 통과가 아니라 거부 — 검증 없는 배포 선언 금지.
