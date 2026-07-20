@@ -23,9 +23,9 @@ Decisions confirmed on 2026-07-19 through a structured interview. This document 
 
 ## Propagation: git is the whole mechanism
 
-- Canonical config is committed **inside** this repository (`meta/`, and later `.claude/`, `.mcp.json`). Child projects get it by cloning; revisions arrive via `git pull upstream main`. No symlinks, no machine-global (`~/.claude/`) placement, no per-machine setup.
+- Canonical config is committed **inside** this repository (`meta/`, `.claude/`, and later `.mcp.json`). Child projects get it by cloning; revisions arrive via `git pull upstream main`. No symlinks, no machine-global (`~/.claude/`) placement, no per-machine setup.
 - Child project creation uses the clone recipe (README "Getting started") because GitHub cannot fork into the same account (E1) and "Use this template" severs history, breaking upstream pulls (E2).
-- Upstream-pull conflicts on `CLAUDE.md`/`README.md`/`docs/` are **by design** (children replace those files). Resolution convention: keep the child's version for those paths; take upstream for `meta/` and `.github/`.
+- Upstream-pull conflicts on `CLAUDE.md`/`README.md`/`docs/` are **by design** (children replace those files). Resolution convention: keep the child's version for those paths; take upstream for `meta/`, `.claude/`, and `.github/`.
 - The personal `~/.claude/CLAUDE.md` is outside atom's scope. Atom is responsible only for its children; other repositories may copy files manually. Until the legacy rules are migrated into `meta/rules/`, the personal global file remains the only live copy of those rules — do not touch it before migration completes.
 
 ## Layout: meta layer isolated in `meta/`
