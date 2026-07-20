@@ -25,6 +25,7 @@ deployed-to: CLAUDE.md
     `feat/logging-module`, `fix/collector-timeout`).
   - Merge to main only via PR, even solo - the PR diff is the review gate,
     especially for agent-written code.
+  - PR/MR titles and bodies are English too, like commit messages.
   - Never merge a PR yourself unless the owner asks; open it and hand over for
     review.
 - Don't accumulate unrelated edits and lose the ability to roll back
