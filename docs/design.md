@@ -30,10 +30,11 @@ Decisions confirmed on 2026-07-19 through a structured interview. This document 
 
 ## Layout: meta layer isolated in `meta/`
 
-- `meta/` holds everything that exists to run the Claude ecosystem (rules, templates, harnesses), so a child project's root stays clean for its product layer (`services/`, `infra/`, `libs/`, …).
+- `meta/` holds everything that exists to run the Claude ecosystem (rules, templates, harnesses, test infra), so a child project's root stays clean for its product layer (`services/`, `infra/`, `libs/`, …).
 - `meta/` is a **self-contained uv project** (own `pyproject.toml`, committed `uv.lock`, own `.venv`). The repo root deliberately has no `pyproject.toml` — that slot belongs to a child project's product. Meta and product environments are fully separate, so their dependency versions (e.g. pytest) can never conflict, no matter how far they drift. venv (manual multi-env, no lockfile) and Docker (overkill for second-long unit tests) were considered and rejected.
 - Files with fixed-path semantics stay at their required locations: root `CLAUDE.md`, `.claude/`, `.mcp.json`.
 - Harnesses grow as one subpackage each under `meta/harness/<name>/`, with their own `tests/` (each `tests/` contains `__init__.py` to avoid pytest module-name collisions between harnesses).
+- `meta/infra/` holds on-demand test infrastructure (first instance: the disposable GitLab CE + runner stack, 2026-07-21, for verifying forge-coupled harnesses and CI configs against a real instance — issue #17). This does not contradict the "Docker rejected" note above, which concerned *unit* tests only: unit tests stay dockerless; `meta/infra/` exists for integration verification, spun up on demand and torn down after. Its docker-socket security model (safe only as loopback-only + ephemeral + self-authored jobs + unprivileged jobs) is documented in `meta/infra/gitlab/README.md` — never reuse that stack as a persistent or shared runner.
 - Never name a file exactly `CLAUDE.md` outside the repo root — Claude Code auto-loads child-directory `CLAUDE.md` files on demand, which would make template/reference content leak into sessions unpredictably.
 
 ## Scope decisions (2026-07-19)

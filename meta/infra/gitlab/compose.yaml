@@ -1,0 +1,54 @@
+# 일회성 GitLab CE + 러너 테스트 스택 정의 (온디맨드 전용 — 상시 구동 금지)
+#
+# ⚠️ 보안 경고 — 이 파일을 수정·복사하기 전에 반드시 읽을 것 (사람과 에이전트 공통):
+#
+#   runner 서비스의 /var/run/docker.sock 마운트는 호스트 docker 데몬의
+#   **root 권한과 등가**다. 이 구성이 안전한 것은 오직 아래 4개 조건이
+#   전부 성립하는 동안뿐이다.
+#     1. 루프백 전용 바인딩(127.0.0.1) — 외부에서 인스턴스에 접근 불가
+#     2. 완전 일회성 — run.sh가 실행마다 up→down, 상시 구동 없음
+#     3. 실행되는 job이 전부 이 저장소가 로컬에서 작성한 것 — 외부 사용자 없음
+#     4. job 컨테이너는 비특권(privileged 미사용) + 소켓 미전달 (seed.sh 등록 설정)
+#
+#   금지 사항 (조건이 하나라도 깨지는 변경):
+#     - 이 파일을 상시 구동 러너나 공용/프로덕션 러너 구성으로 복사하지 말 것
+#     - ports 바인딩에서 127.0.0.1 접두사를 제거하지 말 것
+#     - 러너 등록에 --docker-privileged를 추가하거나 job에 소켓을 마운트하지 말 것
+#     - restart 정책을 추가해 스택을 상주시키지 말 것
+name: atom-gitlab-infra
+
+services:
+  gitlab:
+    image: gitlab/gitlab-ce:19.2.0-ce.0
+    hostname: gitlab
+    shm_size: 256m
+    ports:
+      # 루프백 전용 바인딩 — 고정 자격 증명 인스턴스를 LAN에 노출하지 않는다
+      - "127.0.0.1:8929:8929"
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://localhost:8929'
+        gitlab_rails['initial_root_password'] = 'atom-infra-Zx9.seed-only'
+        prometheus_monitoring['enable'] = false
+        registry['enable'] = false
+        gitlab_kas['enable'] = false
+        puma['worker_processes'] = 2
+        sidekiq['max_concurrency'] = 10
+    volumes:
+      # 이미지가 VOLUME으로 선언한 세 경로를 명명 볼륨으로 고정 —
+      # 익명 볼륨 고아화를 막고 `down -v`가 컨테이너 유무와 무관하게 제거하도록 보장
+      - gitlab-config:/etc/gitlab
+      - gitlab-data:/var/opt/gitlab
+      - gitlab-logs:/var/log/gitlab
+
+  runner:
+    image: gitlab/gitlab-runner:alpine-v19.2.0
+    volumes:
+      # ⚠️ 호스트 root 등가 마운트 — 파일 상단 보안 경고의 4개 조건 밖에서 재사용 금지.
+      # 소켓은 러너 데몬만 쥐며 job 컨테이너에는 전달되지 않는다(비특권 형제 컨테이너).
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  gitlab-config:
+  gitlab-data:
+  gitlab-logs:

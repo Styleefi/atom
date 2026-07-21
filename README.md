@@ -25,7 +25,8 @@ Open questions (which agent roles, which pipelines, rule migration) are tracked 
 ├── meta/              # the meta layer every child project inherits
 │   ├── rules/         #   rule SSOT (frontmatter-declared deployment)
 │   ├── templates/     #   CLAUDE.template.md and other scaffolds
-│   └── harness/       #   verification harnesses (one subpackage each)
+│   ├── harness/       #   verification harnesses (one subpackage each)
+│   └── infra/         #   on-demand test infrastructure (docker compose stacks)
 ├── docs/              # curated design docs
 └── (child projects add their product layer: services/, infra/, libs/ …)
 ```
