@@ -1,2 +1,49 @@
-# 줄바꿈 정규화: 커밋 시 텍스트 파일은 항상 LF (Windows/WSL 도구의 CRLF 오염 방지)
-* text=auto
+# 기본: 텍스트 판정 파일은 커밋 시 LF 정규화 + 워킹 트리도 LF 강제
+# (Windows git 도구의 autocrlf=true CRLF 오염 방지 — 무확장자·dotfile 포함.
+#  이 베이스라인은 반드시 첫 규칙이어야 하며, CRLF 예외는 아래에서 우선한다)
+* text=auto eol=lf
+
+# 실행 스크립트 및 소스 코드는 OS 무관 LF 고정
+# (Windows/WSL2 체크아웃 시에도 LF 유지 — Docker 마운트 오류 방지)
+*.sh text eol=lf
+*.py text eol=lf
+
+# 프런트엔드 소스
+*.js text eol=lf
+*.ts text eol=lf
+*.vue text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+
+# 설정 및 구성 파일
+*.yml text eol=lf
+*.yaml text eol=lf
+*.conf text eol=lf
+*.cnf text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.ini text eol=lf
+uv.lock text eol=lf
+
+# Docker 관련 (확장자 없는 파일)
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+
+# 기타 문서
+*.example text eol=lf
+*.md text eol=lf
+requirements.txt text eol=lf
+
+# 이미지 및 바이너리는 텍스트 변환 금지
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.jar binary
+
+# Windows용 스크립트는 CRLF 유지 (베이스라인보다 뒤라 우선 적용됨)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
