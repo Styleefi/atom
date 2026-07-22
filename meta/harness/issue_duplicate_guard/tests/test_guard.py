@@ -150,15 +150,24 @@ def test_repo_is_forwarded_to_search(monkeypatch) -> None:
 
 
 # ---------- glab 어댑터 (보수 파싱) ----------
+# 픽스처 문자열은 실측 출력 그대로 (glab 1.108.0 / GitLab CE 19.2.0, 2026-07-22).
+# 실인스턴스 드리프트 카나리아는 test_guard_gitlab.py (-m gitlab).
 
 def test_glab_confident_lines_block(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(guard, "_run_search", lambda argv: "#3  Something similar\n")
+    out = (
+        "Showing 1 issue in root/scratch that match your search. (Page 1)\n"
+        "\n"
+        "ID\tTitle\tLabels\tCreated at\n"
+        "#3\tcapture sample issue\t\tless than a minute ago\n"
+        "\n"
+    )
+    monkeypatch.setattr(guard, "_run_search", lambda argv: out)
     assert _run_main(monkeypatch, _bash_payload("glab issue create -t x")) == 2
     assert "#3" in capsys.readouterr().err
 
 
 def test_glab_ambiguous_output_fails_open(monkeypatch) -> None:
-    out = "Showing 0 of 0 issues that match\nno issues match your search\n"
+    out = "No issues match your search in root/scratch.\n\n\n"
     monkeypatch.setattr(guard, "_run_search", lambda argv: out)
     assert _run_main(monkeypatch, _bash_payload("glab issue create -t x")) == 0
 

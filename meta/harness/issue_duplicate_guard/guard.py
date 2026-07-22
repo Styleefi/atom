@@ -276,7 +276,8 @@ def search_duplicates(invocation: CreateInvocation) -> list[str] | None:
 
     # glab: 구조화 출력이 버전에 따라 달라 텍스트를 보수적으로 파싱한다.
     # 이슈로 확신되는 라인(#번호 시작)만 채택하고, 애매하면 빈 결과(통과).
-    # 실인스턴스 검증 전이므로 잘못 차단보다 놓침을 택한다 (issue #9).
+    # glab 1.108.0 / GitLab CE 19.2.0 실인스턴스로 검증됨 (2026-07-22, issue #9).
+    # 드리프트 카나리아: tests/test_guard_gitlab.py (-m gitlab, meta/infra/gitlab).
     argv = [
         "glab", "issue", "list",
         "--all",

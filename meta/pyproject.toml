@@ -11,3 +11,6 @@ dev = ["pytest>=9.0"]
 [tool.pytest.ini_options]
 testpaths = ["harness"]
 pythonpath = ["."]
+markers = [
+    "gitlab: requires the on-demand GitLab test environment (meta/infra/gitlab/run.sh)",
+]
