@@ -53,7 +53,7 @@ git push -u origin main
 git pull upstream main
 ```
 
-Merge conflicts on upstream pulls are expected for the files you replaced: keep **yours** for `CLAUDE.md`, `README.md`, and `docs/`; take **upstream's** for `meta/`, `.claude/`, and `.github/`.
+Merge conflicts on upstream pulls are expected for the files you replaced: keep **yours** for `CLAUDE.md`, `README.md`, and `docs/`; take **upstream's** for `meta/`, `.claude/`, `.github/`, `.gitlab-ci.yml`, and `.gitattributes`.
 
 ## License
 
