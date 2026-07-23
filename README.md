@@ -16,7 +16,7 @@ Each goal exists because of a recurring, real pain — not an aspiration:
 | 4 | **Session Continuity** — decisions survive across sessions: progress context in issue comments, durable rationale in curated docs | Context and rationale lost between sessions |
 | 5 | **Agent Pipelines** — standard workflows chaining agent roles (e.g. implement → review → test → docs) | Manual re-orchestration of proven multi-agent flows |
 
-Open questions (which agent roles, which pipelines, rule migration) are tracked in GitHub Issues, not in this file.
+Open questions (which agent roles, which pipelines, rule migration) are tracked in the issue tracker, not in this file.
 
 ## Repository layout
 
@@ -33,14 +33,17 @@ Open questions (which agent roles, which pipelines, rule migration) are tracked 
 
 ## Getting started — creating a child project
 
-GitHub cannot fork a repository into the same account, and "Use this template" severs the upstream link (`git pull upstream main` stops working). Use the clone recipe instead:
+Same-account forks are impossible, and template/import features sever the upstream link (`git pull upstream main` stops working). Use the clone recipe instead — `origin` points wherever the child lives, GitHub or GitLab, while `upstream` stays on atom (git handles mixed-host remotes fine):
 
 ```bash
-# 1. create an empty repository on GitHub (e.g. myproject), then:
+# 1. create an empty repository on your forge (e.g. myproject) — no README init
+#    (GitLab checks "Initialize repository with a README" by default; uncheck it), then:
 git clone https://github.com/Styleefi/atom.git myproject
 cd myproject
 git remote rename origin upstream
-git remote add origin https://github.com/Styleefi/myproject.git
+# origin = where the child lives (pick one):
+git remote add origin https://github.com/<your-account>/myproject.git
+#   or: git remote add origin https://gitlab.example.com/<group>/myproject.git
 git push -u origin main
 
 # 2. adapt the skeleton
@@ -53,7 +56,9 @@ git push -u origin main
 git pull upstream main
 ```
 
-Merge conflicts on upstream pulls are expected for the files you replaced: keep **yours** for `CLAUDE.md`, `README.md`, and `docs/`; take **upstream's** for `meta/`, `.claude/`, and `.github/`.
+CI travels with the clone on either forge: GitHub Actions reads `.github/workflows/harness.yml`, GitLab reads `.gitlab-ci.yml`, and each platform ignores the other's file.
+
+Merge conflicts on upstream pulls are expected for the files you replaced: keep **yours** for `CLAUDE.md`, `README.md`, and `docs/`; take **upstream's** for `meta/`, `.claude/`, `.github/`, `.gitlab-ci.yml`, and `.gitattributes`.
 
 ## License
 

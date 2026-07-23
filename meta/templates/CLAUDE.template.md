@@ -8,7 +8,7 @@
     4. Replace atom's docs/design.md with your own: durable rationale lives in curated docs, progress context in issue comments (issue-workflow rule).
 
   On `git pull upstream main` conflicts: keep YOURS for CLAUDE.md / README.md / docs/,
-  take UPSTREAM'S for meta/, .github/, .claude/, and .gitattributes.
+  take UPSTREAM'S for meta/, .github/, .gitlab-ci.yml, .claude/, and .gitattributes.
 -->
 # CLAUDE.md
 
