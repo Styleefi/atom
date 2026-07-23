@@ -1,0 +1,13 @@
+# GitLab mirror of .github/workflows/harness.yml — same two checks, GitLab CI idiom.
+# Each forge reads only its own file, so children get CI on clone regardless of host.
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+harness:
+  image: ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+  script:
+    - uv sync --directory meta
+    - uv run --directory meta pytest
+    - uv run --directory meta python -m harness.rules_checker
