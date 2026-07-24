@@ -16,10 +16,16 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
    (규칙 본문의 SSOT는 meta/rules/, SKILL.md는 참조만 한다는 v1 규약).
    검증 로직이 없는 그릇은 통과가 아니라 **거부**한다(강화 사양).
 
-규칙 단위 검사와 별개로 repo-level 검사 하나를 수행한다: root CLAUDE.md와
-child 템플릿(meta/templates/CLAUDE.template.md)의 `@meta/rules/` import
-집합이 동일한지 — 유일한 수동 동기화 지점의 침묵 드리프트를 양방향으로
-차단한다.
+규칙 단위 검사와 별개로 repo-level 검사를 둘 수행한다.
+
+- 템플릿 동기화: root CLAUDE.md와 child 템플릿(meta/templates/CLAUDE.template.md)
+  의 `@meta/rules/` import 집합이 동일한지 — 수동 동기화 지점의 침묵 드리프트를
+  양방향으로 차단한다.
+- 인벤토리 커버리지: 오너용 인터페이스 인벤토리(meta/README.md)의 두 표가
+  실체와 일치하는지 — `## Rules` 표는 meta/rules/의 규칙 집합과, `## Functional
+  artifacts` 표는 규칙이 뒷받침하지 않는 스킬/하니스/인프라 집합과 양방향으로
+  비교한다. 검증 없는 인벤토리는 검증 없는 규칙과 같은 실패이므로, 인벤토리
+  파일 자체의 부재도 위반으로 본다.
 
 경로는 실행 위치와 무관하게 이 파일의 고정 위치(meta/harness/rules_checker/)
 로부터 역산한 저장소 루트 기준으로 해석하므로 로컬과 CI에서 결과가 동일하다.
@@ -48,6 +54,20 @@ IMPORT_RE = re.compile(r"@meta/rules/\S+\.md")
 
 TEMPLATE_PATH = Path("meta") / "templates" / "CLAUDE.template.md"
 
+# 오너용 인터페이스 인벤토리와 그 두 표의 헤딩(원문 그대로 매치한다).
+INVENTORY_PATH = Path("meta") / "README.md"
+RULES_HEADING = "## Rules"
+ARTIFACTS_HEADING = "## Functional artifacts"
+
+# 인벤토리 표에서 항목 이름을 뽑는 패턴. 첫 셀의 백틱 토큰만 잡도록 줄 시작에
+# 앵커하며(뒤 컬럼의 `ATOM_*=1` 같은 토큰 배제), 표 정렬 패딩을 흡수한다.
+INVENTORY_ROW_RE = re.compile(r"^\|\s*`([a-z0-9_-]+)`\s*\|", re.MULTILINE)
+
+# 규칙이 아닌 아티팩트의 열거 루트. 각각 직계 자식만 본다.
+SKILLS_DIR = Path(".claude") / "skills"
+HARNESS_DIR = Path("meta") / "harness"
+INFRA_DIR = Path("meta") / "infra"
+
 
 def find_repo_root() -> Path:
     """이 파일의 고정 위치로부터 저장소 루트를 역산한다.
@@ -61,6 +81,24 @@ def find_repo_root() -> Path:
         저장소 루트 디렉토리.
     """
     return Path(__file__).resolve().parents[3]
+
+
+def rule_files(root: Path) -> list[Path]:
+    """meta/rules/ 아래의 규칙 파일을 정렬해 돌려준다.
+
+    규칙이 아닌 README.md 제외 규칙을 여기 한 곳에 두어, 규칙 순회와 인벤토리
+    커버리지 검사가 서로 다른 집합을 보게 되는 드리프트를 막는다.
+
+    Args:
+        root: 저장소 루트.
+
+    Returns:
+        규칙 파일 경로 목록. 디렉토리가 없으면 빈 목록.
+    """
+    rules_dir = root / "meta" / "rules"
+    if not rules_dir.is_dir():
+        return []
+    return [path for path in sorted(rules_dir.glob("*.md")) if path.name != "README.md"]
 
 
 def parse_frontmatter(text: str) -> tuple[dict | None, str | None]:
@@ -233,6 +271,178 @@ def check_template_sync(root: Path) -> list[str]:
     return violations
 
 
+def _section_body(text: str, heading: str) -> str:
+    """인벤토리 본문에서 헤딩 하나가 지배하는 구간을 잘라낸다.
+
+    헤딩 판정은 부분 문자열이 아니라 줄 단위 정확 일치다(rstrip으로 CRLF와
+    트레일링 공백을 흡수). 구간은 헤딩 다음 줄부터 다음 `## ` 헤딩 직전 또는
+    파일 끝까지이며, 같은 헤딩이 여러 번 나오면 첫 번째 것만 쓴다.
+
+    Args:
+        text: 인벤토리 파일 전체 내용.
+        heading: 찾을 헤딩 줄 (예: "## Rules").
+
+    Returns:
+        구간 본문. 헤딩이 없으면 빈 문자열.
+    """
+    lines = text.splitlines()
+    start = None
+    for index, line in enumerate(lines):
+        if line.rstrip() == heading:
+            start = index + 1
+            break
+    if start is None:
+        return ""
+
+    end = len(lines)
+    for index in range(start, len(lines)):
+        if lines[index].rstrip().startswith("## "):
+            end = index
+            break
+    return "\n".join(lines[start:end])
+
+
+def _rule_frontmatters(root: Path) -> list[tuple[Path, dict]]:
+    """파싱에 성공한 규칙의 (경로, frontmatter) 목록을 돌려준다.
+
+    파싱 실패 규칙은 조용히 건너뛴다 — 그 실패는 check_rule_file이 이미
+    위반으로 보고하므로 여기서 중복 보고하지 않는다.
+
+    Args:
+        root: 저장소 루트.
+
+    Returns:
+        (규칙 파일 경로, frontmatter dict) 목록.
+    """
+    parsed: list[tuple[Path, dict]] = []
+    for rule_path in rule_files(root):
+        data, error = parse_frontmatter(rule_path.read_text(encoding="utf-8"))
+        if error or data is None:
+            continue
+        parsed.append((rule_path, data))
+    return parsed
+
+
+def _child_dirs(path: Path) -> list[Path]:
+    """직계 자식 디렉토리만 정렬해 돌려준다.
+
+    재귀하지 않는 것이 핵심이다 — 하니스마다 tests/ 하위 패키지가 있어
+    재귀하면 유령 아티팩트가 잡힌다.
+
+    Args:
+        path: 열거할 디렉토리.
+
+    Returns:
+        직계 자식 디렉토리 목록. 대상이 없으면 빈 목록.
+    """
+    if not path.is_dir():
+        return []
+    return sorted(child for child in path.iterdir() if child.is_dir())
+
+
+def _expected_artifacts(root: Path) -> set[str]:
+    """인벤토리에 실려야 하는 비규칙 아티팩트 이름을 모은다.
+
+    스킬/하니스/인프라 세 루트를 직계 자식만 열거하고, 그중 규칙이 뒷받침하는
+    것(규칙 표가 이미 커버하는 것)은 뺀다. 단일 분류 불변식이므로 규칙 기반
+    아티팩트가 이 표에 실리면 stale로 잡힌다.
+
+    Args:
+        root: 저장소 루트.
+
+    Returns:
+        기능성 아티팩트 이름 집합.
+    """
+    deployed_targets: set[str] = set()
+    hook_packages: set[str] = set()
+    for rule_path, data in _rule_frontmatters(root):
+        deployed = str(data.get("deployed-to", "")).strip()
+        if deployed:
+            deployed_targets.add(deployed)
+        if data.get("enforce") == "hook":
+            # 훅 하니스 매핑은 frontmatter id가 아니라 파일명 stem 기준이다
+            # (id == stem 검증은 check_rule_file의 몫).
+            hook_packages.add(rule_path.stem.replace("-", "_"))
+
+    artifacts: set[str] = set()
+    for skill_dir in _child_dirs(root / SKILLS_DIR):
+        if not (skill_dir / "SKILL.md").is_file():
+            continue
+        if f".claude/skills/{skill_dir.name}/SKILL.md" in deployed_targets:
+            continue
+        artifacts.add(skill_dir.name)
+    for harness_dir in _child_dirs(root / HARNESS_DIR):
+        if not (harness_dir / "__init__.py").is_file():
+            continue
+        if harness_dir.name in hook_packages:
+            continue
+        artifacts.add(harness_dir.name)
+    for infra_dir in _child_dirs(root / INFRA_DIR):
+        artifacts.add(infra_dir.name)
+    return artifacts
+
+
+def _diff_section(heading: str, expected: set[str], listed: set[str]) -> list[str]:
+    """한 표의 기대 집합과 등재 집합을 양방향으로 비교한다.
+
+    Args:
+        heading: 대상 표의 헤딩 (위반 메시지에 그대로 실린다).
+        expected: 실체에서 뽑은 기대 이름 집합.
+        listed: 인벤토리 표에서 뽑은 등재 이름 집합.
+
+    Returns:
+        위반 메시지 목록. 출력 결정성을 위해 이름순으로 정렬한다.
+    """
+    violations: list[str] = []
+    for missing in sorted(expected - listed):
+        violations.append(
+            f"{INVENTORY_PATH}: '{missing}' is missing from the '{heading}' "
+            "section — add a row for it"
+        )
+    for stale in sorted(listed - expected):
+        violations.append(
+            f"{INVENTORY_PATH}: '{heading}' section lists '{stale}', which does "
+            "not exist — remove the stale row"
+        )
+    return violations
+
+
+def check_inventory(root: Path) -> list[str]:
+    """오너용 인터페이스 인벤토리가 실체를 빠짐없이 반영하는지 검증한다.
+
+    인벤토리(meta/README.md)의 두 표를 각각의 실체 집합과 양방향으로 비교한다.
+    v1 시맨틱은 이름 존재 여부만이며, 나머지 컬럼(등급·관여 방식·인터페이스
+    설명)은 사람이 유지한다.
+
+    Args:
+        root: 저장소 루트.
+
+    Returns:
+        위반 메시지 목록. 인벤토리 파일이 없으면 그 자체가 위반이다 —
+        템플릿 동기화와 달리 부재를 잡아줄 다른 검사가 없기 때문이다.
+    """
+    inventory = root / INVENTORY_PATH
+    if not inventory.is_file():
+        return [
+            f"{INVENTORY_PATH}: owner-facing interface inventory is missing "
+            "— restore it; every meta-layer artifact must be listed there"
+        ]
+
+    text = inventory.read_text(encoding="utf-8")
+    listed_rules = set(INVENTORY_ROW_RE.findall(_section_body(text, RULES_HEADING)))
+    listed_artifacts = set(
+        INVENTORY_ROW_RE.findall(_section_body(text, ARTIFACTS_HEADING))
+    )
+
+    violations = _diff_section(
+        RULES_HEADING, {path.stem for path in rule_files(root)}, listed_rules
+    )
+    violations.extend(
+        _diff_section(ARTIFACTS_HEADING, _expected_artifacts(root), listed_artifacts)
+    )
+    return violations
+
+
 def check_rules(root: Path) -> list[str]:
     """meta/rules/ 전체와 repo-level 동기화를 검증하고 위반 목록을 돌려준다.
 
@@ -240,7 +450,7 @@ def check_rules(root: Path) -> list[str]:
         root: 저장소 루트.
 
     Returns:
-        전 규칙 파일 + 템플릿 동기화의 위반 메시지 목록.
+        전 규칙 파일 + 템플릿 동기화 + 인벤토리 커버리지의 위반 메시지 목록.
         README.md는 규칙이 아니므로 제외한다.
     """
     rules_dir = root / "meta" / "rules"
@@ -248,11 +458,10 @@ def check_rules(root: Path) -> list[str]:
         return [f"rules directory not found: {rules_dir.relative_to(root)}"]
 
     violations: list[str] = []
-    for rule_path in sorted(rules_dir.glob("*.md")):
-        if rule_path.name == "README.md":
-            continue
+    for rule_path in rule_files(root):
         violations.extend(check_rule_file(rule_path, root))
     violations.extend(check_template_sync(root))
+    violations.extend(check_inventory(root))
     return violations
 
 

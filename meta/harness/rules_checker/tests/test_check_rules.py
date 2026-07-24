@@ -3,8 +3,13 @@
 
 가짜 저장소(tmp_path)를 만들어 정상 규칙과 각 위반 유형(필드 누락, 잘못된
 enum, 깨진 YAML, 없는 배포 대상, 미배포 선언, 미검증 그릇 거부, 템플릿
-드리프트)을 검증하고, 마지막에 실제 저장소의 규칙이 전부 통과하는지 통합
-확인한다.
+드리프트, 인벤토리 커버리지)을 검증하고, 마지막에 실제 저장소의 규칙이
+전부 통과하는지 통합 확인한다.
+
+인벤토리 검사가 check_rules에 연결되어 있으므로 모든 픽스처는 정합한
+meta/README.md를 가져야 한다. 이를 개별 테스트에 떠넘기지 않도록 make_repo가
+골격을 만들고 write_rule이 규칙 행을 자동으로 채운다 — 인벤토리 위반 자체를
+검증하는 테스트만 write_inventory로 비정합 상태를 명시적으로 구성한다.
 """
 
 from __future__ import annotations
@@ -14,11 +19,30 @@ from pathlib import Path
 import pytest
 
 from harness.rules_checker import check_rules as check_rules_module
-from harness.rules_checker.check_rules import check_rules, find_repo_root
+from harness.rules_checker.check_rules import (
+    INVENTORY_ROW_RE,
+    check_rules,
+    find_repo_root,
+)
+
+
+# 인벤토리 골격. 표 헤더 셀에는 백틱을 쓰지 않는다(항목으로 오인되므로).
+# 마커 주석은 헬퍼가 행을 끼워 넣는 위치이며 추출 대상이 아니다.
+RULES_MARKER = "<!-- rules-end -->"
+ARTIFACTS_MARKER = "<!-- artifacts-end -->"
+INVENTORY_SKELETON = (
+    "# fixture inventory\n\n"
+    "## Rules\n\n"
+    "| id | notes |\n| --- | --- |\n"
+    f"{RULES_MARKER}\n\n"
+    "## Functional artifacts\n\n"
+    "| name | notes |\n| --- | --- |\n"
+    f"{ARTIFACTS_MARKER}\n"
+)
 
 
 def make_repo(tmp_path: Path) -> Path:
-    """meta/rules/ 골격을 가진 가짜 저장소를 만든다.
+    """meta/rules/ 골격과 빈 인벤토리를 가진 가짜 저장소를 만든다.
 
     Args:
         tmp_path: pytest가 제공하는 임시 디렉토리.
@@ -27,14 +51,49 @@ def make_repo(tmp_path: Path) -> Path:
         가짜 저장소 루트 경로.
     """
     (tmp_path / "meta" / "rules").mkdir(parents=True)
+    (tmp_path / "meta" / "README.md").write_text(INVENTORY_SKELETON, encoding="utf-8")
     return tmp_path
 
 
+def write_inventory(root: Path, text: str) -> None:
+    """인벤토리를 통째로 덮어쓴다 (비정합 상태를 구성할 때만 쓴다)."""
+    (root / "meta" / "README.md").write_text(text, encoding="utf-8")
+
+
+def _add_inventory_row(root: Path, marker: str, name: str) -> None:
+    """마커 바로 앞에 항목 행 하나를 끼워 넣는다."""
+    path = root / "meta" / "README.md"
+    text = path.read_text(encoding="utf-8")
+    path.write_text(text.replace(marker, f"| `{name}` | fixture |\n{marker}"), encoding="utf-8")
+
+
+def list_artifact(root: Path, name: str) -> None:
+    """인벤토리의 Functional artifacts 표에 아티팩트를 등재한다."""
+    _add_inventory_row(root, ARTIFACTS_MARKER, name)
+
+
 def write_rule(root: Path, name: str, body: str) -> Path:
-    """meta/rules/ 아래에 규칙 파일을 만든다."""
+    """meta/rules/ 아래에 규칙 파일을 만들고 인벤토리에 등재한다.
+
+    체커와 동일하게 README.md는 규칙이 아니므로 등재하지 않는다.
+    """
     path = root / "meta" / "rules" / name
     path.write_text(body, encoding="utf-8")
+    if name != "README.md":
+        _add_inventory_row(root, RULES_MARKER, path.stem)
     return path
+
+
+def make_harness_package(root: Path, name: str) -> None:
+    """import 가능한 하니스 패키지 디렉토리를 만든다."""
+    package = root / "meta" / "harness" / name
+    package.mkdir(parents=True, exist_ok=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+
+
+def make_infra_stack(root: Path, name: str) -> None:
+    """인프라 스택 디렉토리를 만든다."""
+    (root / "meta" / "infra" / name).mkdir(parents=True, exist_ok=True)
 
 
 def valid_rule(rule_id: str) -> str:
@@ -318,6 +377,240 @@ def test_template_stale_import(tmp_path: Path) -> None:
     assert len(violations) == 1
     assert "'@meta/rules/removed-rule.md'" in violations[0]
     assert "stale" in violations[0]
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        # 항목으로 인정되는 형태: 행 첫 셀의 백틱 이름 하나.
+        ("| `my-rule` | note |", ["my-rule"]),
+        ("|   `my-rule`   | aligned with padding |", ["my-rule"]),
+        ("| `rules_checker` | underscores are names too |", ["rules_checker"]),
+        # 표 헤더와 구분선은 항목이 아니다 (헤더 셀에 백틱을 쓰지 않는 규약).
+        ("| id | tier | vessel |", []),
+        ("| --- | --- | --- |", []),
+        # 뒤 컬럼의 백틱 토큰은 이름이 아니다 — 문자 집합을 통과하더라도.
+        ("| `my-rule` | mentions `ghost-token` |", ["my-rule"]),
+        ("| `my-rule` | note | `ghost-token` |", ["my-rule"]),
+        ("| `commit-guard` | `ATOM_COMMIT_OVERRIDE=1` |", ["commit-guard"]),
+        # 첫 셀이어도 문자 집합 밖이면 이름이 아니다.
+        ("| `Not-A-Name` | uppercase |", []),
+        ("| `run.sh` | dots are not allowed |", []),
+        # 표 행이 아닌 산문 속 백틱도 이름이 아니다.
+        ("see `ghost-token` in the prose", []),
+    ],
+)
+def test_inventory_row_pattern(line: str, expected: list[str]) -> None:
+    # 인벤토리의 포맷 계약(첫 셀만 이름, 소문자 케밥/스네이크)을 명세한다.
+    assert INVENTORY_ROW_RE.findall(line) == expected
+
+
+def test_inventory_full_fixture_passes(tmp_path: Path) -> None:
+    # 다섯 종류를 모두 담아 통과 경로에서 backing 제외가 실제로 작동함을 본다.
+    root = make_repo(tmp_path)
+    # 규칙이 뒷받침하는 스킬/하니스는 규칙 표가 커버하므로 아티팩트가 아니다.
+    write_rule(root, "my-style.md", skill_rule("my-style"))
+    make_skill_deployment(root, "my-skill", "meta/rules/my-style.md\n")
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    (root / ".claude" / "settings.json").write_text(
+        '{"hooks": {"PreToolUse": [{"hooks": [{"command": "python -m harness.my_guard"}]}]}}',
+        encoding="utf-8",
+    )
+    make_harness_package(root, "my_guard")
+    # 규칙이 없는 셋은 전부 아티팩트 표에 실려야 한다.
+    make_skill_deployment(root, "helper-skill", "functional skill\n")
+    make_harness_package(root, "toolbox")
+    make_infra_stack(root, "sandbox")
+    for name in ("helper-skill", "toolbox", "sandbox"):
+        list_artifact(root, name)
+    assert check_rules(root) == []
+
+
+def test_inventory_file_missing(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    (root / "meta" / "README.md").unlink()
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "inventory is missing" in violations[0]
+
+
+def test_inventory_missing_rule_row(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    write_inventory(root, INVENTORY_SKELETON)  # 자동 등재된 행을 지운다
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "'my-rule' is missing from the '## Rules' section" in violations[0]
+
+
+def test_inventory_missing_rules_heading(tmp_path: Path) -> None:
+    # 헤딩 자체가 없으면 추출이 빈 집합이 되어 같은 forward 위반으로 드러난다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    write_inventory(
+        root, "# inventory\n\n## Functional artifacts\n\n| name | notes |\n| --- | --- |\n"
+    )
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "'my-rule' is missing from the '## Rules' section" in violations[0]
+
+
+def test_inventory_stale_rule_row(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    _add_inventory_row(root, RULES_MARKER, "removed-rule")
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "'## Rules' section lists 'removed-rule'" in violations[0]
+    assert "stale" in violations[0]
+
+
+def test_inventory_missing_functional_skill(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    make_skill_deployment(root, "post-merge", "functional skill\n")
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert (
+        "'post-merge' is missing from the '## Functional artifacts' section"
+        in violations[0]
+    )
+
+
+def test_inventory_missing_harness_and_infra(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    make_harness_package(root, "toolbox")
+    make_infra_stack(root, "sandbox")
+    violations = check_rules(root)
+    assert len(violations) == 2
+    assert "'sandbox' is missing" in violations[0]
+    assert "'toolbox' is missing" in violations[1]
+
+
+def test_inventory_stale_artifact_row(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    list_artifact(root, "ghost-stack")
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "'## Functional artifacts' section lists 'ghost-stack'" in violations[0]
+
+
+def test_inventory_rule_backed_skill_listed_as_artifact(tmp_path: Path) -> None:
+    # 단일 분류 불변식: 규칙이 뒷받침하는 스킬은 아티팩트 표에 실리면 안 된다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-style.md", skill_rule("my-style"))
+    make_skill_deployment(root, "my-skill", "meta/rules/my-style.md\n")
+    list_artifact(root, "my-skill")
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "'## Functional artifacts' section lists 'my-skill'" in violations[0]
+
+
+def test_inventory_skill_dir_without_skill_md_is_not_an_artifact(
+    tmp_path: Path,
+) -> None:
+    # SKILL.md가 없으면 스킬이 아니다 — 등재를 요구하지 않아야 한다.
+    root = make_repo(tmp_path)
+    (root / ".claude" / "skills" / "scratch").mkdir(parents=True)
+    assert check_rules(root) == []
+
+
+def test_inventory_harness_dir_without_init_is_not_an_artifact(tmp_path: Path) -> None:
+    # __init__.py가 없으면 하니스 패키지가 아니다 (__pycache__ 등이 여기 걸린다).
+    root = make_repo(tmp_path)
+    (root / "meta" / "harness" / "scratch").mkdir(parents=True)
+    assert check_rules(root) == []
+
+
+def test_inventory_subheadings_do_not_end_a_section(tmp_path: Path) -> None:
+    # 포맷 계약: ### 소제목은 표현일 뿐이며 구간을 끊지 않는다.
+    root = make_repo(tmp_path)
+    make_infra_stack(root, "sandbox")
+    write_inventory(
+        root,
+        "# inventory\n\n## Rules\n\n| id | notes |\n| --- | --- |\n\n"
+        "## Functional artifacts\n\n### Infrastructure\n\n"
+        "| name | notes |\n| --- | --- |\n| `sandbox` | grouped under a subheading |\n",
+    )
+    assert check_rules(root) == []
+
+
+def test_inventory_uses_the_first_of_duplicated_headings(tmp_path: Path) -> None:
+    # 헤딩이 중복되면 첫 번째 구간만 읽는다 — 두 번째 블록은 추출되지 않는다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    write_inventory(
+        root,
+        "# inventory\n\n## Rules\n\n| id | notes |\n| --- | --- |\n"
+        "| `my-rule` | the first block wins |\n\n"
+        "## Rules\n\n| id | notes |\n| --- | --- |\n"
+        "| `ghost-rule` | the second block is never read |\n\n"
+        "## Functional artifacts\n\n| name | notes |\n| --- | --- |\n",
+    )
+    assert check_rules(root) == []
+
+
+def test_inventory_path_as_directory_reports_missing(tmp_path: Path) -> None:
+    # 병리 케이스: 같은 경로가 디렉토리면 crash가 아니라 위반으로 보고한다.
+    root = make_repo(tmp_path)
+    (root / "meta" / "README.md").unlink()
+    (root / "meta" / "README.md").mkdir()
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "inventory is missing" in violations[0]
+
+
+def test_inventory_nested_dirs_are_not_artifacts(tmp_path: Path) -> None:
+    # 하니스마다 tests/ 하위 패키지가 있으므로 재귀 열거는 유령 항목을 만든다.
+    root = make_repo(tmp_path)
+    make_harness_package(root, "toolbox")
+    make_harness_package(root, "toolbox/tests")
+    list_artifact(root, "toolbox")
+    assert check_rules(root) == []
+
+
+def test_inventory_ignores_rows_outside_first_column_and_sections(
+    tmp_path: Path,
+) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    write_inventory(
+        root,
+        "# inventory\n\n"
+        "| `stray-row` | sits before any section |\n\n"
+        "## Rules\n\n| id | notes |\n| --- | --- |\n"
+        "| `my-rule` | override marker `ATOM_COMMIT_OVERRIDE=1` in a later cell |\n\n"
+        "## Functional artifacts\n\n| name | notes |\n| --- | --- |\n\n"
+        "## Notes\n\n| `trailing-row` | sits after the last table |\n",
+    )
+    assert check_rules(root) == []
+
+
+def test_inventory_tolerates_table_padding(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    write_inventory(
+        root,
+        "# inventory\n\n"
+        "## Rules\n\n| id | notes |\n| --- | --- |\n"
+        "|   `my-rule`   | aligned with padding |\n\n"
+        "## Functional artifacts\n\n| name | notes |\n| --- | --- |\n",
+    )
+    assert check_rules(root) == []
+
+
+def test_inventory_tolerates_crlf_and_trailing_space(tmp_path: Path) -> None:
+    # 헤딩 뒤 공백은 파이썬의 개행 정규화가 걷어내지 않으므로 rstrip이 필요하다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    body = (root / "meta" / "README.md").read_text(encoding="utf-8")
+    body = body.replace("## Rules\n", "## Rules  \n").replace("\n", "\r\n")
+    (root / "meta" / "README.md").write_bytes(body.encode("utf-8"))
+    assert check_rules(root) == []
 
 
 def test_real_repo_rules_all_pass() -> None:
