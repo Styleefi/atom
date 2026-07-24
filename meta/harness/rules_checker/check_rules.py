@@ -25,9 +25,9 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
   실체와 일치하는지 — `## Rules` 표는 meta/rules/의 규칙 집합과, `## Functional
   artifacts` 표는 규칙이 뒷받침하지 않는 스킬/하니스/인프라 집합과 양방향으로
   비교한다. 검증 없는 인벤토리는 검증 없는 규칙과 같은 실패이므로, 인벤토리
-  파일 자체의 부재도 위반으로 본다. 스킬 소유권만은 규칙의 deployed-to를 읽어야
-  알 수 있어서, 그 값을 확보하지 못한 규칙이 있으면 스킬 판정만 보류하고 보류
-  사실을 위반으로 남긴다.
+  파일 자체의 부재도 위반으로 본다. 다만 아티팩트 분류가 규칙 frontmatter에서
+  파생되므로, 규칙 위반이 하나라도 있으면 이 검사는 통째로 미루고 미룬 사실을
+  위반으로 남긴다 — 깨진 레지스트리 위의 분류는 틀린 지시를 낳기 때문이다.
 
 경로는 실행 위치와 무관하게 이 파일의 고정 위치(meta/harness/rules_checker/)
 로부터 역산한 저장소 루트 기준으로 해석하므로 로컬과 CI에서 결과가 동일하다.
@@ -38,7 +38,7 @@ from __future__ import annotations
 import json
 import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
@@ -347,7 +347,10 @@ def _expected_artifacts(root: Path) -> set[str]:
             # 훅 하니스 매핑은 frontmatter id가 아니라 파일명 stem 기준이다
             # (id == stem 검증은 check_rule_file의 몫).
             hook_packages.add(rule_path.stem.replace("-", "_"))
-        skill_targets.add(str(data["deployed-to"]).strip())
+        # check_rule_file이 이 값을 Path로 해석하므로 여기서도 같은 정규화를
+        # 거친다. 문자열 그대로 비교하면 './'나 중복 슬래시가 섞인 경로가
+        # 규칙 검증은 통과하고 소유권 판정만 어긋나 오분류를 낳는다.
+        skill_targets.add(PurePosixPath(str(data["deployed-to"]).strip()).as_posix())
 
     artifacts: set[str] = set()
     for skill_dir in _child_dirs(root / SKILLS_DIR):

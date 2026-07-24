@@ -15,7 +15,7 @@ The rules checker parses this file, so a few things here are load-bearing. Editi
 - **Table header rows must not use backticks** in the first cell, or the header is mistaken for an entry.
 - `###` subheadings are presentational: a slice ends only at the next `##` heading, so grouping a section into subsections does not remove those rows from verification.
 - Names are matched as `[a-z0-9_-]+`. A directory named outside that character set cannot be represented here and would fail the check permanently, so keep artifact directories lowercase kebab or snake case.
-- Artifacts are enumerated from the **direct children** of `.claude/skills/`, `meta/harness/`, and `meta/infra/`. Nested directories are not artifacts.
+- Artifacts are enumerated from the **direct children** of `.claude/skills/`, `meta/harness/`, and `meta/infra/`. Nested directories are not artifacts. A skill directory counts only once it has a `SKILL.md`, and a harness directory only once it has an `__init__.py`, so a half-built directory is not demanded here until it is a real artifact.
 
 Child projects: this inventory is a **merge point, not a wholesale take**. When a child adds a local rule, skill, harness, or infra stack, add a row for it here too — the same way a local `claude-md` rule has to be added to the child's own `CLAUDE.md`.
 
@@ -72,5 +72,7 @@ Disposable environments under `meta/infra/`, brought up only for the duration of
 ## Verification scope
 
 The checker compares **names only**, in both directions: an artifact on disk with no row here fails, and a row here with nothing behind it fails. Everything else in these tables — tier, vessel, engagement, owner interface, behavior — is written and maintained by hand, and can drift without the checker noticing. Duplicate rows for the same name also pass, since names are compared as sets.
+
+That comparison is **skipped entirely on a run where any rule in `meta/rules/` is failing its own checks**, because classifying artifacts means reading rule frontmatter, and doing that against a broken registry produces confidently wrong instructions. The checker says so in its output rather than passing quietly, and the coverage is checked again on the next run once the rules are clean — so a run that reports rule violations is never also a statement that this inventory is accurate.
 
 Widening that scope, for example by checking the vessel column against each rule's frontmatter, is a choice available whenever it earns its keep. It is not a scheduled next step, and nothing here depends on it happening.

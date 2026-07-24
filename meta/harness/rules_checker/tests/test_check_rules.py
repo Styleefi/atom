@@ -67,7 +67,11 @@ def make_repo(tmp_path: Path) -> Path:
 
 
 def write_inventory(root: Path, text: str) -> None:
-    """인벤토리를 통째로 덮어쓴다 (비정합 상태를 구성할 때만 쓴다)."""
+    """인벤토리를 통째로 덮어쓴다.
+
+    자동 유지되는 골격 대신 원하는 상태를 직접 구성할 때 쓴다 — 위반 상태든,
+    포맷 내성을 보는 정합 상태든.
+    """
     (root / "meta" / "README.md").write_text(text, encoding="utf-8")
 
 
@@ -515,6 +519,31 @@ def test_inventory_rule_backed_skill_listed_as_artifact(tmp_path: Path) -> None:
     violations = check_rules(root)
     assert len(violations) == 1
     assert "'## Functional artifacts' section lists 'my-skill'" in violations[0]
+
+
+@pytest.mark.parametrize(
+    "deployed",
+    [
+        ".claude/skills/my-skill/SKILL.md",
+        "./.claude/skills/my-skill/SKILL.md",
+        ".claude//skills/my-skill/SKILL.md",
+    ],
+)
+def test_inventory_matches_skill_owner_by_normalized_path(
+    tmp_path: Path, deployed: str
+) -> None:
+    # check_rule_file이 deployed-to를 Path로 해석하므로, 문자열 그대로 비교하면
+    # 규칙 검증은 통과하는데 소유권만 어긋나 스킬이 '규칙 없는 아티팩트'로
+    # 오분류된다.
+    root = make_repo(tmp_path)
+    write_rule(
+        root,
+        "my-style.md",
+        f"---\nid: my-style\ntier: convention\nenforce: skill\n"
+        f"deployed-to: {deployed}\n---\n",
+    )
+    make_skill_deployment(root, "my-skill", "meta/rules/my-style.md\n")
+    assert check_rules(root) == []
 
 
 @pytest.mark.parametrize(
