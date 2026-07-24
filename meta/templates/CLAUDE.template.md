@@ -9,6 +9,10 @@
 
   On `git pull upstream main` conflicts: keep YOURS for CLAUDE.md / README.md / docs/,
   take UPSTREAM'S for meta/, .github/, .gitlab-ci.yml, .claude/, and .gitattributes.
+  Two files under those paths are MERGE points, not wholesale takes — resolving them
+  by taking upstream's version drops your project's own entries:
+    - meta/README.md    (the interface inventory: keep your local rule/artifact rows)
+    - .gitlab-ci.yml    (if you added product jobs alongside the inherited harness job)
 -->
 # CLAUDE.md
 

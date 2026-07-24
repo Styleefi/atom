@@ -17,6 +17,7 @@ deployed-to: <repo-root-relative path of the actual deployment location>
 - `enforce: skill`: the rule deploys as a `SKILL.md` under `.claude/skills/`, loaded on demand by its description. The SKILL.md carries only a pointer — the rule body's SSOT stays here — and the checker verifies the deployed-to path shape and that the SKILL.md references `meta/rules/<file>` (v1: substring reference check).
   - Not every skill under `.claude/skills/` is a rule. Skills that encode a **working agreement** (collaboration norms, standards, protocols) are rules and follow this SSOT-plus-pointer pattern. **Functional** skills (plain tools/automation) are not rules — their body lives directly in the SKILL.md and evolves through ordinary PRs. The test: does changing the content change an agreement about how we work, or just improve a tool?
 - Vessels without implemented verification are **rejected**, never silently passed.
+- Every rule must also appear in the owner-facing inventory (`meta/README.md`), which the checker verifies in both directions — an unlisted rule and a listed-but-deleted rule both fail. Functional skills, harnesses, and infra stacks are covered by the same check under their own table there. That coverage check is deferred (and reported as deferred) on any run where a rule below is itself failing, since it reads frontmatter to do its job.
 - This README is not a rule and is excluded from checking.
 
 ## Revision procedure
