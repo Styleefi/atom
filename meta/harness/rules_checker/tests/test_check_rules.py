@@ -42,6 +42,16 @@ INVENTORY_SKELETON = (
 )
 
 
+def rule_violations(root: Path) -> list[str]:
+    """인벤토리 보류 안내를 뺀 위반 목록을 돌려준다.
+
+    규칙 위반이 있으면 인벤토리 검사가 미뤄지고 그 사실이 위반으로 따라붙는다.
+    규칙 검사 자체를 다루는 테스트가 매번 그것까지 세면 불필요한 결합이 생기므로
+    걸러낸다 — 보류 동작은 전용 테스트가 고정한다.
+    """
+    return [v for v in check_rules(root) if "coverage was not checked" not in v]
+
+
 def make_repo(tmp_path: Path) -> Path:
     """meta/rules/ 골격과 빈 인벤토리를 가진 가짜 저장소를 만든다.
 
@@ -126,7 +136,7 @@ def test_missing_required_field(tmp_path: Path) -> None:
         "no-target.md",
         "---\nid: no-target\ntier: principle\nenforce: claude-md\n---\n",
     )
-    violations = check_rules(root)
+    violations = rule_violations(root)
     assert len(violations) == 1
     assert "missing required field" in violations[0]
     assert "deployed-to" in violations[0]
@@ -139,7 +149,7 @@ def test_missing_tier_field(tmp_path: Path) -> None:
         "no-tier.md",
         "---\nid: no-tier\nenforce: claude-md\ndeployed-to: CLAUDE.md\n---\n",
     )
-    violations = check_rules(root)
+    violations = rule_violations(root)
     assert len(violations) == 1
     assert "missing required field" in violations[0]
     assert "tier" in violations[0]
@@ -152,7 +162,7 @@ def test_invalid_tier_enum(tmp_path: Path) -> None:
         "bad-tier.md",
         "---\nid: bad-tier\ntier: law\nenforce: claude-md\ndeployed-to: CLAUDE.md\n---\n",
     )
-    violations = check_rules(root)
+    violations = rule_violations(root)
     assert len(violations) == 1
     assert "invalid tier value 'law'" in violations[0]
 
@@ -164,7 +174,7 @@ def test_invalid_enforce_enum(tmp_path: Path) -> None:
         "bad-enum.md",
         "---\nid: bad-enum\ntier: convention\nenforce: cron\ndeployed-to: CLAUDE.md\n---\n",
     )
-    violations = check_rules(root)
+    violations = rule_violations(root)
     assert len(violations) == 1
     assert "invalid enforce value 'cron'" in violations[0]
 
@@ -172,7 +182,7 @@ def test_invalid_enforce_enum(tmp_path: Path) -> None:
 def test_broken_yaml_reported_not_raised(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "broken.md", "---\nid: [unclosed\n---\n")
-    violations = check_rules(root)
+    violations = rule_violations(root)
     assert len(violations) == 1
     assert "invalid YAML" in violations[0]
 
@@ -181,7 +191,7 @@ def test_id_filename_mismatch(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "actual-name.md", valid_rule("other-name"))
     (root / "CLAUDE.md").write_text("@meta/rules/actual-name.md\n", encoding="utf-8")
-    violations = check_rules(root)
+    violations = rule_violations(root)
     assert len(violations) == 1
     assert "does not match filename stem" in violations[0]
 
@@ -189,7 +199,7 @@ def test_id_filename_mismatch(tmp_path: Path) -> None:
 def test_missing_deploy_target(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "my-rule.md", valid_rule("my-rule"))  # CLAUDE.md 미생성
-    violations = check_rules(root)
+    violations = rule_violations(root)
     assert len(violations) == 1
     assert "does not exist" in violations[0]
 
@@ -198,7 +208,7 @@ def test_declared_but_not_deployed(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "my-rule.md", valid_rule("my-rule"))
     (root / "CLAUDE.md").write_text("# no import here\n", encoding="utf-8")
-    violations = check_rules(root)
+    violations = rule_violations(root)
     assert len(violations) == 1
     assert "declared but not actually deployed" in violations[0]
 
@@ -220,7 +230,7 @@ def test_unverifiable_vessels_are_rejected(
         "---\nid: future-rule\ntier: convention\nenforce: webhook\n"
         "deployed-to: CLAUDE.md\n---\n",
     )
-    violations = check_rules(root)
+    violations = rule_violations(root)
     assert len(violations) == 1
     assert "is not implemented" in violations[0]
 
@@ -252,7 +262,7 @@ def test_hook_rule_with_broken_settings_json(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
     make_hook_deployment(root, "my-guard", "{not json")
-    violations = check_rules(root)
+    violations = rule_violations(root)
     assert len(violations) == 1
     assert "is not valid JSON" in violations[0]
 
@@ -261,7 +271,7 @@ def test_hook_rule_without_module_reference(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
     make_hook_deployment(root, "my-guard", '{"hooks": {}}')
-    violations = check_rules(root)
+    violations = rule_violations(root)
     assert len(violations) == 1
     assert "harness.my_guard" in violations[0]
     assert "declared but not actually deployed" in violations[0]
@@ -275,7 +285,7 @@ def test_hook_rule_without_harness_package(tmp_path: Path) -> None:
         '{"hooks": {"PreToolUse": [{"hooks": [{"command": "python -m harness.my_guard"}]}]}}',
         encoding="utf-8",
     )
-    violations = check_rules(root)
+    violations = rule_violations(root)
     assert len(violations) == 1
     assert "does not exist" in violations[0]
     assert "meta/harness/my_guard/" in violations[0]
@@ -313,7 +323,7 @@ def test_skill_rule_outside_skills_dir(tmp_path: Path) -> None:
     )
     (root / "docs").mkdir()
     (root / "docs" / "SKILL.md").write_text("meta/rules/my-style.md\n", encoding="utf-8")
-    violations = check_rules(root)
+    violations = rule_violations(root)
     assert len(violations) == 1
     assert "must be a SKILL.md under .claude/skills/" in violations[0]
 
@@ -329,7 +339,7 @@ def test_skill_rule_target_not_skill_md(tmp_path: Path) -> None:
     skill_dir = root / ".claude" / "skills" / "my-skill"
     skill_dir.mkdir(parents=True)
     (skill_dir / "readme.md").write_text("meta/rules/my-style.md\n", encoding="utf-8")
-    violations = check_rules(root)
+    violations = rule_violations(root)
     assert len(violations) == 1
     assert "must be a SKILL.md under .claude/skills/" in violations[0]
 
@@ -338,7 +348,7 @@ def test_skill_rule_without_reference(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "my-style.md", skill_rule("my-style"))
     make_skill_deployment(root, "my-skill", "No reference here.\n")
-    violations = check_rules(root)
+    violations = rule_violations(root)
     assert len(violations) == 1
     assert "does not reference" in violations[0]
     assert "meta/rules/my-style.md" in violations[0]
@@ -512,68 +522,54 @@ def test_inventory_rule_backed_skill_listed_as_artifact(tmp_path: Path) -> None:
     [
         # frontmatter 자체가 깨진 경우.
         "---\nid: my-guard\ntier: convention\n",
-        # YAML은 정상이지만 그릇(enforce)을 알 수 없는 경우.
+        # YAML은 정상이지만 필수 필드(enforce)가 빠진 경우.
         "---\nid: my-guard\ntier: convention\ndeployed-to: .claude/settings.json\n---\n",
     ],
 )
-def test_inventory_holds_harness_claim_when_vessel_is_unknown(
-    tmp_path: Path, body: str
-) -> None:
-    # 그릇을 확정할 수 없는 규칙의 하니스를 '규칙 없는 아티팩트'로 보면, 고치는
-    # 순간 stale이 될 행을 추가하라는 잘못된 지시가 나온다. 방어적으로 규칙
-    # 소유로 본다 — 규칙 자체의 위반은 check_rule_file이 이미 보고한다.
+def test_inventory_deferred_while_a_rule_is_violating(tmp_path: Path, body: str) -> None:
+    # 깨진 레지스트리 위에서 분류하면 규칙이 뒷받침하던 하니스를 '규칙 없는
+    # 아티팩트'로 오분류해, 고치는 순간 stale이 될 행을 추가하라고 지시하게
+    # 된다. 그래서 검사를 미루고, 미룬 사실을 보고한다.
     root = make_repo(tmp_path)
     write_rule(root, "my-guard.md", body)
     make_harness_package(root, "my_guard")
     violations = check_rules(root)
     assert not [v for v in violations if "Functional artifacts" in v]
+    assert [v for v in violations if "coverage was not checked" in v]
 
 
-def test_inventory_still_checks_infra_while_a_rule_is_unparseable(
-    tmp_path: Path,
-) -> None:
-    # 인프라 열거는 frontmatter에 의존하지 않으므로 보류 대상이 아니다 —
-    # 무관한 규칙이 깨진 동안 새 스택이 조용히 들어오면 안 된다.
+def test_inventory_deferral_also_holds_unrelated_drift(tmp_path: Path) -> None:
+    # 보류의 대가: 규칙이 깨진 동안에는 무관한 아티팩트 드리프트도 보고되지
+    # 않는다. 침묵이 아니라 보류 안내로 드러나고, 다음 실행에서 잡힌다.
     root = make_repo(tmp_path)
     write_rule(root, "broken.md", "---\nid: broken\n")
     make_infra_stack(root, "sandbox")
     violations = check_rules(root)
+    assert not [v for v in violations if "'sandbox'" in v]
+    assert [v for v in violations if "coverage was not checked" in v]
+
+
+def test_inventory_runs_once_the_registry_is_clean(tmp_path: Path) -> None:
+    # 보류는 한시적이다 — 규칙을 고치면 같은 드리프트가 바로 잡힌다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    make_infra_stack(root, "sandbox")
+    violations = check_rules(root)
+    assert not [v for v in violations if "coverage was not checked" in v]
     assert [v for v in violations if "'sandbox' is missing" in v]
 
 
-def test_inventory_still_checks_functional_harness_while_a_rule_is_unparseable(
-    tmp_path: Path,
-) -> None:
-    # 깨진 규칙과 이름이 겹치지 않는 하니스는 계속 등재를 요구해야 한다.
+def test_inventory_not_deferred_by_template_drift(tmp_path: Path) -> None:
+    # 템플릿 동기화는 규칙 frontmatter와 무관하므로 보류 사유가 아니다.
     root = make_repo(tmp_path)
-    write_rule(root, "broken.md", "---\nid: broken\n")
-    make_harness_package(root, "toolbox")
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    write_template(root, "# no imports\n")
+    make_infra_stack(root, "sandbox")
     violations = check_rules(root)
-    assert [v for v in violations if "'toolbox' is missing" in v]
-
-
-def test_inventory_holds_skill_coverage_when_deployed_to_is_unreadable(
-    tmp_path: Path,
-) -> None:
-    # 스킬 소유권만은 deployed-to를 읽어야 알 수 있다. 보류하되, 보류 사실을
-    # 출력에 남긴다 — 검증을 조용히 건너뛰지 않는다.
-    root = make_repo(tmp_path)
-    write_rule(root, "my-style.md", "---\nid: my-style\ntier: convention\n")
-    make_skill_deployment(root, "my-skill", "meta/rules/my-style.md\n")
-    violations = check_rules(root)
-    assert not [v for v in violations if "'my-skill'" in v]
-    assert [v for v in violations if "was not verified" in v]
-
-
-def test_inventory_still_flags_stale_skill_row_while_deployed_to_is_unreadable(
-    tmp_path: Path,
-) -> None:
-    # 실체 없는 스킬 행은 frontmatter와 무관하므로 보류 중에도 계속 잡는다.
-    root = make_repo(tmp_path)
-    write_rule(root, "my-style.md", "---\nid: my-style\ntier: convention\n")
-    list_artifact(root, "ghost-skill")
-    violations = check_rules(root)
-    assert [v for v in violations if "lists 'ghost-skill'" in v]
+    assert not [v for v in violations if "coverage was not checked" in v]
+    assert [v for v in violations if "'sandbox' is missing" in v]
 
 
 def test_inventory_skill_dir_without_skill_md_is_not_an_artifact(

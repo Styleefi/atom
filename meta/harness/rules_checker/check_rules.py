@@ -322,42 +322,32 @@ def _child_dirs(path: Path) -> list[Path]:
     return sorted(child for child in path.iterdir() if child.is_dir())
 
 
-def _expected_artifacts(root: Path) -> tuple[set[str], int]:
+def _expected_artifacts(root: Path) -> set[str]:
     """인벤토리에 실려야 하는 비규칙 아티팩트 이름을 모은다.
 
     스킬/하니스/인프라 세 루트를 직계 자식만 열거하고, 그중 규칙이 뒷받침하는
     것(규칙 표가 이미 커버하는 것)은 뺀다. 단일 분류 불변식이므로 규칙 기반
     아티팩트가 이 표에 실리면 stale로 잡힌다.
 
-    세 루트의 frontmatter 의존도는 서로 다르다. 인프라는 규칙 개념이 없어 전혀
-    의존하지 않고, 하니스 소유권은 규칙 파일명에서 도출되므로 frontmatter 없이도
-    판정할 수 있다. 스킬 소유권만은 deployed-to를 읽어야 알 수 있어서, 그 값을
-    확보하지 못한 규칙이 있으면 스킬 판정만 보류한다(호출자가 보류 사실을
-    출력에 남긴다). 그릇을 확정할 수 없는 규칙은 하니스를 방어적으로 규칙
-    소유로 보는데, 그러지 않으면 그 하니스가 '규칙 없는 아티팩트'로 오분류되어
-    행을 추가하라는 잘못된 지시가 나온다(추가하면 규칙을 고치는 순간 stale이
-    된다).
+    규칙 위반이 하나도 없을 때만 호출되므로(check_rules 참조) 모든 규칙의
+    frontmatter는 파싱되고 필수 필드가 갖춰져 있다고 전제한다.
 
     Args:
         root: 저장소 루트.
 
     Returns:
-        (기능성 아티팩트 이름 집합, deployed-to를 읽지 못한 규칙 수) 튜플.
+        기능성 아티팩트 이름 집합.
     """
     skill_targets: set[str] = set()
-    harness_claims: set[str] = set()
-    unreadable_rules = 0
+    hook_packages: set[str] = set()
     for rule_path in rule_files(root):
         data, _ = parse_frontmatter(rule_path.read_text(encoding="utf-8"))
-        enforce = data.get("enforce") if data else None
-        deployed = str(data.get("deployed-to") or "").strip() if data else ""
-
-        if enforce == "hook" or enforce is None:
-            harness_claims.add(rule_path.stem.replace("-", "_"))
-        if deployed:
-            skill_targets.add(deployed)
-        else:
-            unreadable_rules += 1
+        assert data is not None
+        if data["enforce"] == "hook":
+            # 훅 하니스 매핑은 frontmatter id가 아니라 파일명 stem 기준이다
+            # (id == stem 검증은 check_rule_file의 몫).
+            hook_packages.add(rule_path.stem.replace("-", "_"))
+        skill_targets.add(str(data["deployed-to"]).strip())
 
     artifacts: set[str] = set()
     for skill_dir in _child_dirs(root / SKILLS_DIR):
@@ -369,12 +359,12 @@ def _expected_artifacts(root: Path) -> tuple[set[str], int]:
     for harness_dir in _child_dirs(root / HARNESS_DIR):
         if not (harness_dir / "__init__.py").is_file():
             continue
-        if harness_dir.name in harness_claims:
+        if harness_dir.name in hook_packages:
             continue
         artifacts.add(harness_dir.name)
     for infra_dir in _child_dirs(root / INFRA_DIR):
         artifacts.add(infra_dir.name)
-    return artifacts, unreadable_rules
+    return artifacts
 
 
 def _diff_section(heading: str, expected: set[str], listed: set[str]) -> list[str]:
@@ -415,9 +405,8 @@ def check_inventory(root: Path) -> list[str]:
     Returns:
         위반 메시지 목록. 인벤토리 파일이 없으면 그 자체가 위반이다 —
         템플릿 동기화와 달리 부재를 잡아줄 다른 검사가 없기 때문이다.
-        deployed-to를 읽지 못한 규칙이 있으면 스킬 항목의 판정만 보류하고 그
-        사실을 위반 목록에 남긴다 — 규칙 표·하니스·인프라 판정은 frontmatter에
-        의존하지 않으므로 그대로 수행한다.
+        아티팩트 분류가 규칙 frontmatter에서 파생되므로 이 함수는 규칙 위반이
+        하나도 없을 때만 호출된다(호출 조건은 check_rules에 있다).
     """
     inventory = root / INVENTORY_PATH
     if not inventory.is_file():
@@ -435,22 +424,8 @@ def check_inventory(root: Path) -> list[str]:
     violations = _diff_section(
         RULES_HEADING, {path.stem for path in rule_files(root)}, listed_rules
     )
-    expected_artifacts, unreadable_rules = _expected_artifacts(root)
-    on_disk_skills = {skill.name for skill in _child_dirs(root / SKILLS_DIR)}
-    if unreadable_rules and on_disk_skills:
-        # 스킬 소유권을 확정할 수 없으므로 디스크에 있는 스킬의 판정만 뺀다.
-        # 실체가 없는 스킬 행(stale)은 frontmatter와 무관하므로 계속 잡는다.
-        # 보류할 스킬이 실제로 있을 때만 알린다 — 보류한 것이 없는데 알리면
-        # 이미 보고된 규칙 위반에 잡음만 얹는다.
-        expected_artifacts -= on_disk_skills
-        listed_artifacts -= on_disk_skills
-        violations.append(
-            f"{INVENTORY_PATH}: skill coverage of '{ARTIFACTS_HEADING}' was not "
-            f"verified — {unreadable_rules} rule(s) have no readable "
-            "'deployed-to'; fix those and re-run"
-        )
     violations.extend(
-        _diff_section(ARTIFACTS_HEADING, expected_artifacts, listed_artifacts)
+        _diff_section(ARTIFACTS_HEADING, _expected_artifacts(root), listed_artifacts)
     )
     return violations
 
@@ -469,11 +444,23 @@ def check_rules(root: Path) -> list[str]:
     if not rules_dir.is_dir():
         return [f"rules directory not found: {rules_dir.relative_to(root)}"]
 
-    violations: list[str] = []
+    rule_violations: list[str] = []
     for rule_path in rule_files(root):
-        violations.extend(check_rule_file(rule_path, root))
+        rule_violations.extend(check_rule_file(rule_path, root))
+
+    violations = list(rule_violations)
     violations.extend(check_template_sync(root))
-    violations.extend(check_inventory(root))
+    if rule_violations:
+        # 인벤토리의 아티팩트 분류는 규칙 frontmatter에서 파생된다. 깨진
+        # 레지스트리 위에서 분류하면 규칙이 뒷받침하던 하니스/스킬을 '규칙 없는
+        # 아티팩트'로 오분류해, 규칙을 고치는 순간 stale이 될 행을 추가하라고
+        # 지시하게 된다. 미루되 조용히 넘어가지 않고 미룬 사실을 보고한다.
+        violations.append(
+            f"{INVENTORY_PATH}: coverage was not checked — fix the "
+            f"{len(rule_violations)} rule violation(s) above and re-run"
+        )
+    else:
+        violations.extend(check_inventory(root))
     return violations
 
 
