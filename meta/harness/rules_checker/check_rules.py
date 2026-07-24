@@ -25,8 +25,9 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
   실체와 일치하는지 — `## Rules` 표는 meta/rules/의 규칙 집합과, `## Functional
   artifacts` 표는 규칙이 뒷받침하지 않는 스킬/하니스/인프라 집합과 양방향으로
   비교한다. 검증 없는 인벤토리는 검증 없는 규칙과 같은 실패이므로, 인벤토리
-  파일 자체의 부재도 위반으로 본다. 단, 아티팩트 분류는 규칙 frontmatter에서
-  파생되므로 파싱 실패가 하나라도 있으면 그 표의 검사는 보류한다.
+  파일 자체의 부재도 위반으로 본다. 스킬 소유권만은 규칙의 deployed-to를 읽어야
+  알 수 있어서, 그 값을 확보하지 못한 규칙이 있으면 스킬 판정만 보류하고 보류
+  사실을 위반으로 남긴다.
 
 경로는 실행 위치와 무관하게 이 파일의 고정 위치(meta/harness/rules_checker/)
 로부터 역산한 저장소 루트 기준으로 해석하므로 로컬과 CI에서 결과가 동일하다.
@@ -304,29 +305,6 @@ def _section_body(text: str, heading: str) -> str:
     return "\n".join(lines[start:end])
 
 
-def _rule_frontmatters(root: Path) -> list[tuple[Path, dict]] | None:
-    """모든 규칙의 (경로, frontmatter) 목록을 돌려준다.
-
-    하나라도 파싱에 실패하면 목록 대신 None을 준다. 깨진 규칙을 건너뛰고
-    나머지로 분류를 이어가면, 그 규칙이 뒷받침하던 하니스/스킬이 '규칙 없는
-    아티팩트'로 오분류되어 인벤토리에 행을 추가하라는 잘못된 지시가 나온다
-    (행을 추가하면 frontmatter를 고치는 순간 stale 위반으로 바뀐다).
-
-    Args:
-        root: 저장소 루트.
-
-    Returns:
-        (규칙 파일 경로, frontmatter dict) 목록, 또는 파싱 실패가 있으면 None.
-    """
-    parsed: list[tuple[Path, dict]] = []
-    for rule_path in rule_files(root):
-        data, error = parse_frontmatter(rule_path.read_text(encoding="utf-8"))
-        if error or data is None:
-            return None
-        parsed.append((rule_path, data))
-    return parsed
-
-
 def _child_dirs(path: Path) -> list[Path]:
     """직계 자식 디렉토리만 정렬해 돌려준다.
 
@@ -344,51 +322,59 @@ def _child_dirs(path: Path) -> list[Path]:
     return sorted(child for child in path.iterdir() if child.is_dir())
 
 
-def _expected_artifacts(root: Path) -> set[str] | None:
+def _expected_artifacts(root: Path) -> tuple[set[str], int]:
     """인벤토리에 실려야 하는 비규칙 아티팩트 이름을 모은다.
 
     스킬/하니스/인프라 세 루트를 직계 자식만 열거하고, 그중 규칙이 뒷받침하는
     것(규칙 표가 이미 커버하는 것)은 뺀다. 단일 분류 불변식이므로 규칙 기반
     아티팩트가 이 표에 실리면 stale로 잡힌다.
 
+    세 루트의 frontmatter 의존도는 서로 다르다. 인프라는 규칙 개념이 없어 전혀
+    의존하지 않고, 하니스 소유권은 규칙 파일명에서 도출되므로 frontmatter 없이도
+    판정할 수 있다. 스킬 소유권만은 deployed-to를 읽어야 알 수 있어서, 그 값을
+    확보하지 못한 규칙이 있으면 스킬 판정만 보류한다(호출자가 보류 사실을
+    출력에 남긴다). 그릇을 확정할 수 없는 규칙은 하니스를 방어적으로 규칙
+    소유로 보는데, 그러지 않으면 그 하니스가 '규칙 없는 아티팩트'로 오분류되어
+    행을 추가하라는 잘못된 지시가 나온다(추가하면 규칙을 고치는 순간 stale이
+    된다).
+
     Args:
         root: 저장소 루트.
 
     Returns:
-        기능성 아티팩트 이름 집합. 분류의 입력인 규칙 frontmatter가 깨져 있으면
-        None — 신뢰할 수 없는 분류로 진단을 내는 대신 판단을 보류한다.
+        (기능성 아티팩트 이름 집합, deployed-to를 읽지 못한 규칙 수) 튜플.
     """
-    frontmatters = _rule_frontmatters(root)
-    if frontmatters is None:
-        return None
+    skill_targets: set[str] = set()
+    harness_claims: set[str] = set()
+    unreadable_rules = 0
+    for rule_path in rule_files(root):
+        data, _ = parse_frontmatter(rule_path.read_text(encoding="utf-8"))
+        enforce = data.get("enforce") if data else None
+        deployed = str(data.get("deployed-to") or "").strip() if data else ""
 
-    deployed_targets: set[str] = set()
-    hook_packages: set[str] = set()
-    for rule_path, data in frontmatters:
-        deployed = str(data.get("deployed-to", "")).strip()
+        if enforce == "hook" or enforce is None:
+            harness_claims.add(rule_path.stem.replace("-", "_"))
         if deployed:
-            deployed_targets.add(deployed)
-        if data.get("enforce") == "hook":
-            # 훅 하니스 매핑은 frontmatter id가 아니라 파일명 stem 기준이다
-            # (id == stem 검증은 check_rule_file의 몫).
-            hook_packages.add(rule_path.stem.replace("-", "_"))
+            skill_targets.add(deployed)
+        else:
+            unreadable_rules += 1
 
     artifacts: set[str] = set()
     for skill_dir in _child_dirs(root / SKILLS_DIR):
         if not (skill_dir / "SKILL.md").is_file():
             continue
-        if f".claude/skills/{skill_dir.name}/SKILL.md" in deployed_targets:
+        if f".claude/skills/{skill_dir.name}/SKILL.md" in skill_targets:
             continue
         artifacts.add(skill_dir.name)
     for harness_dir in _child_dirs(root / HARNESS_DIR):
         if not (harness_dir / "__init__.py").is_file():
             continue
-        if harness_dir.name in hook_packages:
+        if harness_dir.name in harness_claims:
             continue
         artifacts.add(harness_dir.name)
     for infra_dir in _child_dirs(root / INFRA_DIR):
         artifacts.add(infra_dir.name)
-    return artifacts
+    return artifacts, unreadable_rules
 
 
 def _diff_section(heading: str, expected: set[str], listed: set[str]) -> list[str]:
@@ -429,8 +415,9 @@ def check_inventory(root: Path) -> list[str]:
     Returns:
         위반 메시지 목록. 인벤토리 파일이 없으면 그 자체가 위반이다 —
         템플릿 동기화와 달리 부재를 잡아줄 다른 검사가 없기 때문이다.
-        규칙 frontmatter가 깨져 있는 동안에는 아티팩트 표 검사를 건너뛴다
-        (규칙 표 검사는 파일명 기반이라 영향받지 않는다).
+        deployed-to를 읽지 못한 규칙이 있으면 스킬 항목의 판정만 보류하고 그
+        사실을 위반 목록에 남긴다 — 규칙 표·하니스·인프라 판정은 frontmatter에
+        의존하지 않으므로 그대로 수행한다.
     """
     inventory = root / INVENTORY_PATH
     if not inventory.is_file():
@@ -448,11 +435,23 @@ def check_inventory(root: Path) -> list[str]:
     violations = _diff_section(
         RULES_HEADING, {path.stem for path in rule_files(root)}, listed_rules
     )
-    expected_artifacts = _expected_artifacts(root)
-    if expected_artifacts is not None:
-        violations.extend(
-            _diff_section(ARTIFACTS_HEADING, expected_artifacts, listed_artifacts)
+    expected_artifacts, unreadable_rules = _expected_artifacts(root)
+    on_disk_skills = {skill.name for skill in _child_dirs(root / SKILLS_DIR)}
+    if unreadable_rules and on_disk_skills:
+        # 스킬 소유권을 확정할 수 없으므로 디스크에 있는 스킬의 판정만 뺀다.
+        # 실체가 없는 스킬 행(stale)은 frontmatter와 무관하므로 계속 잡는다.
+        # 보류할 스킬이 실제로 있을 때만 알린다 — 보류한 것이 없는데 알리면
+        # 이미 보고된 규칙 위반에 잡음만 얹는다.
+        expected_artifacts -= on_disk_skills
+        listed_artifacts -= on_disk_skills
+        violations.append(
+            f"{INVENTORY_PATH}: skill coverage of '{ARTIFACTS_HEADING}' was not "
+            f"verified — {unreadable_rules} rule(s) have no readable "
+            "'deployed-to'; fix those and re-run"
         )
+    violations.extend(
+        _diff_section(ARTIFACTS_HEADING, expected_artifacts, listed_artifacts)
+    )
     return violations
 
 

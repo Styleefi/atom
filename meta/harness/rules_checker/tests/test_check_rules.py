@@ -507,16 +507,73 @@ def test_inventory_rule_backed_skill_listed_as_artifact(tmp_path: Path) -> None:
     assert "'## Functional artifacts' section lists 'my-skill'" in violations[0]
 
 
-def test_inventory_skips_artifacts_while_a_rule_is_unparseable(tmp_path: Path) -> None:
-    # 아티팩트 분류는 frontmatter에서 파생된다. 깨진 규칙을 건너뛰고 분류하면
-    # 그 규칙이 뒷받침하던 하니스가 '규칙 없는 아티팩트'로 오분류되어, 고치는
-    # 순간 stale이 될 행을 추가하라는 지시가 나온다. 그래서 판단을 보류한다.
+@pytest.mark.parametrize(
+    "body",
+    [
+        # frontmatter 자체가 깨진 경우.
+        "---\nid: my-guard\ntier: convention\n",
+        # YAML은 정상이지만 그릇(enforce)을 알 수 없는 경우.
+        "---\nid: my-guard\ntier: convention\ndeployed-to: .claude/settings.json\n---\n",
+    ],
+)
+def test_inventory_holds_harness_claim_when_vessel_is_unknown(
+    tmp_path: Path, body: str
+) -> None:
+    # 그릇을 확정할 수 없는 규칙의 하니스를 '규칙 없는 아티팩트'로 보면, 고치는
+    # 순간 stale이 될 행을 추가하라는 잘못된 지시가 나온다. 방어적으로 규칙
+    # 소유로 본다 — 규칙 자체의 위반은 check_rule_file이 이미 보고한다.
     root = make_repo(tmp_path)
-    write_rule(root, "my-guard.md", "---\nid: my-guard\ntier: convention\n")
+    write_rule(root, "my-guard.md", body)
     make_harness_package(root, "my_guard")
     violations = check_rules(root)
-    assert len(violations) == 1
-    assert "frontmatter" in violations[0]
+    assert not [v for v in violations if "Functional artifacts" in v]
+
+
+def test_inventory_still_checks_infra_while_a_rule_is_unparseable(
+    tmp_path: Path,
+) -> None:
+    # 인프라 열거는 frontmatter에 의존하지 않으므로 보류 대상이 아니다 —
+    # 무관한 규칙이 깨진 동안 새 스택이 조용히 들어오면 안 된다.
+    root = make_repo(tmp_path)
+    write_rule(root, "broken.md", "---\nid: broken\n")
+    make_infra_stack(root, "sandbox")
+    violations = check_rules(root)
+    assert [v for v in violations if "'sandbox' is missing" in v]
+
+
+def test_inventory_still_checks_functional_harness_while_a_rule_is_unparseable(
+    tmp_path: Path,
+) -> None:
+    # 깨진 규칙과 이름이 겹치지 않는 하니스는 계속 등재를 요구해야 한다.
+    root = make_repo(tmp_path)
+    write_rule(root, "broken.md", "---\nid: broken\n")
+    make_harness_package(root, "toolbox")
+    violations = check_rules(root)
+    assert [v for v in violations if "'toolbox' is missing" in v]
+
+
+def test_inventory_holds_skill_coverage_when_deployed_to_is_unreadable(
+    tmp_path: Path,
+) -> None:
+    # 스킬 소유권만은 deployed-to를 읽어야 알 수 있다. 보류하되, 보류 사실을
+    # 출력에 남긴다 — 검증을 조용히 건너뛰지 않는다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-style.md", "---\nid: my-style\ntier: convention\n")
+    make_skill_deployment(root, "my-skill", "meta/rules/my-style.md\n")
+    violations = check_rules(root)
+    assert not [v for v in violations if "'my-skill'" in v]
+    assert [v for v in violations if "was not verified" in v]
+
+
+def test_inventory_still_flags_stale_skill_row_while_deployed_to_is_unreadable(
+    tmp_path: Path,
+) -> None:
+    # 실체 없는 스킬 행은 frontmatter와 무관하므로 보류 중에도 계속 잡는다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-style.md", "---\nid: my-style\ntier: convention\n")
+    list_artifact(root, "ghost-skill")
+    violations = check_rules(root)
+    assert [v for v in violations if "lists 'ghost-skill'" in v]
 
 
 def test_inventory_skill_dir_without_skill_md_is_not_an_artifact(
