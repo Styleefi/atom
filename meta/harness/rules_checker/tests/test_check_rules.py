@@ -8,8 +8,9 @@ enum, 깨진 YAML, 없는 배포 대상, 미배포 선언, 미검증 그릇 거�
 
 인벤토리 검사가 check_rules에 연결되어 있으므로 모든 픽스처는 정합한
 meta/README.md를 가져야 한다. 이를 개별 테스트에 떠넘기지 않도록 make_repo가
-골격을 만들고 write_rule이 규칙 행을 자동으로 채운다 — 인벤토리 위반 자체를
-검증하는 테스트만 write_inventory로 비정합 상태를 명시적으로 구성한다.
+골격을 만들고 write_rule이 규칙 행을 자동으로 채운다. 인벤토리 자체를 다루는
+테스트는 write_inventory로 파일을 통째로 써서 원하는 상태(위반 상태든, 포맷
+내성을 보는 정합 상태든)를 명시적으로 구성한다.
 """
 
 from __future__ import annotations
@@ -504,6 +505,18 @@ def test_inventory_rule_backed_skill_listed_as_artifact(tmp_path: Path) -> None:
     violations = check_rules(root)
     assert len(violations) == 1
     assert "'## Functional artifacts' section lists 'my-skill'" in violations[0]
+
+
+def test_inventory_skips_artifacts_while_a_rule_is_unparseable(tmp_path: Path) -> None:
+    # 아티팩트 분류는 frontmatter에서 파생된다. 깨진 규칙을 건너뛰고 분류하면
+    # 그 규칙이 뒷받침하던 하니스가 '규칙 없는 아티팩트'로 오분류되어, 고치는
+    # 순간 stale이 될 행을 추가하라는 지시가 나온다. 그래서 판단을 보류한다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", "---\nid: my-guard\ntier: convention\n")
+    make_harness_package(root, "my_guard")
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "frontmatter" in violations[0]
 
 
 def test_inventory_skill_dir_without_skill_md_is_not_an_artifact(

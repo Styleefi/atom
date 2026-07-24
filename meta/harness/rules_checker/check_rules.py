@@ -25,7 +25,8 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
   실체와 일치하는지 — `## Rules` 표는 meta/rules/의 규칙 집합과, `## Functional
   artifacts` 표는 규칙이 뒷받침하지 않는 스킬/하니스/인프라 집합과 양방향으로
   비교한다. 검증 없는 인벤토리는 검증 없는 규칙과 같은 실패이므로, 인벤토리
-  파일 자체의 부재도 위반으로 본다.
+  파일 자체의 부재도 위반으로 본다. 단, 아티팩트 분류는 규칙 frontmatter에서
+  파생되므로 파싱 실패가 하나라도 있으면 그 표의 검사는 보류한다.
 
 경로는 실행 위치와 무관하게 이 파일의 고정 위치(meta/harness/rules_checker/)
 로부터 역산한 저장소 루트 기준으로 해석하므로 로컬과 CI에서 결과가 동일하다.
@@ -274,9 +275,10 @@ def check_template_sync(root: Path) -> list[str]:
 def _section_body(text: str, heading: str) -> str:
     """인벤토리 본문에서 헤딩 하나가 지배하는 구간을 잘라낸다.
 
-    헤딩 판정은 부분 문자열이 아니라 줄 단위 정확 일치다(rstrip으로 CRLF와
-    트레일링 공백을 흡수). 구간은 헤딩 다음 줄부터 다음 `## ` 헤딩 직전 또는
-    파일 끝까지이며, 같은 헤딩이 여러 번 나오면 첫 번째 것만 쓴다.
+    헤딩 판정은 부분 문자열이 아니라 줄 단위 정확 일치다. CRLF는 read_text의
+    개행 정규화가 이미 걷어내므로, rstrip이 맡는 것은 헤딩 뒤 트레일링 공백뿐이다.
+    구간은 헤딩 다음 줄부터 다음 `## ` 헤딩 직전 또는 파일 끝까지이며, 같은
+    헤딩이 여러 번 나오면 첫 번째 것만 쓴다.
 
     Args:
         text: 인벤토리 파일 전체 내용.
@@ -302,23 +304,25 @@ def _section_body(text: str, heading: str) -> str:
     return "\n".join(lines[start:end])
 
 
-def _rule_frontmatters(root: Path) -> list[tuple[Path, dict]]:
-    """파싱에 성공한 규칙의 (경로, frontmatter) 목록을 돌려준다.
+def _rule_frontmatters(root: Path) -> list[tuple[Path, dict]] | None:
+    """모든 규칙의 (경로, frontmatter) 목록을 돌려준다.
 
-    파싱 실패 규칙은 조용히 건너뛴다 — 그 실패는 check_rule_file이 이미
-    위반으로 보고하므로 여기서 중복 보고하지 않는다.
+    하나라도 파싱에 실패하면 목록 대신 None을 준다. 깨진 규칙을 건너뛰고
+    나머지로 분류를 이어가면, 그 규칙이 뒷받침하던 하니스/스킬이 '규칙 없는
+    아티팩트'로 오분류되어 인벤토리에 행을 추가하라는 잘못된 지시가 나온다
+    (행을 추가하면 frontmatter를 고치는 순간 stale 위반으로 바뀐다).
 
     Args:
         root: 저장소 루트.
 
     Returns:
-        (규칙 파일 경로, frontmatter dict) 목록.
+        (규칙 파일 경로, frontmatter dict) 목록, 또는 파싱 실패가 있으면 None.
     """
     parsed: list[tuple[Path, dict]] = []
     for rule_path in rule_files(root):
         data, error = parse_frontmatter(rule_path.read_text(encoding="utf-8"))
         if error or data is None:
-            continue
+            return None
         parsed.append((rule_path, data))
     return parsed
 
@@ -340,7 +344,7 @@ def _child_dirs(path: Path) -> list[Path]:
     return sorted(child for child in path.iterdir() if child.is_dir())
 
 
-def _expected_artifacts(root: Path) -> set[str]:
+def _expected_artifacts(root: Path) -> set[str] | None:
     """인벤토리에 실려야 하는 비규칙 아티팩트 이름을 모은다.
 
     스킬/하니스/인프라 세 루트를 직계 자식만 열거하고, 그중 규칙이 뒷받침하는
@@ -351,11 +355,16 @@ def _expected_artifacts(root: Path) -> set[str]:
         root: 저장소 루트.
 
     Returns:
-        기능성 아티팩트 이름 집합.
+        기능성 아티팩트 이름 집합. 분류의 입력인 규칙 frontmatter가 깨져 있으면
+        None — 신뢰할 수 없는 분류로 진단을 내는 대신 판단을 보류한다.
     """
+    frontmatters = _rule_frontmatters(root)
+    if frontmatters is None:
+        return None
+
     deployed_targets: set[str] = set()
     hook_packages: set[str] = set()
-    for rule_path, data in _rule_frontmatters(root):
+    for rule_path, data in frontmatters:
         deployed = str(data.get("deployed-to", "")).strip()
         if deployed:
             deployed_targets.add(deployed)
@@ -420,6 +429,8 @@ def check_inventory(root: Path) -> list[str]:
     Returns:
         위반 메시지 목록. 인벤토리 파일이 없으면 그 자체가 위반이다 —
         템플릿 동기화와 달리 부재를 잡아줄 다른 검사가 없기 때문이다.
+        규칙 frontmatter가 깨져 있는 동안에는 아티팩트 표 검사를 건너뛴다
+        (규칙 표 검사는 파일명 기반이라 영향받지 않는다).
     """
     inventory = root / INVENTORY_PATH
     if not inventory.is_file():
@@ -437,9 +448,11 @@ def check_inventory(root: Path) -> list[str]:
     violations = _diff_section(
         RULES_HEADING, {path.stem for path in rule_files(root)}, listed_rules
     )
-    violations.extend(
-        _diff_section(ARTIFACTS_HEADING, _expected_artifacts(root), listed_artifacts)
-    )
+    expected_artifacts = _expected_artifacts(root)
+    if expected_artifacts is not None:
+        violations.extend(
+            _diff_section(ARTIFACTS_HEADING, expected_artifacts, listed_artifacts)
+        )
     return violations
 
 
