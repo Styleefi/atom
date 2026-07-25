@@ -3,6 +3,7 @@ id: answer-first-reminder
 tier: convention
 enforce: hook
 deployed-to: .claude/settings.json
+blocking: false
 ---
 
 # Answer-first reminder (mechanical re-supply of answer-first)

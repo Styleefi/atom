@@ -15,12 +15,15 @@ meta/README.md를 가져야 한다. 이를 개별 테스트에 떠넘기지 않�
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
 from harness.rules_checker import check_rules as check_rules_module
 from harness.rules_checker.check_rules import (
+    HOOK_COMMAND_BLOCKING,
+    HOOK_COMMAND_NON_BLOCKING,
     INVENTORY_ROW_RE,
     check_rules,
     find_repo_root,
@@ -239,12 +242,26 @@ def test_unverifiable_vessels_are_rejected(
     assert "is not implemented" in violations[0]
 
 
-def hook_rule(rule_id: str) -> str:
-    """유효한 hook 규칙 본문을 만든다."""
+def hook_rule(rule_id: str, blocking: str | None = "true") -> str:
+    """유효한 hook 규칙 본문을 만든다. blocking=None이면 필드를 뺀다."""
+    blocking_line = f"blocking: {blocking}\n" if blocking is not None else ""
     return (
         f"---\nid: {rule_id}\ntier: convention\nenforce: hook\n"
-        "deployed-to: .claude/settings.json\n---\n\nbody\n"
+        f"deployed-to: .claude/settings.json\n{blocking_line}---\n\nbody\n"
     )
+
+
+def hook_settings(*commands: str) -> str:
+    """주어진 커맨드들로 훅 하나짜리 settings JSON을 만든다."""
+    return json.dumps(
+        {"hooks": {"PreToolUse": [{"hooks": [{"command": c} for c in commands]}]}}
+    )
+
+
+def canonical_command(module: str, blocking: bool = True) -> str:
+    """정본 템플릿에서 훅 커맨드를 만든다 — 픽스처가 상수와 드리프트하지 않게."""
+    template = HOOK_COMMAND_BLOCKING if blocking else HOOK_COMMAND_NON_BLOCKING
+    return template.replace("{module}", module)
 
 
 def make_hook_deployment(root: Path, rule_id: str, settings_text: str) -> None:
@@ -257,7 +274,15 @@ def make_hook_deployment(root: Path, rule_id: str, settings_text: str) -> None:
 def test_valid_hook_rule_passes(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
-    settings = '{"hooks": {"PreToolUse": [{"hooks": [{"command": "uv run python -m harness.my_guard"}]}]}}'
+    settings = hook_settings(canonical_command("harness.my_guard"))
+    make_hook_deployment(root, "my-guard", settings)
+    assert check_rules(root) == []
+
+
+def test_valid_non_blocking_hook_rule_passes(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard", blocking="false"))
+    settings = hook_settings(canonical_command("harness.my_guard", blocking=False))
     make_hook_deployment(root, "my-guard", settings)
     assert check_rules(root) == []
 
@@ -286,13 +311,131 @@ def test_hook_rule_without_harness_package(tmp_path: Path) -> None:
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
     (root / ".claude").mkdir()
     (root / ".claude" / "settings.json").write_text(
-        '{"hooks": {"PreToolUse": [{"hooks": [{"command": "python -m harness.my_guard"}]}]}}',
-        encoding="utf-8",
+        hook_settings(canonical_command("harness.my_guard")), encoding="utf-8"
     )
     violations = rule_violations(root)
     assert len(violations) == 1
     assert "does not exist" in violations[0]
     assert "meta/harness/my_guard/" in violations[0]
+
+
+def test_hook_rule_with_legacy_exec_command_fails(tmp_path: Path) -> None:
+    # #31의 원형: exec 배선은 uv 자체 exit 2를 차단으로 흘린다 — 형태 위반.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    legacy = (
+        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
+        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.my_guard; fi'
+    )
+    make_hook_deployment(root, "my-guard", hook_settings(legacy))
+    violations = rule_violations(root)
+    # 규칙별 형태 검사와 역방향 스윕이 독립적으로 각자 잡는다 — 위반 2건.
+    assert len(violations) == 2
+    assert any("canonical blocking wrapper" in v for v in violations)
+    # 위반 메시지만으로 복붙 수정이 가능해야 한다 — 기대 정본을 그대로 담는다.
+    assert any(canonical_command("harness.my_guard") in v for v in violations)
+
+
+def test_hook_rule_shape_must_match_blocking_value(tmp_path: Path) -> None:
+    # blocking: false 규칙에 차단형 래퍼가 배선되면 형태 위반이다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard", blocking="false"))
+    settings = hook_settings(canonical_command("harness.my_guard", blocking=True))
+    make_hook_deployment(root, "my-guard", settings)
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "canonical non-blocking wrapper" in violations[0]
+
+
+def test_hook_rule_without_blocking_field(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard", blocking=None))
+    settings = hook_settings(canonical_command("harness.my_guard"))
+    make_hook_deployment(root, "my-guard", settings)
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "must declare 'blocking: true | false'" in violations[0]
+
+
+def test_hook_rule_with_non_bool_blocking(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard", blocking="maybe"))
+    settings = hook_settings(canonical_command("harness.my_guard"))
+    make_hook_deployment(root, "my-guard", settings)
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "'blocking' must be a boolean" in violations[0]
+
+
+def test_blocking_on_non_hook_rule_is_rejected(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    body = (
+        "---\nid: my-rule\ntier: principle\nenforce: claude-md\n"
+        "deployed-to: CLAUDE.md\nblocking: true\n---\n\nbody\n"
+    )
+    write_rule(root, "my-rule.md", body)
+    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "'blocking' is only valid for hook rules" in violations[0]
+
+
+def test_hook_rule_module_mention_outside_command_is_not_deployed(tmp_path: Path) -> None:
+    # hooks 구조 밖의 언급은 배포가 아니다 — v1 substring 검사와의 차이.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    settings = '{"hooks": {}, "note": "python -m harness.my_guard"}'
+    make_hook_deployment(root, "my-guard", settings)
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "declared but not actually deployed" in violations[0]
+
+
+def test_hook_rule_prefix_module_is_not_a_reference(tmp_path: Path) -> None:
+    # harness.my_guard는 harness.my_guard_v2 커맨드의 참조로 오인되면 안 된다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    settings = hook_settings(canonical_command("harness.my_guard_v2"))
+    make_hook_deployment(root, "my-guard", settings)
+    violations = rule_violations(root)
+    assert any("declared but not actually deployed" in v for v in violations)
+
+
+def test_hook_rule_referenced_twice_fails(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    command = canonical_command("harness.my_guard")
+    make_hook_deployment(root, "my-guard", hook_settings(command, command))
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "expected exactly one" in violations[0]
+
+
+def test_sweep_flags_unruled_harness_hook(tmp_path: Path) -> None:
+    # 규칙 파일 없는 harness 훅도 정본 형태여야 한다 — 역방향 스윕.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    rogue = (
+        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
+        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.rogue; fi'
+    )
+    settings = hook_settings(canonical_command("harness.my_guard"), rogue)
+    make_hook_deployment(root, "my-guard", settings)
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "harness.rogue" in violations[0]
+    assert "matches neither canonical wrapper" in violations[0]
+
+
+def test_sweep_ignores_non_harness_commands(tmp_path: Path) -> None:
+    # meta 소관 밖(자식 프로젝트의 자체 훅)은 스윕이 건드리지 않는다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    settings = hook_settings(
+        canonical_command("harness.my_guard"), "npx prettier --check ."
+    )
+    make_hook_deployment(root, "my-guard", settings)
+    assert check_rules(root) == []
 
 
 def skill_rule(rule_id: str, skill_name: str = "my-skill") -> str:
@@ -428,8 +571,7 @@ def test_inventory_full_fixture_passes(tmp_path: Path) -> None:
     make_skill_deployment(root, "my-skill", "meta/rules/my-style.md\n")
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
     (root / ".claude" / "settings.json").write_text(
-        '{"hooks": {"PreToolUse": [{"hooks": [{"command": "python -m harness.my_guard"}]}]}}',
-        encoding="utf-8",
+        hook_settings(canonical_command("harness.my_guard")), encoding="utf-8"
     )
     make_harness_package(root, "my_guard")
     # 규칙이 없는 셋은 전부 아티팩트 표에 실려야 한다.
