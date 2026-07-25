@@ -114,7 +114,7 @@ def test_duplicates_block_with_candidates_and_override_hint(monkeypatch, capsys)
 
 def test_override_skips_search_entirely(monkeypatch) -> None:
     def _fail(argv):
-        raise AssertionError("override인데 검색이 호출됨")
+        raise AssertionError("search was invoked despite override")
 
     monkeypatch.setattr(guard, "_run_search", _fail)
     cmd = f"{guard.OVERRIDE_TOKEN} gh issue create -t anything"
