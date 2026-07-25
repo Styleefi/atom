@@ -37,6 +37,6 @@ Conventions:
 ## Repo-specific rules
 
 - The meta layer lives in `meta/` (rules SSOT, templates, harnesses — one subpackage per harness). Never move root `CLAUDE.md`, `.claude/`, or `.mcp.json` into it; Claude Code only recognizes them at fixed locations.
-- Every rule file in `meta/rules/` MUST declare frontmatter: `id` (= filename), `tier: principle | convention`, `enforce: claude-md | skill | hook`, `deployed-to`. A rule without a deployment target is not a rule — it is a wish.
+- Every rule file in `meta/rules/` MUST declare frontmatter: `id` (= filename), `tier: principle | convention`, `enforce: claude-md | skill | hook`, `deployed-to`; hook rules additionally declare `blocking: true | false` (selects the canonical wrapper template — see `meta/rules/README.md`). A rule without a deployment target is not a rule — it is a wish.
 - Never create a file named exactly `CLAUDE.md` outside the repo root: Claude Code auto-loads it when reading files in that directory. Templates use the name `CLAUDE.template.md`.
 - `meta/templates/CLAUDE.template.md` is the CLAUDE.md scaffold for child projects. When editing it, keep the "INHERITED FROM ATOM" section in sync with this file's Rules/Commands sections (the rules checker verifies the import lists match).
