@@ -12,9 +12,10 @@ fail-open 설계라 형식이 어긋나면 GitLab 쪽 중복 차단이 조용히
 (issue #9). 시드 이슈는 정리하지 않는다 — 환경 자체가 run.sh teardown으로
 일회성이다.
 
-검증 불가 경계: Claude Code가 훅을 실제 호출하는 구간과 settings.json의
-`uv run` 래퍼. 프로세스 경계까지는 test_module_entrypoint_blocks_duplicate가
-커버한다.
+검증 불가 경계: Claude Code가 훅을 실제 호출하는 구간. settings.json의
+`uv run` 셸 래퍼(42→2 되매핑)는 rules_checker의 셸 계약 테스트
+(test_hook_command_contract.py)가, 프로세스 경계까지는
+test_module_entrypoint_blocks_duplicate가 커버한다.
 """
 
 from __future__ import annotations
@@ -281,7 +282,7 @@ def test_duplicate_create_blocked_end_to_end(
 ) -> None:
     code = _run_main(monkeypatch, _create_payload(guard_glab_env, seeded_issues["open"]))
     err = capsys.readouterr().err
-    assert code == 2, f"차단(exit 2)이어야 하는데 {code} — stderr:\n{err}"
+    assert code == 42, f"차단(exit 42)이어야 하는데 {code} — stderr:\n{err}"
     assert any(line.strip().startswith("#") for line in err.splitlines()), err
     assert guard.OVERRIDE_TOKEN in err
 
@@ -298,8 +299,8 @@ def test_module_entrypoint_blocks_duplicate(
         env={**os.environ, "PYTHONPATH": str(_META_DIR)},
         capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT,
     )
-    assert result.returncode == 2, (
-        f"exit 2여야 하는데 {result.returncode} — stderr:\n{result.stderr}"
+    assert result.returncode == 42, (
+        f"exit 42여야 하는데 {result.returncode} — stderr:\n{result.stderr}"
     )
     assert guard.OVERRIDE_TOKEN in result.stderr
 

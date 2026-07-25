@@ -107,7 +107,7 @@ def test_no_duplicates_passes_silently(monkeypatch) -> None:
 def test_duplicates_block_with_candidates_and_override_hint(monkeypatch, capsys) -> None:
     issues = json.dumps([{"number": 12, "state": "OPEN", "title": "같은 작업"}])
     monkeypatch.setattr(guard, "_run_search", lambda argv: issues)
-    assert _run_main(monkeypatch, _bash_payload('gh issue create -t "같은 작업"')) == 2
+    assert _run_main(monkeypatch, _bash_payload('gh issue create -t "같은 작업"')) == 42
     err = capsys.readouterr().err
     assert "#12" in err and guard.OVERRIDE_TOKEN in err
 
@@ -122,12 +122,12 @@ def test_override_skips_search_entirely(monkeypatch) -> None:
 
 
 def test_missing_title_blocks(monkeypatch, capsys) -> None:
-    assert _run_main(monkeypatch, _bash_payload("gh issue create --body x")) == 2
+    assert _run_main(monkeypatch, _bash_payload("gh issue create --body x")) == 42
     assert "--title" in capsys.readouterr().err
 
 
 def test_empty_title_blocks(monkeypatch, capsys) -> None:
-    assert _run_main(monkeypatch, _bash_payload('gh issue create --title ""')) == 2
+    assert _run_main(monkeypatch, _bash_payload('gh issue create --title ""')) == 42
     assert "--title" in capsys.readouterr().err
 
 
@@ -162,7 +162,7 @@ def test_glab_confident_lines_block(monkeypatch, capsys) -> None:
         "\n"
     )
     monkeypatch.setattr(guard, "_run_search", lambda argv: out)
-    assert _run_main(monkeypatch, _bash_payload("glab issue create -t x")) == 2
+    assert _run_main(monkeypatch, _bash_payload("glab issue create -t x")) == 42
     assert "#3" in capsys.readouterr().err
 
 
@@ -190,3 +190,11 @@ def test_run_wrapper_converts_crash_to_nonblocking(monkeypatch, capsys) -> None:
     monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
     assert guard.run() == 1
     assert "fail-open" in capsys.readouterr().err
+
+
+# --- 래퍼 계약 ---------------------------------------------------------------
+
+
+def test_exit_block_matches_wrapper_remap_contract() -> None:
+    # settings.json 래퍼는 42만 차단(2)으로 되매핑한다 — 값이 바뀌면 배선도 함께.
+    assert guard.EXIT_BLOCK == 42
