@@ -161,6 +161,86 @@ def test_protected_start_point_still_marks_unsafe() -> None:
     assert inv.branch_check_unsafe
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        'git checkout --track origin/main && git commit -m "feat: x"',
+        'git checkout -t origin/master && git commit -m "feat: x"',
+        'git switch --track origin/main && git commit -m "feat: x"',
+        'git switch -t origin/main && git commit -m "feat: x"',
+        'git checkout --track=inherit origin/main && git commit -m "feat: x"',
+        'git checkout --track refs/remotes/origin/main && git commit -m "feat: x"',
+    ],
+)
+def test_track_to_protected_remote_keeps_branch_check(command: str) -> None:
+    # `--track origin/main`은 로컬 `main`을 만든다 — 토큰만 보면 놓친다.
+    (inv,) = guard.detect_invocations(command)
+    assert not inv.branch_check_unsafe
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'git checkout --track origin/feature/main && git commit -m "feat: x"',
+        'git switch --track origin/release/master && git commit -m "feat: x"',
+    ],
+)
+def test_track_strips_only_the_first_path_component(command: str) -> None:
+    # 원격 접두만 벗긴다 — 로컬 브랜치는 `feature/main`이지 `main`이 아니다.
+    (inv,) = guard.detect_invocations(command)
+    assert inv.branch_check_unsafe
+
+
+def test_track_to_feature_remote_still_marks_unsafe() -> None:
+    (inv,) = guard.detect_invocations(
+        'git checkout --track origin/feat/x && git commit -m "feat: x"'
+    )
+    assert inv.branch_check_unsafe
+
+
+def test_no_track_is_not_a_track_flag() -> None:
+    # `--no-track origin/main`은 브랜치를 만들지 않고 detached HEAD가 된다.
+    (inv,) = guard.detect_invocations(
+        'git checkout --no-track origin/main && git commit -m "feat: x"'
+    )
+    assert inv.branch_check_unsafe
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'git checkout --track origin/main -b feat/x && git commit -m "feat: x"',
+        'git switch --track origin/main -c feat/x && git commit -m "feat: x"',
+        'git checkout main -b feat/x && git commit -m "feat: x"',
+    ],
+)
+def test_create_flag_wins_over_track_and_position(command: str) -> None:
+    (inv,) = guard.detect_invocations(command)
+    assert inv.branch_check_unsafe
+
+
+def test_create_flag_to_protected_keeps_branch_check() -> None:
+    # 생성 플래그가 이기므로 대상은 `main`이다 — `--track`의 feat/x가 아니다.
+    (inv,) = guard.detect_invocations(
+        'git checkout --track origin/feat/x -b main && git commit -m "feat: x"'
+    )
+    assert not inv.branch_check_unsafe
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'git checkout --track && git commit -m "feat: x"',
+        'git checkout -b && git commit -m "feat: x"',
+        'git checkout --track origin/ && git commit -m "feat: x"',
+        'git checkout - && git commit -m "feat: x"',
+    ],
+)
+def test_degenerate_branch_change_args_do_not_raise(command: str) -> None:
+    # 예외가 나면 run()이 삼켜 exit 1이 되고 해당 형태에서 guard가 무력화된다.
+    assert len(guard.detect_invocations(command)) == 1
+
+
 def test_git_branch_does_not_mark_branch_check_unsafe() -> None:
     (inv,) = guard.detect_invocations('git branch feat/x && git commit -m "feat: x"')
     assert not inv.branch_check_unsafe
@@ -296,6 +376,32 @@ def test_checkout_to_main_from_feature_branch_passes(monkeypatch) -> None:
     assert _run_main(monkeypatch, payload) == 0
 
 
+@pytest.mark.parametrize("branch", ["main", "master"])
+def test_track_to_protected_remote_still_blocks(monkeypatch, branch: str) -> None:
+    _set_branch(monkeypatch, branch)
+    payload = _bash_payload('git checkout --track origin/main && git commit -m "feat: x"')
+    assert _run_main(monkeypatch, payload) == 42
+
+
+def test_track_to_feature_remote_skips_branch_check(monkeypatch) -> None:
+    # main에서 재야 의미가 있다 — feat/x면 래치와 무관하게 0이라 동어반복이 된다.
+    calls = _set_branch(monkeypatch, "main")
+    payload = _bash_payload(
+        'git checkout --track origin/feat/x && git commit -m "feat: x"'
+    )
+    assert _run_main(monkeypatch, payload) == 0
+    assert calls == []
+
+
+def test_track_to_main_from_feature_branch_passes(monkeypatch) -> None:
+    # 설계상 통과한다(#44). calls 단언이 있어야 "래치가 안 켜졌다"가 고정된다 —
+    # 반환값만 보면 래치가 켜져도 0이라 아무것도 증명하지 못한다.
+    calls = _set_branch(monkeypatch, "feat/x")
+    payload = _bash_payload('git checkout --track origin/main && git commit -m "feat: x"')
+    assert _run_main(monkeypatch, payload) == 0
+    assert calls == [(None, None)]
+
+
 def test_branch_change_mention_in_string_does_not_unlatch(monkeypatch) -> None:
     _set_branch(monkeypatch, "main")
     payload = _bash_payload('echo "git checkout -b x" && git commit -m "feat: y"')
@@ -356,6 +462,22 @@ def test_malformed_input_warns_not_blocks(monkeypatch) -> None:
 
 
 # --- _current_branch 자체의 fail-open ----------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("ref", "expected"),
+    [
+        ("origin/main", "main"),
+        ("origin/feature/x", "feature/x"),
+        ("refs/remotes/origin/main", "main"),
+        ("remotes/origin/master", "master"),
+        ("foo", None),
+        ("origin/", None),
+        (None, None),
+    ],
+)
+def test_tracked_branch_name_strips_only_the_remote(ref, expected) -> None:
+    assert guard._tracked_branch_name(ref) == expected
 
 
 def test_current_branch_timeout_returns_none(monkeypatch) -> None:
