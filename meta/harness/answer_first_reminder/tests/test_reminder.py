@@ -2,8 +2,8 @@
 """reminder 모듈 테스트.
 
 휴리스틱은 contains_question을 직접, 판정 흐름은 stdin JSON monkeypatch로
-검증한다. 설계 불변식 — 어떤 입력 클래스에서도 exit 2 없음, stdout은 빈
-문자열 또는 정확히 REMINDER 한 줄(payload 내용이 주입 채널로 새지 않음),
+검증한다. 설계 불변식 — 어떤 입력 클래스에서도 차단 코드(42) 없음, stdout은
+빈 문자열 또는 정확히 REMINDER 한 줄(payload 내용이 주입 채널로 새지 않음),
 ~야/~지 평서문 제외 — 를 케이스로 고정한다.
 """
 
@@ -200,7 +200,7 @@ _ALL_INPUT_CLASSES = [
 
 
 def test_invariant_never_blocks_and_stdout_is_constant_only(monkeypatch, capsys) -> None:
-    """전 입력 클래스에서 (1) exit 2 불가, (2) stdout은 빈 값 또는 정확히 REMINDER 한 줄.
+    """전 입력 클래스에서 (1) 차단 코드(42) 불가, (2) stdout은 빈 값 또는 정확히 REMINDER 한 줄.
 
     (2)는 payload 내용이 컨텍스트 주입 채널(stdout)로 새는 것을 막는 보안
     불변식이다 — 리마인더가 프롬프트 주입 증폭기가 되면 안 된다.

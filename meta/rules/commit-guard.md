@@ -3,6 +3,7 @@ id: commit-guard
 tier: convention
 enforce: hook
 deployed-to: .claude/settings.json
+blocking: true
 ---
 
 # Commit guard (mechanical enforcement of commit-discipline)

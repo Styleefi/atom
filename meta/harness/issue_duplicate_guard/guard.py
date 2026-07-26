@@ -3,7 +3,8 @@
 
 Claude Code의 PreToolUse(Bash) hook으로 실행되어, `gh issue create` 또는
 `glab issue create` 명령을 감지하면 같은 CLI로 열림+닫힘 전체 이슈를 제목
-검색하고, 유사 이슈가 있으면 차단(exit 2)하며 후보 목록을 제시한다.
+검색하고, 유사 이슈가 있으면 차단(exit 42 — 래퍼가 2로 되매핑)하며 후보
+목록을 제시한다.
 모델이 후보를 검토한 뒤 진짜 신규라고 판단하면 `ATOM_DUP_REVIEWED=1`
 프리픽스로 같은 명령을 재실행해 통과한다 — 판단은 모델이, 검색이 반드시
 일어났다는 사실은 기계가 보장한다.
@@ -18,7 +19,8 @@ Claude Code의 PreToolUse(Bash) hook으로 실행되어, `gh issue create` 또�
 - 감지 못하는 형태(`bash -c` 내부, backtick 치환, `env` 프리픽스)는 전부
   통과 방향의 한계이며, claude-md 쪽 issue-workflow 규칙의 관례가 커버한다.
 
-종료 코드: 0 통과, 1 내부 오류(비차단 경고), 2 차단.
+종료 코드: 0 통과, 1 내부 오류(비차단 경고), 42 차단(sentinel — settings.json
+래퍼가 2로 되매핑).
 """
 
 from __future__ import annotations
@@ -32,6 +34,12 @@ from dataclasses import dataclass
 
 # override 마커: 후보 검토를 마쳤다는 선언. 세그먼트 선두에 있으면 통과.
 OVERRIDE_TOKEN = "ATOM_DUP_REVIEWED=1"
+
+# 차단 sentinel 종료 코드. Claude Code의 차단 코드는 2지만 uv(자체 오류 2)와
+# python(예외 1, CLI 오류 2)이 같은 코드를 낼 수 있어, exec 배선에서는 도구
+# 실패가 차단으로 샜다(#31). 자연 발생 불가능한 42를 반환하고 settings.json의
+# 셸 래퍼가 42→2로 되매핑하며, 그 외 nonzero는 전부 1(비차단 경고)로 수렴한다.
+EXIT_BLOCK = 42
 
 # shlex(punctuation_chars=True)가 별도 토큰으로 분리하는 셸 연산자.
 OPERATORS = {"&&", "||", "|", ";", ";;", "&", "(", ")"}
@@ -311,7 +319,7 @@ def main() -> int:
     """stdin의 PreToolUse JSON을 판정한다.
 
     Returns:
-        종료 코드 (0 통과, 1 내부 경고, 2 차단).
+        종료 코드 (0 통과, 1 내부 경고, 42 차단 — 래퍼가 2로 되매핑).
     """
     try:
         payload = json.loads(sys.stdin.read())
@@ -335,7 +343,7 @@ def main() -> int:
                 "(interactive creation does not work in this environment anyway).",
                 file=sys.stderr,
             )
-            return 2
+            return EXIT_BLOCK
         candidates = search_duplicates(invocation)
         if candidates is None:
             print(
@@ -346,7 +354,7 @@ def main() -> int:
             continue
         if candidates:
             print(_block_message(invocation, candidates), file=sys.stderr)
-            return 2
+            return EXIT_BLOCK
     return 0
 
 

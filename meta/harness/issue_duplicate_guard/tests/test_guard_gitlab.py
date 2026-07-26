@@ -12,9 +12,10 @@ fail-open 설계라 형식이 어긋나면 GitLab 쪽 중복 차단이 조용히
 (issue #9). 시드 이슈는 정리하지 않는다 — 환경 자체가 run.sh teardown으로
 일회성이다.
 
-검증 불가 경계: Claude Code가 훅을 실제 호출하는 구간과 settings.json의
-`uv run` 래퍼. 프로세스 경계까지는 test_module_entrypoint_blocks_duplicate가
-커버한다.
+검증 불가 경계: Claude Code가 훅을 실제 호출하는 구간. settings.json의
+`uv run` 셸 래퍼(42→2 되매핑)는 rules_checker의 셸 계약 테스트
+(test_hook_command_contract.py)가, 프로세스 경계까지는
+test_module_entrypoint_blocks_duplicate가 커버한다.
 """
 
 from __future__ import annotations
@@ -83,11 +84,11 @@ def _api(state: dict, method: str, path: str, form: dict | None = None) -> dict:
             return json.load(response)
     except urllib.error.HTTPError as exc:
         body = exc.read().decode(errors="replace")
-        pytest.fail(f"GitLab API {method} {path} 실패: HTTP {exc.code}\n{body}")
+        pytest.fail(f"GitLab API {method} {path} failed: HTTP {exc.code}\n{body}")
     except urllib.error.URLError as exc:
         pytest.fail(
-            f"GitLab API {method} {path} 연결 실패: {exc.reason} "
-            "(stale state.env 가능성 — meta/infra/gitlab/run.sh로 재기동)"
+            f"GitLab API {method} {path} connection failed: {exc.reason} "
+            "(possibly stale state.env — restart via meta/infra/gitlab/run.sh)"
         )
 
 
@@ -146,7 +147,7 @@ def gitlab_state() -> dict:
         환경 변수 복사본.
     """
     if shutil.which("glab") is None:
-        pytest.fail("glab CLI가 설치되어 있지 않다 — 통합 테스트 실행 불가")
+        pytest.fail("glab CLI is not installed — cannot run the integration tests")
     raw = _STATE_FILE.read_text(encoding="utf-8")
     parsed = dict(
         line.split("=", 1) for line in raw.splitlines() if "=" in line
@@ -154,7 +155,7 @@ def gitlab_state() -> dict:
     required = ("GITLAB_TESTENV_URL", "GITLAB_TESTENV_TOKEN", "GITLAB_TESTENV_PROJECT")
     missing = [key for key in required if not parsed.get(key)]
     if missing:
-        pytest.fail(f"state.env에 필수 키 누락: {missing}")
+        pytest.fail(f"state.env is missing required key(s): {missing}")
 
     host = parsed["GITLAB_TESTENV_URL"].removeprefix("http://")
     env = {
@@ -269,7 +270,7 @@ def test_search_duplicates_finds_seeded_issue(
         repo=guard_glab_env["project"], override=False,
     )
     candidates = guard.search_duplicates(invocation)
-    assert candidates is not None, "검색이 실패(fail-open)로 수렴 — glab 인증/환경 확인"
+    assert candidates is not None, "search collapsed to fail-open — check glab auth/environment"
     assert any(seeded_issues["open"] in candidate for candidate in candidates), candidates
 
 
@@ -281,7 +282,7 @@ def test_duplicate_create_blocked_end_to_end(
 ) -> None:
     code = _run_main(monkeypatch, _create_payload(guard_glab_env, seeded_issues["open"]))
     err = capsys.readouterr().err
-    assert code == 2, f"차단(exit 2)이어야 하는데 {code} — stderr:\n{err}"
+    assert code == 42, f"expected block (exit 42), got {code} — stderr:\n{err}"
     assert any(line.strip().startswith("#") for line in err.splitlines()), err
     assert guard.OVERRIDE_TOKEN in err
 
@@ -298,8 +299,8 @@ def test_module_entrypoint_blocks_duplicate(
         env={**os.environ, "PYTHONPATH": str(_META_DIR)},
         capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT,
     )
-    assert result.returncode == 2, (
-        f"exit 2여야 하는데 {result.returncode} — stderr:\n{result.stderr}"
+    assert result.returncode == 42, (
+        f"expected exit 42, got {result.returncode} — stderr:\n{result.stderr}"
     )
     assert guard.OVERRIDE_TOKEN in result.stderr
 
@@ -312,9 +313,9 @@ def test_unique_title_passes_end_to_end(
     title = f"nodup{uuid.uuid4().hex}"
     code = _run_main(monkeypatch, _create_payload(guard_glab_env, title))
     err = capsys.readouterr().err
-    assert code == 0, f"통과(exit 0)여야 하는데 {code} — stderr:\n{err}"
+    assert code == 0, f"expected pass (exit 0), got {code} — stderr:\n{err}"
     # fail-open 경유 가짜 통과 차단: 검색이 실제 실행되어 빈 결과였음을 구분한다.
-    assert "duplicate check skipped" not in err, f"검색이 실행되지 않고 fail-open됨:\n{err}"
+    assert "duplicate check skipped" not in err, f"search did not run and failed open:\n{err}"
 
 
 def test_override_prefix_passes_end_to_end(
@@ -328,4 +329,4 @@ def test_override_prefix_passes_end_to_end(
     err = capsys.readouterr().err
     assert code == 0
     # override 경로는 검색 자체를 건너뛰므로 출력이 전혀 없어야 한다.
-    assert err == "", f"override 경로는 출력이 없어야 함:\n{err}"
+    assert err == "", f"override path must produce no output:\n{err}"

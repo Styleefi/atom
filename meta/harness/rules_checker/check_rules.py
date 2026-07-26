@@ -7,20 +7,28 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
 2. tier 값이 허용된 등급(principle | convention)인지,
    enforce 값이 허용된 그릇(claude-md | skill | hook)인지
 3. id가 파일명(stem)과 일치하는지
-4. deployed-to 대상 파일이 저장소에 실제 존재하는지
+4. deployed-to가 저장소 내 상대 경로이고 대상 파일이 실제 존재하는지
 5. 실배포 확인 — claude-md 그릇: 대상 파일이 `@meta/rules/<파일명>` import를
-   실제로 포함하는지. hook 그릇: deployed-to(settings JSON)가 규칙 id에서
-   도출한 harness 모듈(`harness.<id의 -를 _로>`)을 참조하고 그 harness
-   패키지가 실제 존재하는지. skill 그릇: deployed-to가 `.claude/skills/`
-   아래의 SKILL.md이고 그 SKILL.md가 `meta/rules/<파일명>`을 참조하는지
-   (규칙 본문의 SSOT는 meta/rules/, SKILL.md는 참조만 한다는 v1 규약).
+   실제로 포함하는지. hook 그릇(v2): deployed-to(settings JSON)의 hooks 구조
+   안에서 규칙 id에서 도출한 harness 모듈(`harness.<id의 -를 _로>`)을 `-m`으로
+   참조하는 커맨드가 1개 이상이고, 참조하는 모든 커맨드가 `blocking`
+   frontmatter가 고르는 정본 래퍼 템플릿과 정확히 일치하며, 그 harness
+   패키지가 실제 존재하는지(#31 — uv 자체 오류의 exit 2가 차단으로 새지
+   않는 배선 강제). skill 그릇:
+   deployed-to가 `.claude/skills/` 아래의 SKILL.md이고 그 SKILL.md가
+   `meta/rules/<파일명>`을 참조하는지 (규칙 본문의 SSOT는 meta/rules/,
+   SKILL.md는 참조만 한다는 v1 규약).
    검증 로직이 없는 그릇은 통과가 아니라 **거부**한다(강화 사양).
 
-규칙 단위 검사와 별개로 repo-level 검사를 둘 수행한다.
+규칙 단위 검사와 별개로 repo-level 검사를 셋 수행한다.
 
 - 템플릿 동기화: root CLAUDE.md와 child 템플릿(meta/templates/CLAUDE.template.md)
   의 `@meta/rules/` import 집합이 동일한지 — 수동 동기화 지점의 침묵 드리프트를
   양방향으로 차단한다.
+- hook 배선 역방향 스윕: 프로젝트 설정 파일(.claude/settings*.json — hook
+  규칙이 없어도 무조건)과 hook 규칙들의 deployed-to에 있는 모든 훅 커맨드 중
+  `-m harness.*`를 참조하는 것이 두 정본 래퍼 템플릿 중 하나와 정확히
+  일치하는지 — 규칙 파일 없이 추가된 구식 배선(#31의 exec 패턴)의 재발을 막는다.
 - 인벤토리 커버리지: 오너용 인터페이스 인벤토리(meta/README.md)의 두 표가
   실체와 일치하는지 — `## Rules` 표는 meta/rules/의 규칙 집합과, `## Functional
   artifacts` 표는 규칙이 뒷받침하지 않는 스킬/하니스/인프라 집합과 양방향으로
@@ -50,6 +58,35 @@ VERIFIABLE_ENFORCE = {"claude-md", "skill", "hook"}
 VALID_TIER = {"principle", "convention"}
 
 REQUIRED_FIELDS = ("id", "tier", "enforce", "deployed-to")
+# `blocking`(hook 전용, bool)은 REQUIRED_FIELDS에 넣지 않는다 — 누락 검사가
+# `not data.get(f)`라서 정당한 `blocking: false`를 누락으로 오탐한다.
+
+# hook 커맨드 정본 템플릿(#31). settings JSON의 harness 훅 커맨드는 아래 두
+# 형태 중 하나와 바이트 단위로 일치해야 한다. 차단형: uv run을 if 조건으로
+# 감싸(훅 실행 셸이 set -e여도 동작 동일 — rc=$? 단독 패턴은 -e에서 uv 실패
+# 시점에 셸이 uv 코드로 종료해 누출이 재발한다) 가드의 sentinel 42만 차단(2)
+# 으로 되매핑하고, 그 외 nonzero(uv 자체 오류 2 포함)는 전부 1(비차단 경고)로
+# 수렴한다. 비차단형: 어떤 실패도 1로 수렴해 구조적으로 차단이 불가능하다.
+# {module} 치환은 str.format이 아니라 .replace를 쓴다 — 템플릿에 셸 ${VAR}
+# 표기가 들어와도 안전하도록. 래퍼의 실동작은 셸 계약 테스트가 /bin/sh로 핀.
+HOOK_COMMAND_BLOCKING = (
+    'if command -v uv >/dev/null 2>&1; then '
+    'if uv run --directory "$CLAUDE_PROJECT_DIR/meta" python -m {module}; '
+    'then :; else rc=$?; if [ "$rc" -eq 42 ]; then exit 2; else exit 1; fi; fi; fi'
+)
+HOOK_COMMAND_NON_BLOCKING = (
+    'if command -v uv >/dev/null 2>&1; then '
+    'uv run --directory "$CLAUDE_PROJECT_DIR/meta" python -m {module} || exit 1; fi'
+)
+
+# 훅 커맨드에서 `-m` 플래그로 실행되는 harness 모듈을 뽑는 패턴. 독립 `-m`만
+# 인정해(좌측 (?<!\S)) `--m`·`run-m` 같은 내부 매치를 배제하고, 인터프리터
+# 표기(python/python3/uv run)와 무관하게 변형 배선을 잡는다. `\s*`는 붙여쓰기
+# (`-mharness.x` — 유효한 인터프리터 호출)까지 커버. 점 포함 캡처로 하위모듈
+# 진입점(harness.a.b)도 온전히 뽑는다. 한계: 따옴표로 감싼 모듈명
+# (`-m "harness.x"`)은 미감지 — ruled hook이면 "not referenced" 위반으로
+# 표면화되고, unruled는 bash -c 간접 실행과 같은 기존 잔여 클래스.
+_HOOK_MODULE_RE = re.compile(r"(?<!\S)-m\s*(harness\.\w+(?:\.\w+)*)")
 
 # CLAUDE.md/템플릿에서 규칙 import 줄을 뽑는 패턴.
 IMPORT_RE = re.compile(r"@meta/rules/\S+\.md")
@@ -127,6 +164,72 @@ def parse_frontmatter(text: str) -> tuple[dict | None, str | None]:
     return data, None
 
 
+def _hook_commands(settings: dict) -> list[str]:
+    """settings JSON의 hooks 구조에서 커맨드 문자열을 전부 뽑는다.
+
+    구조가 어긋난 노드는 조용히 건너뛴다 — 이 함수는 수집기일 뿐이고,
+    그 결과 빠진 참조는 상위 검사가 "not referenced" 위반으로 표면화한다.
+
+    Args:
+        settings: 파싱된 settings JSON 최상위 객체.
+
+    Returns:
+        모든 이벤트에 걸친 훅 커맨드 문자열 목록.
+    """
+    commands: list[str] = []
+    hooks = settings.get("hooks")
+    if not isinstance(hooks, dict):
+        return commands
+    for event_entries in hooks.values():
+        if not isinstance(event_entries, list):
+            continue
+        for entry in event_entries:
+            if not isinstance(entry, dict):
+                continue
+            entry_hooks = entry.get("hooks")
+            if not isinstance(entry_hooks, list):
+                continue
+            for hook in entry_hooks:
+                if isinstance(hook, dict) and isinstance(hook.get("command"), str):
+                    commands.append(hook["command"])
+    return commands
+
+
+def _references_module(command: str, module: str) -> bool:
+    """커맨드가 해당 harness 모듈을 `-m`으로 실행하는지 판정한다.
+
+    `python -m` 리터럴이 아니라 독립 `-m` 플래그에 앵커해 python3·공백 변형·
+    붙여쓰기(`-mharness.x`)·`uv run -m` 배선도 잡는다. 우측 lookahead로
+    harness.foo가 harness.foo_v2나 하위모듈(harness.foo.cli)에 오매치되는
+    것을 막는다.
+
+    Args:
+        command: 훅 커맨드 문자열.
+        module: `harness.<이름>` 형태의 모듈명.
+
+    Returns:
+        참조하면 True.
+    """
+    pattern = r"(?<!\S)-m\s*" + re.escape(module) + r"(?![\w.])"
+    return re.search(pattern, command) is not None
+
+
+def _skill_path_shape_violations(rel: Path, deployed_to: str) -> list[str]:
+    """skill 그릇 deployed-to의 경로 형태 위반을 돌려준다(문자열 검사).
+
+    파일 존재·경로 유효성과 무관한 검사라 check_rule_file이 존재 검사 앞
+    단일 지점에서 호출한다 — bad_path/missing-target 어느 조기 return도
+    형태 위반을 가리지 못하게. 다른 곳에서 재호출하면 이중 보고가 된다.
+    """
+    deployed = Path(deployed_to)
+    if deployed.parts[:2] != (".claude", "skills") or deployed.name != "SKILL.md":
+        return [
+            f"{rel}: skill deployed-to '{deployed_to}' must be a "
+            "SKILL.md under .claude/skills/"
+        ]
+    return []
+
+
 def check_rule_file(rule_path: Path, root: Path) -> list[str]:
     """규칙 파일 하나를 검증하고 위반 목록을 돌려준다.
 
@@ -170,6 +273,125 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         )
         return violations
 
+    # deployed-to는 저장소 내 상대 경로여야 한다. 절대경로/..는 root와의 join을
+    # 통째로 대체하거나 검사 대상을 저장소 밖으로 보낸다(#40 리뷰). 위반이어도
+    # 진행한다 — 경로와 무관한 검사(blocking 스키마, hook 패키지 실존)는 여전히
+    # 수행 가능하며, 조기 return은 같은 규칙의 다른 결함을 가린다.
+    deployed = PurePosixPath(str(data["deployed-to"]))
+    bad_path = deployed.is_absolute() or ".." in deployed.parts
+    if bad_path:
+        violations.append(
+            f"{rel}: deployed-to '{data['deployed-to']}' must be a "
+            "repo-root-relative path inside the repository"
+        )
+
+    # blocking 스키마(hook 전용). 위반이어도 계속 진행한다 — 존재·참조·패키지
+    # 검사는 blocking과 무관하고, 템플릿 비교만 유효한 bool을 요구하므로 그
+    # 비교를 건너뛰면 된다(조기 return은 같은 규칙의 다른 결함을 가린다).
+    if enforce == "hook":
+        if "blocking" not in data:
+            violations.append(
+                f"{rel}: hook rule must declare 'blocking: true | false' "
+                "(selects the canonical wrapper template)"
+            )
+        elif not isinstance(data["blocking"], bool):
+            violations.append(
+                f"{rel}: 'blocking' must be a boolean, got {data['blocking']!r}"
+            )
+    elif "blocking" in data:
+        violations.append(
+            f"{rel}: 'blocking' is only valid for hook rules (enforce: hook)"
+        )
+
+    if enforce == "hook":
+        # hook 그릇 규약(v2): 규칙 id에서 harness 모듈명을 도출해
+        # (1) 대상 settings JSON의 hooks 구조 안에 그 모듈을 `-m`으로 참조하는
+        #     커맨드가 1개 이상 있고(복수 matcher/이벤트 배선 허용),
+        # (2) 참조하는 모든 커맨드가 blocking 여부가 고르는 정본 래퍼 템플릿과
+        #     정확히 일치하며(#31 — uv 자체 exit 2가 차단으로 새는 배선 차단),
+        # (3) meta/harness/ 아래에 해당 패키지가 실존해야 실배포로 본다.
+        # 이 분기는 조기 return 없이 위반을 끝까지 수집한다(#40 리뷰 2R: 새로
+        # 추가한 조기 return들이 blocking에서 제거했던 가림 패턴을 재도입 —
+        # 사례가 아니라 구조로 닫는다). 경로/대상/JSON 문제는 각자 보고하고
+        # 의존 검사만 건너뛰며, 패키지 실존 검사는 항상 수행한다.
+        # 한계: 이벤트/matcher 위치까지는 보지 않는다 — 차단형 템플릿이
+        # UserPromptSubmit 아래에 있어도 통과한다(기계 검증은 범위 밖 결정).
+        module_name = "harness." + rule_path.stem.replace("-", "_")
+        settings: dict | None = None
+        if not bad_path:
+            target = root / str(data["deployed-to"])
+            if not target.is_file():
+                violations.append(
+                    f"{rel}: deployed-to target '{data['deployed-to']}' does not exist"
+                )
+            else:
+                # problem 변수로 실패를 명시 추적한다 — parsed의 None을 실패
+                # sentinel로 겸용하면 JSON 리터럴 null이 무위반 통과한다
+                # (최종 게이트 리뷰: 침묵 통과 회귀).
+                problem: str | None = None
+                parsed: object = None
+                try:
+                    parsed = json.loads(target.read_text(encoding="utf-8"))
+                except OSError:
+                    problem = "cannot be read"
+                except ValueError:
+                    problem = "is not valid JSON"
+                if problem is None and not isinstance(parsed, dict):
+                    problem = "is not a JSON object"
+                if problem is not None:
+                    violations.append(
+                        f"{rel}: deployed-to target '{data['deployed-to']}' {problem}"
+                    )
+                else:
+                    assert isinstance(parsed, dict)
+                    settings = parsed
+        if settings is not None:
+            commands = _hook_commands(settings)
+            matching = [c for c in commands if _references_module(c, module_name)]
+            if not matching:
+                violations.append(
+                    f"{rel}: '{data['deployed-to']}' does not reference the "
+                    f"'{module_name}' hook module — declared but not actually deployed"
+                )
+            elif isinstance(data.get("blocking"), bool):
+                # blocking이 무효(부재/비bool)면 위에서 이미 위반 — 템플릿
+                # 선택이 불가능하므로 형태 비교만 건너뛴다.
+                template = (
+                    HOOK_COMMAND_BLOCKING
+                    if data["blocking"]
+                    else HOOK_COMMAND_NON_BLOCKING
+                )
+                expected = template.replace("{module}", module_name)
+                shape = "blocking" if data["blocking"] else "non-blocking"
+                for command in matching:
+                    if command != expected:
+                        violations.append(
+                            f"{rel}: hook command for '{module_name}' does not "
+                            f"match the canonical {shape} wrapper (#31 fail-open "
+                            f"wiring) — got: {command} — expected exactly: {expected}"
+                        )
+        package_dir = root / "meta" / "harness" / rule_path.stem.replace("-", "_")
+        if not package_dir.is_dir():
+            violations.append(
+                f"{rel}: hook harness package "
+                f"'meta/harness/{rule_path.stem.replace('-', '_')}/' does not exist"
+            )
+        return violations
+
+    # skill 그릇의 SKILL.md 경로 형태는 문자열 검사라 파일 존재·경로 유효성과
+    # 무관하게 항상 여기서 수행한다 — bad_path든 missing-target이든 조기
+    # return이 형태 위반을 가리지 않게(탈출 관찰 라운드: bad_path만 고치고
+    # missing-target 경로에 같은 가림이 남아 있었다).
+    skill_shape_violations: list[str] = []
+    if enforce == "skill":
+        skill_shape_violations = _skill_path_shape_violations(
+            rel, str(data["deployed-to"])
+        )
+        violations.extend(skill_shape_violations)
+
+    if bad_path:
+        return violations
+
     target = root / str(data["deployed-to"])
     if not target.is_file():
         violations.append(
@@ -185,41 +407,13 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
                 f"{rel}: '{data['deployed-to']}' does not contain the "
                 f"'{import_line}' import — declared but not actually deployed"
             )
-    elif enforce == "hook":
-        # hook 그릇 규약(v1): 규칙 id에서 harness 모듈명을 도출해
-        # (1) 대상 settings JSON이 그 모듈을 command로 참조하고
-        # (2) meta/harness/ 아래에 해당 패키지가 실존해야 실배포로 본다.
-        # 모듈 참조는 substring 검사이며 PreToolUse 위치까지는 보지 않는다.
-        module_name = "harness." + rule_path.stem.replace("-", "_")
-        target_text = target.read_text(encoding="utf-8")
-        try:
-            json.loads(target_text)
-        except ValueError:
-            violations.append(
-                f"{rel}: deployed-to target '{data['deployed-to']}' is not valid JSON"
-            )
-            return violations
-        if module_name not in target_text:
-            violations.append(
-                f"{rel}: '{data['deployed-to']}' does not reference the "
-                f"'{module_name}' hook module — declared but not actually deployed"
-            )
-        package_dir = root / "meta" / "harness" / rule_path.stem.replace("-", "_")
-        if not package_dir.is_dir():
-            violations.append(
-                f"{rel}: hook harness package "
-                f"'meta/harness/{rule_path.stem.replace('-', '_')}/' does not exist"
-            )
     elif enforce == "skill":
         # skill 그릇 규약(v1): deployed-to는 .claude/skills/ 아래의 SKILL.md여야
         # 하고, 그 SKILL.md가 규칙 파일을 참조해야 실배포로 본다. 규칙 본문의
         # SSOT는 meta/rules/이고 SKILL.md는 참조만 한다(내용 드리프트 방지).
-        deployed = Path(str(data["deployed-to"]))
-        if deployed.parts[:2] != (".claude", "skills") or deployed.name != "SKILL.md":
-            violations.append(
-                f"{rel}: skill deployed-to '{data['deployed-to']}' must be a "
-                "SKILL.md under .claude/skills/"
-            )
+        # 경로 형태 검사는 위(존재 검사 전)에서 수행됨 — 형태가 틀리면 참조
+        # 검사는 무의미하므로 여기서 종료.
+        if skill_shape_violations:
             return violations
         reference = f"meta/rules/{rule_path.name}"
         if reference not in target.read_text(encoding="utf-8"):
@@ -433,6 +627,111 @@ def check_inventory(root: Path) -> list[str]:
     return violations
 
 
+def check_hook_wiring(root: Path) -> list[str]:
+    """harness 훅 커맨드가 전부 정본 래퍼 템플릿인지 검사한다(repo-level).
+
+    규칙별 검사는 "규칙 → 배선" 방향만 보므로, 규칙 파일 없이 추가된 훅
+    커맨드는 아무도 형태를 검증하지 않는다 — 구식 exec 배선이 그 틈으로
+    재발하면 uv 자체 오류(exit 2)가 차단으로 새는 #31이 되돌아온다. 그래서
+    Claude Code가 읽는 프로젝트 설정 파일(.claude/settings.json,
+    settings.local.json — hook 규칙이 없어도 무조건)과 hook 규칙들의
+    deployed-to 집합을 대상으로, `-m harness.*`를 참조하는 모든 커맨드가
+    두 정본 템플릿 중 하나와 정확히 일치하는지 역방향으로도 훑는다.
+    하위모듈 진입점(harness.a.b)은 여기서만 허용된다 — ruled hook의 규칙별
+    검사는 규칙 id 파생 단일 모듈을 계속 요구한다. harness 참조가 없는
+    커맨드는 meta 소관 밖이므로 검사하지 않는다(자식 프로젝트의 자체 훅을
+    과잉 규제하지 않기 위함).
+
+    한계: settings.local.json은 커밋되지 않으므로 CI에서는 검증 불가(로컬
+    실행에서만 잡힘). 읽기·파싱이 불가능한 규칙 파일이 선언한 비표준
+    deployed-to는 대상을 알 수 없어 그 파일이 고쳐질 때까지 스윕할 수 없다 —
+    해당 규칙은 per-rule 전역 방어가 internal error로 보고해 run이 red이므로
+    침묵 통과는 아니며, 인벤토리 보류와 같은 공표된 지연 패턴이다. 읽기 실패(OSError)·JSON 파싱 실패·비객체 대상은 규칙
+    유무와 무관하게 위반으로 소리낸다 — 규칙별 검사가 frontmatter 오류로
+    조기 종료하면 아무도 보고하지 않는 조합이 생기기 때문이며(최종 게이트
+    리뷰), 건강한 ruled 대상의 이중 보고는 수용된 패턴이다.
+    따옴표 감싼 모듈명(`-m "harness.x"`)은 미감지 —
+    ruled hook이면 "not referenced" 위반으로 표면화되고, unruled는
+    bash -c 간접 실행과 같은 기존 잔여 클래스.
+
+    Args:
+        root: 저장소 루트.
+
+    Returns:
+        위반 메시지 목록. 비어 있으면 통과.
+    """
+    unconditional: set[Path] = {
+        root / ".claude" / "settings.json",
+        root / ".claude" / "settings.local.json",
+    }
+    ruled: set[Path] = set()
+    for rule_path in rule_files(root):
+        try:
+            data, error = parse_frontmatter(rule_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 — 아래 참조
+            # 규칙 파일 하나가 스윕 전체를 뭉개면 안 된다. 가드는 예외 "타입"이
+            # 아니라 반복 "영역"을 감싼다 — OSError만(깨진 symlink), 다음엔
+            # UnicodeDecodeError(비UTF-8), 다음엔 파싱 예외(YAML RecursionError)
+            # 로 같은 가림이 세 번 재발한 교훈. 문제의 규칙 파일 자체는
+            # per-rule 전역 방어가 internal error로 보고하고(run은 red), 그
+            # 파일이 선언한 비표준 deployed-to는 파일이 고쳐질 때까지 스윕
+            # 불가 — 인벤토리 보류와 같은 공표된 지연 패턴(docstring 참조).
+            continue
+        if error or data is None:
+            continue
+        if data.get("enforce") == "hook" and data.get("deployed-to"):
+            deployed = PurePosixPath(str(data["deployed-to"]))
+            if deployed.is_absolute() or ".." in deployed.parts:
+                # 저장소 밖 경로 — 규칙별 검사가 위반 보고. relative_to는
+                # 어휘적이라 ..를 못 거르므로(#40 리뷰 2R) 여기서 배제한다.
+                continue
+            ruled.add(root / str(data["deployed-to"]))
+
+    violations: list[str] = []
+    for target in sorted(unconditional | ruled):
+        if not target.is_file():
+            continue
+        rel = target.relative_to(root)
+        try:
+            settings: object = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            settings = None
+        if not isinstance(settings, dict):
+            # ruled 대상도 예외 없이 보고한다 — 규칙별 검사는 frontmatter 오류
+            # 등으로 조기 종료하면 여기까지 못 오므로, "규칙이 대신 보고한다"는
+            # 면제 전제는 성립하지 않는다(최종 게이트 리뷰). ruled 대상의 이중
+            # 보고는 per-rule/스윕 이중 검사와 같은 수용된 패턴.
+            violations.append(
+                f"{rel}: cannot verify hook wiring — file is unreadable or "
+                "not a JSON object"
+            )
+            continue
+        for command in _hook_commands(settings):
+            tokens = _HOOK_MODULE_RE.findall(command)
+            if not tokens:
+                continue
+            if len(set(tokens)) > 1:
+                violations.append(
+                    f"{rel}: hook command references multiple harness modules "
+                    f"({', '.join(sorted(set(tokens)))}) — split into one "
+                    "canonical hook command per module"
+                )
+                continue
+            module = tokens[0]
+            expected_blocking = HOOK_COMMAND_BLOCKING.replace("{module}", module)
+            expected_non_blocking = HOOK_COMMAND_NON_BLOCKING.replace(
+                "{module}", module
+            )
+            if command not in (expected_blocking, expected_non_blocking):
+                violations.append(
+                    f"{rel}: hook command referencing '{module}' matches neither "
+                    f"canonical wrapper (#31 fail-open wiring) — got: {command} "
+                    f"— expected exactly (blocking): {expected_blocking} — or "
+                    f"(non-blocking): {expected_non_blocking}"
+                )
+    return violations
+
+
 def check_rules(root: Path) -> list[str]:
     """meta/rules/ 전체와 repo-level 동기화를 검증하고 위반 목록을 돌려준다.
 
@@ -440,19 +739,38 @@ def check_rules(root: Path) -> list[str]:
         root: 저장소 루트.
 
     Returns:
-        전 규칙 파일 + 템플릿 동기화 + 인벤토리 커버리지의 위반 메시지 목록.
-        README.md는 규칙이 아니므로 제외한다.
+        전 규칙 파일 + 템플릿 동기화 + hook 배선 역방향 스윕 + 인벤토리
+        커버리지의 위반 메시지 목록. README.md는 규칙이 아니므로 제외한다.
     """
     rules_dir = root / "meta" / "rules"
     if not rules_dir.is_dir():
         return [f"rules directory not found: {rules_dir.relative_to(root)}"]
 
+    # 사망 부류 방어(#40 리뷰 2R: ValueError를 고치자 PermissionError가 나왔다 —
+    # 지점 단위 방어는 이 부류를 못 닫는다). 어떤 예외든 일반 위반과 구별되는
+    # "internal checker error" 위반으로 변환한다 — 검증기는 절대 traceback으로
+    # 죽지 않고, run은 red로 유지되며, 다른 규칙의 판정은 보존된다.
     rule_violations: list[str] = []
     for rule_path in rule_files(root):
-        rule_violations.extend(check_rule_file(rule_path, root))
+        try:
+            rule_violations.extend(check_rule_file(rule_path, root))
+        except Exception as exc:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
+            rule_violations.append(
+                f"{rule_path.relative_to(root)}: internal checker error — "
+                f"{type(exc).__name__}: {exc}"
+            )
 
     violations = list(rule_violations)
-    violations.extend(check_template_sync(root))
+    # 역방향 스윕은 인벤토리와 달리 규칙 위반이 있어도 미루지 않는다 —
+    # frontmatter 분류에 의존하지 않고, 파싱된 hook 규칙만으로 동작한다.
+    for repo_check in (check_template_sync, check_hook_wiring):
+        try:
+            violations.extend(repo_check(root))
+        except Exception as exc:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
+            violations.append(
+                f"internal checker error in {repo_check.__name__} — "
+                f"{type(exc).__name__}: {exc}"
+            )
     if rule_violations:
         # 인벤토리의 아티팩트 분류는 규칙 frontmatter에서 파생된다. 깨진
         # 레지스트리 위에서 분류하면 규칙이 뒷받침하던 하니스/스킬을 '규칙 없는
@@ -463,7 +781,13 @@ def check_rules(root: Path) -> list[str]:
             f"{len(rule_violations)} rule violation(s) above and re-run"
         )
     else:
-        violations.extend(check_inventory(root))
+        try:
+            violations.extend(check_inventory(root))
+        except Exception as exc:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
+            violations.append(
+                f"internal checker error in check_inventory — "
+                f"{type(exc).__name__}: {exc}"
+            )
     return violations
 
 

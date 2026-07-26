@@ -15,12 +15,16 @@ meta/README.md를 가져야 한다. 이를 개별 테스트에 떠넘기지 않�
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 
 import pytest
 
 from harness.rules_checker import check_rules as check_rules_module
 from harness.rules_checker.check_rules import (
+    HOOK_COMMAND_BLOCKING,
+    HOOK_COMMAND_NON_BLOCKING,
     INVENTORY_ROW_RE,
     check_rules,
     find_repo_root,
@@ -239,12 +243,26 @@ def test_unverifiable_vessels_are_rejected(
     assert "is not implemented" in violations[0]
 
 
-def hook_rule(rule_id: str) -> str:
-    """유효한 hook 규칙 본문을 만든다."""
+def hook_rule(rule_id: str, blocking: str | None = "true") -> str:
+    """유효한 hook 규칙 본문을 만든다. blocking=None이면 필드를 뺀다."""
+    blocking_line = f"blocking: {blocking}\n" if blocking is not None else ""
     return (
         f"---\nid: {rule_id}\ntier: convention\nenforce: hook\n"
-        "deployed-to: .claude/settings.json\n---\n\nbody\n"
+        f"deployed-to: .claude/settings.json\n{blocking_line}---\n\nbody\n"
     )
+
+
+def hook_settings(*commands: str) -> str:
+    """주어진 커맨드들로 훅 하나짜리 settings JSON을 만든다."""
+    return json.dumps(
+        {"hooks": {"PreToolUse": [{"hooks": [{"command": c} for c in commands]}]}}
+    )
+
+
+def canonical_command(module: str, blocking: bool = True) -> str:
+    """정본 템플릿에서 훅 커맨드를 만든다 — 픽스처가 상수와 드리프트하지 않게."""
+    template = HOOK_COMMAND_BLOCKING if blocking else HOOK_COMMAND_NON_BLOCKING
+    return template.replace("{module}", module)
 
 
 def make_hook_deployment(root: Path, rule_id: str, settings_text: str) -> None:
@@ -257,7 +275,15 @@ def make_hook_deployment(root: Path, rule_id: str, settings_text: str) -> None:
 def test_valid_hook_rule_passes(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
-    settings = '{"hooks": {"PreToolUse": [{"hooks": [{"command": "uv run python -m harness.my_guard"}]}]}}'
+    settings = hook_settings(canonical_command("harness.my_guard"))
+    make_hook_deployment(root, "my-guard", settings)
+    assert check_rules(root) == []
+
+
+def test_valid_non_blocking_hook_rule_passes(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard", blocking="false"))
+    settings = hook_settings(canonical_command("harness.my_guard", blocking=False))
     make_hook_deployment(root, "my-guard", settings)
     assert check_rules(root) == []
 
@@ -267,8 +293,10 @@ def test_hook_rule_with_broken_settings_json(tmp_path: Path) -> None:
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
     make_hook_deployment(root, "my-guard", "{not json")
     violations = rule_violations(root)
-    assert len(violations) == 1
-    assert "is not valid JSON" in violations[0]
+    # per-rule의 정밀 메시지 + 스윕의 검증 불가 보고(면제 없음 — 최종 게이트 리뷰).
+    assert len(violations) == 2
+    assert any("is not valid JSON" in v for v in violations)
+    assert any("cannot verify hook wiring" in v for v in violations)
 
 
 def test_hook_rule_without_module_reference(tmp_path: Path) -> None:
@@ -286,13 +314,545 @@ def test_hook_rule_without_harness_package(tmp_path: Path) -> None:
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
     (root / ".claude").mkdir()
     (root / ".claude" / "settings.json").write_text(
-        '{"hooks": {"PreToolUse": [{"hooks": [{"command": "python -m harness.my_guard"}]}]}}',
-        encoding="utf-8",
+        hook_settings(canonical_command("harness.my_guard")), encoding="utf-8"
     )
     violations = rule_violations(root)
     assert len(violations) == 1
     assert "does not exist" in violations[0]
     assert "meta/harness/my_guard/" in violations[0]
+
+
+def test_hook_rule_with_legacy_exec_command_fails(tmp_path: Path) -> None:
+    # #31의 원형: exec 배선은 uv 자체 exit 2를 차단으로 흘린다 — 형태 위반.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    legacy = (
+        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
+        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.my_guard; fi'
+    )
+    make_hook_deployment(root, "my-guard", hook_settings(legacy))
+    violations = rule_violations(root)
+    # 규칙별 형태 검사와 역방향 스윕이 독립적으로 각자 잡는다 — 위반 2건.
+    assert len(violations) == 2
+    assert any("canonical blocking wrapper" in v for v in violations)
+    # 위반 메시지만으로 복붙 수정이 가능해야 한다 — 기대 정본을 그대로 담는다.
+    assert any(canonical_command("harness.my_guard") in v for v in violations)
+
+
+def test_hook_rule_shape_must_match_blocking_value(tmp_path: Path) -> None:
+    # blocking: false 규칙에 차단형 래퍼가 배선되면 형태 위반이다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard", blocking="false"))
+    settings = hook_settings(canonical_command("harness.my_guard", blocking=True))
+    make_hook_deployment(root, "my-guard", settings)
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "canonical non-blocking wrapper" in violations[0]
+
+
+def test_hook_rule_without_blocking_field(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard", blocking=None))
+    settings = hook_settings(canonical_command("harness.my_guard"))
+    make_hook_deployment(root, "my-guard", settings)
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "must declare 'blocking: true | false'" in violations[0]
+
+
+def test_hook_rule_with_non_bool_blocking(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard", blocking="maybe"))
+    settings = hook_settings(canonical_command("harness.my_guard"))
+    make_hook_deployment(root, "my-guard", settings)
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "'blocking' must be a boolean" in violations[0]
+
+
+def test_blocking_on_non_hook_rule_is_rejected(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    body = (
+        "---\nid: my-rule\ntier: principle\nenforce: claude-md\n"
+        "deployed-to: CLAUDE.md\nblocking: true\n---\n\nbody\n"
+    )
+    write_rule(root, "my-rule.md", body)
+    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "'blocking' is only valid for hook rules" in violations[0]
+
+
+def test_hook_rule_module_mention_outside_command_is_not_deployed(tmp_path: Path) -> None:
+    # hooks 구조 밖의 언급은 배포가 아니다 — v1 substring 검사와의 차이.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    settings = '{"hooks": {}, "note": "python -m harness.my_guard"}'
+    make_hook_deployment(root, "my-guard", settings)
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "declared but not actually deployed" in violations[0]
+
+
+def test_hook_rule_prefix_module_is_not_a_reference(tmp_path: Path) -> None:
+    # harness.my_guard는 harness.my_guard_v2 커맨드의 참조로 오인되면 안 된다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    settings = hook_settings(canonical_command("harness.my_guard_v2"))
+    make_hook_deployment(root, "my-guard", settings)
+    violations = rule_violations(root)
+    assert any("declared but not actually deployed" in v for v in violations)
+
+
+def test_hook_rule_referenced_twice_all_canonical_passes(tmp_path: Path) -> None:
+    # 복수 matcher/이벤트 배선은 정당하다 — 전부 정본이면 통과(리뷰 완화).
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    command = canonical_command("harness.my_guard")
+    make_hook_deployment(root, "my-guard", hook_settings(command, command))
+    assert check_rules(root) == []
+
+
+def test_hook_rule_referenced_twice_one_legacy_fails(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    legacy = (
+        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
+        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.my_guard; fi'
+    )
+    settings = hook_settings(canonical_command("harness.my_guard"), legacy)
+    make_hook_deployment(root, "my-guard", settings)
+    violations = rule_violations(root)
+    # 정본 커맨드는 통과하고, 구식 커맨드만 per-rule 형태 검사와 스윕이 각각 잡는다.
+    assert len(violations) == 2
+    assert any("canonical blocking wrapper" in v for v in violations)
+
+
+def test_sweep_flags_unruled_harness_hook(tmp_path: Path) -> None:
+    # 규칙 파일 없는 harness 훅도 정본 형태여야 한다 — 역방향 스윕.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    rogue = (
+        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
+        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.rogue; fi'
+    )
+    settings = hook_settings(canonical_command("harness.my_guard"), rogue)
+    make_hook_deployment(root, "my-guard", settings)
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "harness.rogue" in violations[0]
+    assert "matches neither canonical wrapper" in violations[0]
+    # 위반 메시지만으로 복붙 수정이 가능해야 한다 — 렌더링된 정본을 담는다.
+    assert canonical_command("harness.rogue") in violations[0]
+
+
+def test_sweep_runs_without_any_hook_rule(tmp_path: Path) -> None:
+    # settings.json은 hook 규칙이 하나도 없어도 무조건 스윕 대상이다(리뷰
+    # 발견: 자식이 규칙을 지우면 구식 배선이 무검증으로 남던 구멍).
+    root = make_repo(tmp_path)
+    legacy = (
+        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
+        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.rogue; fi'
+    )
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text(
+        hook_settings(legacy), encoding="utf-8"
+    )
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "harness.rogue" in violations[0]
+    assert "matches neither canonical wrapper" in violations[0]
+
+
+def test_sweep_covers_settings_local_json(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    make_hook_deployment(
+        root, "my-guard", hook_settings(canonical_command("harness.my_guard"))
+    )
+    legacy = (
+        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
+        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.local_rogue; fi'
+    )
+    (root / ".claude" / "settings.local.json").write_text(
+        hook_settings(legacy), encoding="utf-8"
+    )
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "settings.local.json" in violations[0]
+    assert "harness.local_rogue" in violations[0]
+
+
+def test_sweep_catches_python3_variant(tmp_path: Path) -> None:
+    # `python -m` 리터럴이 아닌 변형 표기도 -m 앵커로 잡는다(리뷰 발견).
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    variant = (
+        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
+        '"$CLAUDE_PROJECT_DIR/meta" python3 -m harness.rogue; fi'
+    )
+    settings = hook_settings(canonical_command("harness.my_guard"), variant)
+    make_hook_deployment(root, "my-guard", settings)
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "harness.rogue" in violations[0]
+
+
+def test_sweep_allows_canonical_submodule_entrypoint(tmp_path: Path) -> None:
+    # 하위모듈 진입점은 스윕에서 허용 — 정본 래핑이면 통과(리뷰 발견:
+    # 캡처 잘림으로 검사 불충족이던 케이스).
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    settings = hook_settings(
+        canonical_command("harness.my_guard"),
+        canonical_command("harness.my_tool.cli"),
+    )
+    make_hook_deployment(root, "my-guard", settings)
+    assert check_rules(root) == []
+
+
+def test_sweep_ignores_harness_like_paths(tmp_path: Path) -> None:
+    # `-m` 호출이 아닌 경로성 문자열(meta/harness.txt)은 모듈 참조가 아니다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    settings = hook_settings(
+        canonical_command("harness.my_guard"), "cat meta/harness.txt"
+    )
+    make_hook_deployment(root, "my-guard", settings)
+    assert check_rules(root) == []
+
+
+def test_ruled_hook_variant_spelling_gets_shape_violation(tmp_path: Path) -> None:
+    # ruled hook의 python3 변형은 오해 소지 있는 "not referenced"가 아니라
+    # 정확한 형태 위반으로 잡힌다(감지 확대의 개선점 핀).
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    variant = canonical_command("harness.my_guard").replace("python -m", "python3 -m")
+    make_hook_deployment(root, "my-guard", hook_settings(variant))
+    violations = rule_violations(root)
+    assert len(violations) == 2  # per-rule 형태 위반 + 스윕
+    assert any("does not match the canonical blocking wrapper" in v for v in violations)
+
+
+def test_absolute_deployed_to_is_rejected_not_crash(tmp_path: Path) -> None:
+    # 절대경로 deployed-to는 위반으로 보고되고 체커는 죽지 않는다(리뷰 발견:
+    # relative_to의 ValueError로 전체 체커 사망). 경로 위반이 경로 무관 검사
+    # (패키지 실존)를 가리지도 않는다(리뷰 2R).
+    root = make_repo(tmp_path)
+    outside = tmp_path / "outside-settings.json"
+    outside.write_text(
+        hook_settings(canonical_command("harness.my_guard")), encoding="utf-8"
+    )
+    body = (
+        "---\nid: my-guard\ntier: convention\nenforce: hook\n"
+        f"deployed-to: {outside}\nblocking: true\n---\n\nbody\n"
+    )
+    write_rule(root, "my-guard.md", body)
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("repo-root-relative" in v for v in violations)
+    assert any("does not exist" in v for v in violations)
+
+
+def test_bad_path_does_not_mask_blocking_and_package(tmp_path: Path) -> None:
+    # 경로 위반 + blocking 부재 + 패키지 부재 → 셋 다 한 번에 보고(리뷰 2R:
+    # 조기 return 가림 패턴을 hook 분기에서 구조적으로 제거했음을 핀).
+    root = make_repo(tmp_path)
+    body = (
+        "---\nid: my-guard\ntier: convention\nenforce: hook\n"
+        "deployed-to: /abs/settings.json\n---\n\nbody\n"
+    )
+    write_rule(root, "my-guard.md", body)
+    violations = rule_violations(root)
+    assert len(violations) == 3
+    assert any("repo-root-relative" in v for v in violations)
+    assert any("must declare 'blocking" in v for v in violations)
+    assert any("does not exist" in v for v in violations)
+
+
+def test_non_object_settings_does_not_mask_package(tmp_path: Path) -> None:
+    # 비객체 settings 위반이 패키지 부재를 가리면 안 된다(리뷰 2R).
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text("[]", encoding="utf-8")
+    violations = rule_violations(root)
+    assert len(violations) == 3
+    assert any("is not a JSON object" in v for v in violations)
+    assert any("does not exist" in v for v in violations)
+    assert any("cannot verify hook wiring" in v for v in violations)
+
+
+def test_broken_rule_plus_corrupt_settings_both_reported(tmp_path: Path) -> None:
+    # frontmatter가 깨진 hook 규칙 + 깨진 settings 조합 — 규칙별 검사가 조기
+    # 종료해도 스윕이 검증 불가를 보고해야 한다(최종 게이트 리뷰: 면제 전제
+    # 붕괴로 아무도 보고하지 않던 침묵 통과).
+    root = make_repo(tmp_path)
+    body = (
+        "---\nid: my-guard\ntier: bogus\nenforce: hook\n"
+        "deployed-to: .claude/settings.json\nblocking: true\n---\n\nbody\n"
+    )
+    write_rule(root, "my-guard.md", body)
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text("{not json", encoding="utf-8")
+    violations = rule_violations(root)
+    assert any("invalid tier" in v for v in violations)
+    assert any("cannot verify hook wiring" in v for v in violations)
+
+
+def test_broken_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
+    # 규칙 파일 하나가 안 읽혀도(깨진 symlink) 스윕의 배선 위반은 살아야
+    # 한다(최종 게이트 리뷰: 스윕 전체가 internal error 하나로 뭉개지던 가림).
+    root = make_repo(tmp_path)
+    (root / "meta" / "rules" / "broken.md").symlink_to(root / "nonexistent.md")
+    legacy = (
+        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
+        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.legacy; fi'
+    )
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text(
+        hook_settings(legacy), encoding="utf-8"
+    )
+    violations = rule_violations(root)
+    # per-rule 방어의 보고인지(스윕 붕괴 메시지가 아니라) 규칙 경로로 앵커한다.
+    assert any("meta/rules/broken.md: internal checker error" in v for v in violations)
+    assert any("harness.legacy" in v for v in violations)
+
+
+def test_non_utf8_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
+    # 비UTF-8 규칙 파일(UnicodeDecodeError — OSError가 아님)도 스윕을 뭉개면
+    # 안 된다(탈출 관찰 라운드: OSError만 잡던 가드가 같은 가림을 재발시킴).
+    root = make_repo(tmp_path)
+    (root / "meta" / "rules" / "badenc.md").write_bytes(b"\xbe\xbe\xbe")
+    legacy = (
+        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
+        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.legacy; fi'
+    )
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text(
+        hook_settings(legacy), encoding="utf-8"
+    )
+    violations = rule_violations(root)
+    assert any("meta/rules/badenc.md: internal checker error" in v for v in violations)
+    assert any("harness.legacy" in v for v in violations)
+
+
+def test_pathological_rule_yaml_does_not_kill_the_sweep(tmp_path: Path) -> None:
+    # 파싱 중 예외(YAML 중첩의 RecursionError — OSError도 UnicodeDecodeError도
+    # 아님)도 스윕을 뭉개면 안 된다(탈출 관찰 2R: 가드가 예외 타입만 넓히고
+    # 영역을 안 넓혀 같은 가림이 세 번째 재발).
+    root = make_repo(tmp_path)
+    (root / "meta" / "rules" / "deep.md").write_text(
+        "---\nx: " + "[" * 8000 + "\n---\n", encoding="utf-8"
+    )
+    legacy = (
+        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
+        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.legacy; fi'
+    )
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text(
+        hook_settings(legacy), encoding="utf-8"
+    )
+    violations = rule_violations(root)
+    # 형제 테스트들과 동일하게 "run은 red" 절반도 핀한다 — 규칙이 조용히
+    # 건너뛰어지는 회귀를 이 테스트만 놓치면 안 된다(최종 게이트 R6).
+    assert any("meta/rules/deep.md: internal checker error" in v for v in violations)
+    assert any("harness.legacy" in v for v in violations)
+
+
+def test_skill_missing_target_does_not_mask_shape(tmp_path: Path) -> None:
+    # 대상 파일 부재가 SKILL.md 형태 위반을 가리면 안 된다(탈출 관찰 라운드:
+    # bad_path만 고치고 missing-target 경로에 같은 가림이 남아 있었다).
+    root = make_repo(tmp_path)
+    write_rule(
+        root,
+        "my-style.md",
+        "---\nid: my-style\ntier: convention\nenforce: skill\n"
+        "deployed-to: docs/my-style.md\n---\n",
+    )
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("must be a SKILL.md under .claude/skills/" in v for v in violations)
+    assert any("does not exist" in v for v in violations)
+
+
+def test_skill_bad_path_does_not_mask_shape(tmp_path: Path) -> None:
+    # skill 그릇의 경로 위반이 SKILL.md 형태 위반을 가리면 안 된다(최종 게이트
+    # 리뷰: 가림 부류의 skill 잔재).
+    root = make_repo(tmp_path)
+    body = (
+        "---\nid: my-style\ntier: convention\nenforce: skill\n"
+        "deployed-to: /abs/not-a-skill.txt\n---\n\nbody\n"
+    )
+    write_rule(root, "my-style.md", body)
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("repo-root-relative" in v for v in violations)
+    assert any("must be a SKILL.md under .claude/skills/" in v for v in violations)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root는 mode 000도 읽을 수 있다")
+def test_unreadable_settings_is_a_violation_not_a_crash(tmp_path: Path) -> None:
+    # 읽기 불가 settings는 traceback이 아니라 위반이다(리뷰 2R: per-rule
+    # read_text가 OSError 미포착으로 체커 사망).
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    settings = hook_settings(canonical_command("harness.my_guard"))
+    make_hook_deployment(root, "my-guard", settings)
+    (root / ".claude" / "settings.json").chmod(0o000)
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("cannot be read" in v for v in violations)
+    assert any("cannot verify hook wiring" in v for v in violations)
+
+
+def test_sweep_reports_unruled_corrupt_settings(tmp_path: Path) -> None:
+    # hook 규칙이 없는 무조건 대상의 깨진 settings는 조용히 통과하면 안 된다
+    # (리뷰 2R: 아무도 대신 보고하지 않는 조합이 green으로 새던 구멍).
+    root = make_repo(tmp_path)
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text("{not json", encoding="utf-8")
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "cannot verify hook wiring" in violations[0]
+
+
+def test_sweep_catches_attached_m_spelling(tmp_path: Path) -> None:
+    # `-mharness.x` 붙여쓰기는 유효한 인터프리터 호출 — 스윕이 잡아야 한다(리뷰 2R).
+    root = make_repo(tmp_path)
+    attached = (
+        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
+        '"$CLAUDE_PROJECT_DIR/meta" python -mharness.rogue; fi'
+    )
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text(
+        hook_settings(attached), encoding="utf-8"
+    )
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "harness.rogue" in violations[0]
+
+
+def test_dotdot_deployed_to_is_not_swept(tmp_path: Path) -> None:
+    # ..로 저장소를 탈출하는 deployed-to는 스윕 대상에서 배제된다(리뷰 2R:
+    # relative_to는 어휘적이라 ..를 통과시켜 저장소 밖 파일을 검사하던 구멍).
+    root = make_repo(tmp_path / "repo")
+    sibling = tmp_path / "sibling"
+    sibling.mkdir()
+    rogue = (
+        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
+        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.outside_rogue; fi'
+    )
+    (sibling / "settings.json").write_text(hook_settings(rogue), encoding="utf-8")
+    body = (
+        "---\nid: my-guard\ntier: convention\nenforce: hook\n"
+        "deployed-to: ../sibling/settings.json\nblocking: true\n---\n\nbody\n"
+    )
+    write_rule(root, "my-guard.md", body)
+    violations = rule_violations(root)
+    # 경로 위반 + 패키지 부재만 — 저장소 밖 파일의 내용은 절대 검사되지 않는다.
+    assert len(violations) == 2
+    assert not any("outside_rogue" in v for v in violations)
+
+
+def test_sweep_flags_multi_module_command(tmp_path: Path) -> None:
+    # 한 커맨드가 harness 모듈 두 개를 참조하면 첫 토큰 기준 오보고 대신
+    # "모듈별 분리" 안내를 낸다(리뷰 2R).
+    root = make_repo(tmp_path)
+    compound = "python -m harness.a && python -m harness.b"
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text(
+        hook_settings(compound), encoding="utf-8"
+    )
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "multiple harness modules" in violations[0]
+    assert "harness.a" in violations[0] and "harness.b" in violations[0]
+
+
+def test_checker_never_raises_on_malformed_inputs(tmp_path: Path) -> None:
+    """사망 부류 방어: 어떤 깨진 입력에도 check_rules는 예외 대신 위반을 낸다.
+
+    지점 단위 방어(ValueError → 고침 → PermissionError)가 반복 실패한 부류라
+    전역 변환 + 이 퍼즈성 테스트로 구조적으로 닫는다(#40 리뷰 2R).
+    """
+    cases = [
+        # (규칙 본문, settings 내용 — None이면 파일 없음)
+        ("---\nid: my-guard\ntier: convention\nenforce: hook\n"
+         "deployed-to: /abs/x\nblocking: true\n---\n\nbody\n", None),
+        ("---\nid: my-guard\ntier: convention\nenforce: hook\n"
+         "deployed-to: ../up/x\nblocking: true\n---\n\nbody\n", None),
+        ("---\nid: my-guard\ntier: convention\nenforce: hook\n"
+         "deployed-to: .claude/settings.json\nblocking: [list]\n---\n\nbody\n",
+         "{not json"),
+        ("---\nid: my-guard\ntier: convention\nenforce: hook\n"
+         "deployed-to: .claude/settings.json\nblocking: true\n---\n\nbody\n",
+         '{"hooks": 42}'),
+        ("---\nid: my-guard\ntier: convention\nenforce: hook\n"
+         "deployed-to: .claude/settings.json\nblocking: true\n---\n\nbody\n",
+         '{"hooks": {"PreToolUse": [{"hooks": [{"command": 42}]}]}}'),
+        ("---\nid: [1, 2]\ntier: {a: b}\nenforce: hook\n"
+         "deployed-to: 5\nblocking: yes\n---\n\nbody\n", "[]"),
+    ]
+    for i, (rule_body, settings_text) in enumerate(cases):
+        root = make_repo(tmp_path / str(i))
+        write_rule(root, "my-guard.md", rule_body)
+        if settings_text is not None:
+            (root / ".claude").mkdir()
+            (root / ".claude" / "settings.json").write_text(
+                settings_text, encoding="utf-8"
+            )
+        # 예외 없이 위반 목록이 나오면 통과 — 내용은 각 시나리오 테스트가 핀.
+        assert isinstance(check_rules(root), list)
+
+
+def test_missing_blocking_does_not_mask_other_defects(tmp_path: Path) -> None:
+    # blocking 부재가 같은 규칙의 다른 결함(패키지 부재)을 가리면 안 된다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard", blocking=None))
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text(
+        hook_settings(canonical_command("harness.my_guard")), encoding="utf-8"
+    )
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("must declare 'blocking" in v for v in violations)
+    assert any("does not exist" in v for v in violations)
+
+
+def test_hook_rule_with_non_object_settings(tmp_path: Path) -> None:
+    # 배열 등 비객체 settings는 전용 메시지로 보고한다(리뷰 발견: "not
+    # referenced"로 오도하던 케이스). 스윕도 예외 없이 함께 보고한다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    make_hook_deployment(root, "my-guard", "[]")
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("is not a JSON object" in v for v in violations)
+    assert any("cannot verify hook wiring" in v for v in violations)
+
+
+def test_null_settings_is_rejected(tmp_path: Path) -> None:
+    # JSON 리터럴 null은 무위반 통과가 아니라 비객체 위반이다(최종 게이트
+    # 리뷰: parsed의 None 겸용 sentinel이 만든 침묵 통과 회귀).
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    make_hook_deployment(root, "my-guard", "null")
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("is not a JSON object" in v for v in violations)
+    assert any("cannot verify hook wiring" in v for v in violations)
+
+
+def test_sweep_ignores_non_harness_commands(tmp_path: Path) -> None:
+    # meta 소관 밖(자식 프로젝트의 자체 훅)은 스윕이 건드리지 않는다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    settings = hook_settings(
+        canonical_command("harness.my_guard"), "npx prettier --check ."
+    )
+    make_hook_deployment(root, "my-guard", settings)
+    assert check_rules(root) == []
 
 
 def skill_rule(rule_id: str, skill_name: str = "my-skill") -> str:
@@ -428,8 +988,7 @@ def test_inventory_full_fixture_passes(tmp_path: Path) -> None:
     make_skill_deployment(root, "my-skill", "meta/rules/my-style.md\n")
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
     (root / ".claude" / "settings.json").write_text(
-        '{"hooks": {"PreToolUse": [{"hooks": [{"command": "python -m harness.my_guard"}]}]}}',
-        encoding="utf-8",
+        hook_settings(canonical_command("harness.my_guard")), encoding="utf-8"
     )
     make_harness_package(root, "my_guard")
     # 규칙이 없는 셋은 전부 아티팩트 표에 실려야 한다.

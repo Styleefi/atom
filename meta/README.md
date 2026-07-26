@@ -59,7 +59,7 @@ Python packages under `meta/harness/`, run as modules from the meta uv project.
 
 | name | engagement | owner interface | behavior |
 |---|---|---|---|
-| `rules_checker` | on demand, and on every CI run | `uv run --directory meta python -m harness.rules_checker` | Verifies that every rule is deployed as declared, that the child template's import list matches root `CLAUDE.md`, and that this inventory matches reality. |
+| `rules_checker` | on demand, and on every CI run | `uv run --directory meta python -m harness.rules_checker` | Verifies that every rule is deployed as declared (for hook rules: the command matches the canonical fail-open wrapper), that harness hook commands pass the reverse wiring sweep, that the child template's import list matches root `CLAUDE.md`, and that this inventory matches reality. |
 
 ### Infrastructure
 

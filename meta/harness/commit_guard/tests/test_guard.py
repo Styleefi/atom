@@ -150,12 +150,12 @@ def test_validate_rejects_bad_headers() -> None:
 
 def test_commit_on_main_is_blocked(monkeypatch) -> None:
     _set_branch(monkeypatch, "main")
-    assert _run_main(monkeypatch, _bash_payload('git commit -m "feat: x"')) == 2
+    assert _run_main(monkeypatch, _bash_payload('git commit -m "feat: x"')) == 42
 
 
 def test_commit_on_master_is_blocked(monkeypatch) -> None:
     _set_branch(monkeypatch, "master")
-    assert _run_main(monkeypatch, _bash_payload('git commit -m "feat: x"')) == 2
+    assert _run_main(monkeypatch, _bash_payload('git commit -m "feat: x"')) == 42
 
 
 def test_commit_on_feature_branch_passes(monkeypatch) -> None:
@@ -196,13 +196,13 @@ def test_detached_head_passes(monkeypatch) -> None:
 
 def test_bad_message_is_blocked(monkeypatch) -> None:
     _set_branch(monkeypatch, "feat/thing")
-    assert _run_main(monkeypatch, _bash_payload('git commit -m "Update stuff"')) == 2
+    assert _run_main(monkeypatch, _bash_payload('git commit -m "Update stuff"')) == 42
 
 
 def test_bad_heredoc_message_is_blocked(monkeypatch) -> None:
     _set_branch(monkeypatch, "feat/thing")
     command = 'git commit -m "$(cat <<\'EOF\'\nbad subject line\nEOF\n)"'
-    assert _run_main(monkeypatch, _bash_payload(command)) == 2
+    assert _run_main(monkeypatch, _bash_payload(command)) == 42
 
 
 def test_unextractable_message_passes_on_feature_branch(monkeypatch) -> None:
@@ -212,7 +212,7 @@ def test_unextractable_message_passes_on_feature_branch(monkeypatch) -> None:
 
 def test_unextractable_message_still_blocks_on_main(monkeypatch) -> None:
     _set_branch(monkeypatch, "main")
-    assert _run_main(monkeypatch, _bash_payload("git commit --amend --no-edit")) == 2
+    assert _run_main(monkeypatch, _bash_payload("git commit --amend --no-edit")) == 42
 
 
 def test_override_passes_on_main(monkeypatch) -> None:

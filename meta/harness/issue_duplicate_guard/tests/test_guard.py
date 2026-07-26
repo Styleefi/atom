@@ -107,14 +107,14 @@ def test_no_duplicates_passes_silently(monkeypatch) -> None:
 def test_duplicates_block_with_candidates_and_override_hint(monkeypatch, capsys) -> None:
     issues = json.dumps([{"number": 12, "state": "OPEN", "title": "같은 작업"}])
     monkeypatch.setattr(guard, "_run_search", lambda argv: issues)
-    assert _run_main(monkeypatch, _bash_payload('gh issue create -t "같은 작업"')) == 2
+    assert _run_main(monkeypatch, _bash_payload('gh issue create -t "같은 작업"')) == 42
     err = capsys.readouterr().err
     assert "#12" in err and guard.OVERRIDE_TOKEN in err
 
 
 def test_override_skips_search_entirely(monkeypatch) -> None:
     def _fail(argv):
-        raise AssertionError("override인데 검색이 호출됨")
+        raise AssertionError("search was invoked despite override")
 
     monkeypatch.setattr(guard, "_run_search", _fail)
     cmd = f"{guard.OVERRIDE_TOKEN} gh issue create -t anything"
@@ -122,12 +122,12 @@ def test_override_skips_search_entirely(monkeypatch) -> None:
 
 
 def test_missing_title_blocks(monkeypatch, capsys) -> None:
-    assert _run_main(monkeypatch, _bash_payload("gh issue create --body x")) == 2
+    assert _run_main(monkeypatch, _bash_payload("gh issue create --body x")) == 42
     assert "--title" in capsys.readouterr().err
 
 
 def test_empty_title_blocks(monkeypatch, capsys) -> None:
-    assert _run_main(monkeypatch, _bash_payload('gh issue create --title ""')) == 2
+    assert _run_main(monkeypatch, _bash_payload('gh issue create --title ""')) == 42
     assert "--title" in capsys.readouterr().err
 
 
@@ -162,7 +162,7 @@ def test_glab_confident_lines_block(monkeypatch, capsys) -> None:
         "\n"
     )
     monkeypatch.setattr(guard, "_run_search", lambda argv: out)
-    assert _run_main(monkeypatch, _bash_payload("glab issue create -t x")) == 2
+    assert _run_main(monkeypatch, _bash_payload("glab issue create -t x")) == 42
     assert "#3" in capsys.readouterr().err
 
 

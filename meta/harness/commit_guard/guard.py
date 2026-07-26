@@ -30,7 +30,8 @@ Claude Code의 PreToolUse(Bash) hook으로 실행되어 `git commit` 명령을 �
   밖이며 fail-open 방향의 한계다(commit 차단으로 main에 신규 커밋 자체가
   생기지 않아 실효 공백은 작다 — 잔여 경로는 #4에서 검토).
 
-종료 코드: 0 통과, 1 내부 오류(비차단 경고), 2 차단.
+종료 코드: 0 통과, 1 내부 오류(비차단 경고), 42 차단(sentinel — settings.json
+래퍼가 2로 되매핑).
 """
 
 from __future__ import annotations
@@ -44,6 +45,12 @@ from dataclasses import dataclass
 
 # override 마커: 규칙 예외를 선언했다는 표시. 세그먼트 선두에 있으면 통과.
 OVERRIDE_TOKEN = "ATOM_COMMIT_OVERRIDE=1"
+
+# 차단 sentinel 종료 코드. Claude Code의 차단 코드는 2지만 uv(자체 오류 2)와
+# python(예외 1, CLI 오류 2)이 같은 코드를 낼 수 있어, exec 배선에서는 도구
+# 실패가 차단으로 샜다(#31). 자연 발생 불가능한 42를 반환하고 settings.json의
+# 셸 래퍼가 42→2로 되매핑하며, 그 외 nonzero는 전부 1(비차단 경고)로 수렴한다.
+EXIT_BLOCK = 42
 
 # shlex(punctuation_chars=True)가 별도 토큰으로 분리하는 셸 연산자.
 OPERATORS = {"&&", "||", "|", ";", ";;", "&", "(", ")"}
@@ -356,7 +363,7 @@ def main() -> int:
     """stdin의 PreToolUse JSON을 판정한다.
 
     Returns:
-        종료 코드 (0 통과, 1 내부 경고, 2 차단).
+        종료 코드 (0 통과, 1 내부 경고, 42 차단 — 래퍼가 2로 되매핑).
     """
     try:
         payload = json.loads(sys.stdin.read())
@@ -386,7 +393,7 @@ def main() -> int:
                     ),
                     file=sys.stderr,
                 )
-                return 2
+                return EXIT_BLOCK
         if invocation.subject is not None:
             problem = validate_subject(invocation.subject)
             if problem is not None:
@@ -396,7 +403,7 @@ def main() -> int:
                     ),
                     file=sys.stderr,
                 )
-                return 2
+                return EXIT_BLOCK
     return 0
 
 
