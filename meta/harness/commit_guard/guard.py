@@ -38,9 +38,8 @@ Claude Code의 PreToolUse(Bash) hook으로 실행되어 `git commit` 명령을 �
   래치를 세우지 않으므로, 판정 실패는 통과가 아니라 과차단으로 나타난다.
   철자를 바꾸는 것만으로 guard가 무력화되는 일을 막기 위한 선택이다.
   - 그 대가인 오차단: 묶음 단축 옵션(`-qBmain`), 대화형 `-p`, 인자 없는
-    `git checkout`, 이전 브랜치(`-`, `@{-1}`), 셸 변수·glob 대상(shlex는
-    확장하지 않는다). 브랜치가 실제로 바뀌지 않는 형태도 여기 섞이지만
-    전부 `ATOM_COMMIT_OVERRIDE=1`로 복구된다.
+    `git checkout`, 이전 브랜치(`git checkout -`). 브랜치가 실제로 바뀌지 않는
+    형태도 여기 섞이지만 전부 `ATOM_COMMIT_OVERRIDE=1`로 복구된다.
   - 대상이 원격 ref 모양이면 접두를 벗긴 이름도 함께 대조하므로,
     `git checkout origin/main`처럼 detached HEAD가 되는 형태나 마지막 성분이
     보호 브랜치와 같은 브랜치(`feat/main`)도 오차단된다.
@@ -50,6 +49,11 @@ Claude Code의 PreToolUse(Bash) hook으로 실행되어 `git commit` 명령을 �
   - `--` 없이 경로를 지정하는 복원(`git checkout HEAD~1 src/foo.py`)은 대상이
     ref로 읽혀 래치가 켜진다. ref와 경로의 구분은 저장소 조회 없이는 불가능하다.
   - 분리형 옵션 값이 위치 인자를 가리는 형태(`--conflict merge main`).
+  - 확장이 필요한 대상: `@{-1}`, `$BRANCH`, glob(`feat/*`). shlex는 확장하지
+    않으므로 토큰이 그대로 대상이 되고, 보호 브랜치와 글자가 다르니 래치가
+    켜진다. `$BRANCH`가 비어 있으면 브랜치가 그대로인 채 통과한다.
+  - `git checkout --ours <path>` 같은 충돌 해결 형태도 대상이 경로로 읽혀
+    래치가 켜진다(브랜치는 안 바뀐다).
   - 래치는 커밋의 `git -C <path>`도 조건 실행(`||`)도 고려하지 않는다.
   - 비보호 브랜치에서 출발하는 `git checkout main && git commit`은 통과한다 —
     hook이 실행 전에 조회한 브랜치가 아직 비보호라 막을 근거가 없다(#44).
@@ -106,7 +110,11 @@ _MESSAGE_FLAG_RE = re.compile(r"^-[a-zA-Z]*m$")
 _HEREDOC_FIRST_LINE_RE = re.compile(r"<<\s*['\"]?\w+['\"]?[ \t]*\n([^\n]*)")
 
 # heredoc 시작 마커와 종료어. `<<-`는 종료어의 선행 탭을 무시한다.
-_HEREDOC_START_RE = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
+# `(?!<)`로 here-string(`<<<`)을 제외하고, 종료어는 따옴표 안이면 그대로,
+# 아니면 공백·셸 메타문자 전까지 받는다(`EOF-X`, `EOF.md` 같은 형태 포함).
+_HEREDOC_START_RE = re.compile(
+    r"<<(?!<)(-?)\s*(?:'([^']*)'|\"([^\"]*)\"|([^\s;&|<>()'\"]+))"
+)
 
 # shlex 실패 시 폴백: 명령 위치(문자열 시작 또는 연산자 뒤)에 앵커된 감지.
 _FALLBACK_CMD_RE = re.compile(
@@ -363,9 +371,12 @@ def _heredoc_body_flags(lines: list[str]) -> list[bool]:
 
     heredoc 본문은 파일에 쓰이는 내용이지 실행되는 명령이 아니다. 그런데 줄
     단위 토큰화는 `git checkout -b feat/x`라고 적힌 본문 줄을 진짜 명령처럼
-    읽는다. 이 표시는 그런 줄이 브랜치 래치를 건드리지 못하게 하는 데만 쓴다 —
-    본문을 아예 버리지 않는 이유는, 이 판정이 과하게 잡더라도(따옴표 안의
-    `<<` 등) 결과가 "래치를 안 세운다"= 검사 유지 쪽이라 안전하기 때문이다.
+    읽는다. 이 표시는 그런 줄이 브랜치 래치를 **켜지** 못하게 하는 데 쓴다.
+
+    종료어 비교는 bash와 똑같이 **완전 일치**여야 한다. 앞뒤 공백을 무시하면
+    본문 안의 들여쓴 `EOF`가 본문을 일찍 끝내고, 그 뒤 진짜 본문 줄이 명령으로
+    읽혀 래치가 켜진다. `<<-`만 선행 **탭**을 무시한다(공백은 아니다).
+    한 줄에 여러 heredoc이 열리면 열린 순서대로 본문이 이어진다.
 
     Args:
         lines: 명령을 개행으로 나눈 줄 목록.
@@ -374,22 +385,22 @@ def _heredoc_body_flags(lines: list[str]) -> list[bool]:
         줄마다 본문 여부를 담은 같은 길이의 목록.
     """
     flags: list[bool] = []
-    terminator: str | None = None
-    indented = False
+    pending: list[tuple[str, bool]] = []  # (종료어, 선행 탭 무시 여부)
     for line in lines:
-        if terminator is None:
-            flags.append(False)
-            match = _HEREDOC_START_RE.search(line)
-            if match:
-                terminator = match.group(2)
-                indented = "<<-" in line
+        if pending:
+            terminator, indented = pending[0]
+            candidate = line.lstrip("\t") if indented else line
+            if candidate == terminator:
+                pending.pop(0)
+                flags.append(False)
+            else:
+                flags.append(True)
             continue
-        candidate = line.lstrip("\t") if indented else line
-        if candidate.strip() == terminator:
-            terminator = None
-            flags.append(False)
-        else:
-            flags.append(True)
+        flags.append(False)
+        for match in _HEREDOC_START_RE.finditer(line):
+            terminator = match.group(2) or match.group(3) or match.group(4)
+            if terminator:
+                pending.append((terminator, match.group(1) == "-"))
     return flags
 
 
@@ -468,7 +479,18 @@ def detect_invocations(command: str) -> list[CommitInvocation]:
     token_groups: list[list[str]] | None = None
     heredoc_body = _heredoc_body_flags(lines)
     try:
-        token_groups = [_tokenize(line) for line in lines]
+        groups: list[list[str]] = []
+        for line, in_body in zip(lines, heredoc_body):
+            try:
+                groups.append(_tokenize(line))
+            except ValueError:
+                # 본문은 실행되지 않으므로 못 읽어도 그만이다. 여기서 포기하면
+                # 줄 구조가 사라져 본문 표시가 통째로 무의미해진다(따옴표 하나
+                # 들어간 산문이면 충분히 일어난다).
+                if not in_body:
+                    raise
+                groups.append([])
+        token_groups = groups
     except ValueError:
         try:
             token_groups = [_tokenize(command)]
@@ -492,14 +514,18 @@ def detect_invocations(command: str) -> list[CommitInvocation]:
                         branch_check_unsafe=other_repository or branch_unsafe,
                     )
                 )
-            elif in_body:
-                continue  # 파일에 쓰이는 내용이지 실행되는 명령이 아니다
             elif _changes_repository(segment):
-                other_repository = True
+                if not in_body:
+                    other_repository = True
             else:
                 latch = _branch_latch(segment)
-                if latch is not None:
-                    branch_unsafe = latch
+                # 본문 줄은 검사를 **되살리는** 방향만 허용한다. heredoc 판정이
+                # 과하게 잡았을 때(따옴표 안의 `<<` 등) 실행되는 `checkout main`을
+                # 가려버리면 그게 곧 조용한 통과가 되기 때문이다.
+                if latch is False:
+                    branch_unsafe = False
+                elif latch is True and not in_body:
+                    branch_unsafe = True
     return invocations
 
 
