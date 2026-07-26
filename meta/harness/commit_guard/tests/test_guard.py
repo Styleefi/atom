@@ -254,11 +254,3 @@ def test_current_branch_oserror_returns_none(monkeypatch) -> None:
 
     monkeypatch.setattr(guard.subprocess, "run", raise_oserror)
     assert guard._current_branch(None, None) is None
-
-
-# --- 래퍼 계약 ---------------------------------------------------------------
-
-
-def test_exit_block_matches_wrapper_remap_contract() -> None:
-    # settings.json 래퍼는 42만 차단(2)으로 되매핑한다 — 값이 바뀌면 배선도 함께.
-    assert guard.EXIT_BLOCK == 42

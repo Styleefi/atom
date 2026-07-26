@@ -22,6 +22,8 @@ from pathlib import Path
 
 import pytest
 
+from harness.commit_guard import guard as commit_guard
+from harness.issue_duplicate_guard import guard as issue_duplicate_guard
 from harness.rules_checker.check_rules import (
     HOOK_COMMAND_BLOCKING,
     HOOK_COMMAND_NON_BLOCKING,
@@ -128,6 +130,14 @@ def test_non_blocking_wrapper_passes_stdout_through(tmp_path: Path) -> None:
     result = _run_hook(tmp_path, NON_BLOCKING_COMMAND, "echo REMINDER\nexit 0")
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "REMINDER"
+
+
+def test_blocking_template_remaps_the_guards_sentinel() -> None:
+    # 가드 상수 ↔ 래퍼 템플릿의 실결합(리뷰 발견: 트리비얼 ==42 단정은 아무
+    # 것도 묶지 못함). 값이 갈라지면 차단이 조용히 비차단 경고로 강등되므로,
+    # 템플릿 문자열이 각 가드의 EXIT_BLOCK을 되매핑 조건으로 쓰는지 대조한다.
+    for guard in (commit_guard, issue_duplicate_guard):
+        assert f'-eq {guard.EXIT_BLOCK} ' in HOOK_COMMAND_BLOCKING
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv not installed")
