@@ -377,14 +377,18 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
             )
         return violations
 
+    # skill 그릇의 SKILL.md 경로 형태는 문자열 검사라 파일 존재·경로 유효성과
+    # 무관하게 항상 여기서 수행한다 — bad_path든 missing-target이든 조기
+    # return이 형태 위반을 가리지 않게(탈출 관찰 라운드: bad_path만 고치고
+    # missing-target 경로에 같은 가림이 남아 있었다).
+    skill_shape_violations: list[str] = []
+    if enforce == "skill":
+        skill_shape_violations = _skill_path_shape_violations(
+            rel, str(data["deployed-to"])
+        )
+        violations.extend(skill_shape_violations)
+
     if bad_path:
-        # 파일 검사는 불가하지만 문자열 기반 검사(skill 경로 형태)는 수행한다 —
-        # 조기 return이 같은 규칙의 다른 결함을 가리지 않게(최종 게이트 리뷰:
-        # 가림 부류가 skill 그릇에 남아 있던 잔재).
-        if enforce == "skill":
-            violations.extend(
-                _skill_path_shape_violations(rel, str(data["deployed-to"]))
-            )
         return violations
 
     target = root / str(data["deployed-to"])
@@ -406,9 +410,9 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         # skill 그릇 규약(v1): deployed-to는 .claude/skills/ 아래의 SKILL.md여야
         # 하고, 그 SKILL.md가 규칙 파일을 참조해야 실배포로 본다. 규칙 본문의
         # SSOT는 meta/rules/이고 SKILL.md는 참조만 한다(내용 드리프트 방지).
-        shape_violations = _skill_path_shape_violations(rel, str(data["deployed-to"]))
-        if shape_violations:
-            violations.extend(shape_violations)
+        # 경로 형태 검사는 위(존재 검사 전)에서 수행됨 — 형태가 틀리면 참조
+        # 검사는 무의미하므로 여기서 종료.
+        if skill_shape_violations:
             return violations
         reference = f"meta/rules/{rule_path.name}"
         if reference not in target.read_text(encoding="utf-8"):
@@ -660,11 +664,13 @@ def check_hook_wiring(root: Path) -> list[str]:
     for rule_path in rule_files(root):
         try:
             text = rule_path.read_text(encoding="utf-8")
-        except OSError:
-            # 규칙 파일 자체가 안 읽힘(깨진 symlink 등) — per-rule 전역 방어가
-            # internal error로 보고한다. 여기서 전파되면 스윕 전체가 하나의
-            # internal error로 뭉개져 배선 위반이 전부 사라진다(최종 게이트
-            # 리뷰: 가림 부류의 repo-check 단위 재발).
+        except (OSError, UnicodeDecodeError):
+            # 규칙 파일 자체가 안 읽힘(깨진 symlink, 비UTF-8 인코딩 등) —
+            # per-rule 전역 방어가 internal error로 보고한다. 여기서 전파되면
+            # 스윕 전체가 하나의 internal error로 뭉개져 배선 위반이 전부
+            # 사라진다. "읽기 실패"라는 부류로 잡는다 — OSError만 잡던 첫
+            # 수정이 UnicodeDecodeError(ValueError 계열)를 놓쳐 같은 가림이
+            # 재발했다(탈출 관찰 라운드).
             continue
         data, error = parse_frontmatter(text)
         if error or data is None:

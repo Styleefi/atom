@@ -614,8 +614,43 @@ def test_broken_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
         hook_settings(legacy), encoding="utf-8"
     )
     violations = rule_violations(root)
-    assert any("internal checker error" in v for v in violations)
+    # per-rule 방어의 보고인지(스윕 붕괴 메시지가 아니라) 규칙 경로로 앵커한다.
+    assert any("meta/rules/broken.md: internal checker error" in v for v in violations)
     assert any("harness.legacy" in v for v in violations)
+
+
+def test_non_utf8_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
+    # 비UTF-8 규칙 파일(UnicodeDecodeError — OSError가 아님)도 스윕을 뭉개면
+    # 안 된다(탈출 관찰 라운드: OSError만 잡던 가드가 같은 가림을 재발시킴).
+    root = make_repo(tmp_path)
+    (root / "meta" / "rules" / "badenc.md").write_bytes(b"\xbe\xbe\xbe")
+    legacy = (
+        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
+        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.legacy; fi'
+    )
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text(
+        hook_settings(legacy), encoding="utf-8"
+    )
+    violations = rule_violations(root)
+    assert any("meta/rules/badenc.md: internal checker error" in v for v in violations)
+    assert any("harness.legacy" in v for v in violations)
+
+
+def test_skill_missing_target_does_not_mask_shape(tmp_path: Path) -> None:
+    # 대상 파일 부재가 SKILL.md 형태 위반을 가리면 안 된다(탈출 관찰 라운드:
+    # bad_path만 고치고 missing-target 경로에 같은 가림이 남아 있었다).
+    root = make_repo(tmp_path)
+    write_rule(
+        root,
+        "my-style.md",
+        "---\nid: my-style\ntier: convention\nenforce: skill\n"
+        "deployed-to: docs/my-style.md\n---\n",
+    )
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("must be a SKILL.md under .claude/skills/" in v for v in violations)
+    assert any("does not exist" in v for v in violations)
 
 
 def test_skill_bad_path_does_not_mask_shape(tmp_path: Path) -> None:
@@ -783,6 +818,7 @@ def test_null_settings_is_rejected(tmp_path: Path) -> None:
     violations = rule_violations(root)
     assert len(violations) == 2
     assert any("is not a JSON object" in v for v in violations)
+    assert any("cannot verify hook wiring" in v for v in violations)
 
 
 def test_sweep_ignores_non_harness_commands(tmp_path: Path) -> None:
