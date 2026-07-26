@@ -50,10 +50,9 @@ Claude Code의 PreToolUse(Bash) hook으로 실행되어 `git commit` 명령을 �
   - `--` 없이 경로를 지정하는 복원(`git checkout HEAD~1 src/foo.py`)은 대상이
     ref로 읽혀 래치가 켜진다. ref와 경로의 구분은 저장소 조회 없이는 불가능하다.
   - 분리형 옵션 값이 위치 인자를 가리는 형태(`--conflict merge main`).
-  - 래치는 커밋의 `git -C <path>`도 조건 실행(`||`)도 고려하지 않고, 한 번
-    켜지면 뒤 세그먼트가 되돌리지 못한다 — `git checkout feat/x && git
-    checkout main && git commit`은 통과한다. 비보호 브랜치에서 출발하는
-    `git checkout main && git commit`도 통과한다(둘 다 #44).
+  - 래치는 커밋의 `git -C <path>`도 조건 실행(`||`)도 고려하지 않는다.
+  - 비보호 브랜치에서 출발하는 `git checkout main && git commit`은 통과한다 —
+    hook이 실행 전에 조회한 브랜치가 아직 비보호라 막을 근거가 없다(#44).
 
 종료 코드: 0 통과, 1 내부 오류(비차단 경고), 42 차단(sentinel — settings.json
 래퍼가 2로 되매핑).
@@ -356,43 +355,56 @@ def _checkout_target(args: list[str]) -> str | None:
     return next((t for t in args if not t.startswith("-")), None)
 
 
-def _makes_branch_check_unsafe(segment: list[str]) -> bool:
-    """이 세그먼트가 이후 커밋의 브랜치 판정 기준을 불명으로 만드는지 판정한다.
+def _changes_repository(segment: list[str]) -> bool:
+    """세그먼트가 작업 저장소 자체를 옮기는지 판정한다.
 
-    `cd`는 저장소 자체가 바뀌고, 브랜치를 바꾸는 `git checkout`/`git switch`는
-    커밋이 얹힐 브랜치가 바뀐다 — 둘 다 hook이 실행 전에 조회한 브랜치를
-    쓸모없게 만든다. 단 브랜치를 바꾸지 않거나(경로 복원) 대상이 보호 브랜치인
-    경우, 그리고 **대상을 읽어내지 못한 경우**는 검사를 유지한다. 마지막 항목이
-    핵심이다 — 판정 실패가 곧 통과가 되면 철자를 바꾸는 것만으로 guard가
-    무력화되므로, 모르면 막는 쪽으로 기운다.
+    `cd` 뒤로는 페이로드의 `cwd`로 조회한 브랜치가 어느 저장소 것인지 알 수
+    없다. 되돌릴 방법이 없으므로 이 표시는 한 번 켜지면 유지된다.
 
     Args:
         segment: 연산자로 분리된 토큰 세그먼트.
 
     Returns:
-        이후 커밋의 브랜치 검사를 건너뛰어야 하면 True.
+        저장소가 바뀌면 True.
     """
     first = next((t for t in segment if not _ENV_ASSIGNMENT_RE.match(t)), None)
-    if first is not None and _basename(first) == "cd":
-        return True
+    return first is not None and _basename(first) == "cd"
 
+
+def _branch_latch(segment: list[str]) -> bool | None:
+    """브랜치 변경 세그먼트가 이후 커밋의 브랜치 검사를 어떻게 바꾸는지 판정한다.
+
+    브랜치를 바꾸는 `git checkout`/`git switch`는 hook이 실행 전에 조회한
+    브랜치를 쓸모없게 만든다. 단 대상이 보호 브랜치이거나 **대상을 읽어내지
+    못한 경우**는 검사를 유지한다. 후자가 핵심이다 — 판정 실패가 곧 통과가
+    되면 철자를 바꾸는 것만으로 guard가 무력화되므로 모르면 막는 쪽으로 기운다.
+
+    Args:
+        segment: 연산자로 분리된 토큰 세그먼트.
+
+    Returns:
+        검사를 건너뛰어야 하면 True, 유지해야 하면 False.
+        브랜치와 무관한 세그먼트면 None(기존 판정을 그대로 둔다).
+    """
     parsed = _git_subcommand(segment)
     if parsed is None:
-        return False
-    subcommand, args, _, _ = parsed
+        return None
+    subcommand, args, c_path, _ = parsed
     if subcommand not in BRANCH_CHANGE_SUBCOMMANDS:
-        return False
+        return None
+    # 다른 저장소의 브랜치를 바꾼 것이므로 이 저장소의 판정 기준은 그대로다.
+    if c_path is not None:
+        return None
     # `git checkout [<ref>] -- <path>`는 경로 복원이라 브랜치를 안 바꾼다.
     # 뒤가 빈 `--`는 복원이 아니라 실제로 브랜치를 바꾼다(git 2.53 확인).
     if subcommand == "checkout" and "--" in args and args.index("--") < len(args) - 1:
-        return False
+        return None
     target = _checkout_target(args)
     if target is None:
         return False
     # 대상이 보호 브랜치면 커밋이 거기에 얹히므로 검사를 건너뛰면 안 된다.
     # 원격 접두를 벗긴 형태도 함께 본다 — `--track origin/main`은 로컬 `main`을
     # 만들고, `-qt origin/main`처럼 플래그를 못 알아본 경우도 이쪽에서 걸린다.
-    # 단 앞선 세그먼트가 이미 래치를 켰다면 이 판정은 뒤집지 못한다(#44).
     return (
         target not in PROTECTED_BRANCHES
         and _remote_stripped(target) not in PROTECTED_BRANCHES
@@ -403,9 +415,10 @@ def detect_invocations(command: str) -> list[CommitInvocation]:
     """Bash 명령 문자열에서 모든 git commit 명령을 감지한다.
 
     줄 단위 토큰화 → 전체 문자열 토큰화 → 정규식 폴백 순서로 내려간다
-    (dup guard와 동일한 전략). 커밋보다 앞선 세그먼트가 브랜치 판정 기준을
-    불명으로 만들면(`_makes_branch_check_unsafe`) 이후 커밋들을 unsafe로
-    표시한다.
+    (dup guard와 동일한 전략). 판정 기준은 두 갈래로 추적한다. `cd`는 저장소
+    자체를 옮기므로 한 번 켜지면 유지되고(되돌릴 방법이 없다), 브랜치 변경은
+    **마지막 것이 이긴다** — `git checkout feat/x && git checkout main`이면
+    커밋은 main에 얹히므로 검사를 되살려야 한다.
 
     Args:
         command: Bash 도구가 실행하려는 명령 전체.
@@ -423,23 +436,27 @@ def detect_invocations(command: str) -> list[CommitInvocation]:
             return _detect_fallback(command)
 
     invocations: list[CommitInvocation] = []
+    other_repository = False
     branch_unsafe = False
     for tokens in token_groups:
         for segment in _split_segments(tokens):
             parsed = _parse_segment(segment)
-            if parsed is None:
-                if _makes_branch_check_unsafe(segment):
-                    branch_unsafe = True
-            else:
+            if parsed is not None:
                 subject, c_path, override = parsed
                 invocations.append(
                     CommitInvocation(
                         subject=subject,
                         c_path=c_path,
                         override=override,
-                        branch_check_unsafe=branch_unsafe,
+                        branch_check_unsafe=other_repository or branch_unsafe,
                     )
                 )
+            elif _changes_repository(segment):
+                other_repository = True
+            else:
+                latch = _branch_latch(segment)
+                if latch is not None:
+                    branch_unsafe = latch
     return invocations
 
 

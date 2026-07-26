@@ -458,6 +458,34 @@ def test_track_to_main_from_feature_branch_passes(monkeypatch) -> None:
     assert calls == [(None, None)]
 
 
+def test_later_move_to_protected_restores_branch_check(monkeypatch) -> None:
+    # 마지막 브랜치 변경이 이긴다 — 커밋은 main에 얹히므로 검사가 되살아난다.
+    _set_branch(monkeypatch, "main")
+    payload = _bash_payload(
+        'git checkout feat/x && git checkout main && git commit -m "feat: x"'
+    )
+    assert _run_main(monkeypatch, payload) == 42
+
+
+def test_cd_latch_survives_a_later_branch_change(monkeypatch) -> None:
+    # `cd` 뒤로는 어느 저장소인지 알 수 없으므로 브랜치 변경이 되돌리지 못한다.
+    calls = _set_branch(monkeypatch, "main")
+    payload = _bash_payload(
+        'cd /elsewhere && git checkout main && git commit -m "feat: x"'
+    )
+    assert _run_main(monkeypatch, payload) == 0
+    assert calls == []
+
+
+def test_checkout_in_another_repository_does_not_latch(monkeypatch) -> None:
+    # `git -C /other checkout`은 이 저장소의 브랜치를 바꾸지 않는다.
+    _set_branch(monkeypatch, "main")
+    payload = _bash_payload(
+        'git -C /other checkout -b feat/x && git commit -m "feat: x"'
+    )
+    assert _run_main(monkeypatch, payload) == 42
+
+
 def test_branch_change_mention_in_string_does_not_unlatch(monkeypatch) -> None:
     _set_branch(monkeypatch, "main")
     payload = _bash_payload('echo "git checkout -b x" && git commit -m "feat: y"')
