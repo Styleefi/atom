@@ -22,10 +22,9 @@ Claude Code의 PreToolUse(Bash) hook으로 실행되어 `git commit` 명령을 �
   대상이 불명이므로 브랜치 검사를 건너뛴다(타 저장소·선행 브랜치 생성
   오차단 방지 — hook은 실행 *전*에 돌므로 `git checkout -b feat/x && git
   commit`의 현재 브랜치는 아직 main이다). 단 `--` 뒤에 경로를 지정하는
-  복원 형태와, 대상이 보호 브랜치인 이동은 커밋이 실제로 보호 브랜치에
-  얹히므로 제외한다 — 대상은 철자뿐 아니라 `--track origin/main`처럼 원격
-  ref에서 파생되는 이름까지 본다. rev-parse 실패·timeout·detached
-  HEAD(`HEAD`)는 통과.
+  복원 형태와, 대상이 보호 브랜치인 이동, 그리고 대상을 읽어내지 못한 경우는
+  제외한다 — 대상은 철자뿐 아니라 `--track origin/main`처럼 원격 접두를 벗긴
+  이름까지 본다. rev-parse 실패·timeout·detached HEAD(`HEAD`)는 통과.
 - 메시지는 첫 `-m`/`--message`(결합 단축 `-am` 등 포함)의 첫 줄만 검사.
   heredoc(`-m "$(cat <<'EOF' ...)"`) 형태는 첫 줄을 추출한다. 추출 불가
   (`-F`, 에디터, `--amend --no-edit`)와 빈 제목은 메시지 검사만 통과시키고
@@ -35,25 +34,26 @@ Claude Code의 PreToolUse(Bash) hook으로 실행되어 `git commit` 명령을 �
 - 감지 못하는 형태(`bash -c` 내부, 스크립트 경유)와 push 차단은 v1 범위
   밖이며 fail-open 방향의 한계다(commit 차단으로 main에 신규 커밋 자체가
   생기지 않아 실효 공백은 작다 — 잔여 경로는 #4에서 검토).
-- 브랜치 변경 판정의 알려진 한계 — 통과(fail-open) 방향:
-  - `--` 없이 경로를 지정하는 복원(`git checkout HEAD~1 src/foo.py`), 대화형
-    `-p`, 인자 없는 `git checkout`은 브랜치 변경으로 오분류돼 브랜치 검사가
-    생략된다. ref와 경로의 구분은 저장소 조회 없이는 불가능하다.
-  - 이전 브랜치(`git checkout -`, `@{-1}`), 셸 변수·glob 대상(shlex는 확장
-    하지 않는다), 분리형 옵션 값(`--conflict merge main`), 단축 옵션의
-    클러스터·결합값(`-qt origin/main`, `-tdirect origin/main`)은 대상을
-    알아내지 못한다.
-  - `--track`의 ref에서 이름을 파생할 수 없는 형태(`--track foo`)도 마찬가지다.
-    git이 브랜치 생성을 포기하는 무효 명령이라 `&&`로는 커밋이 돌지 않는다.
+- 브랜치 변경 판정은 **모르면 막는 쪽**으로 기운다. 대상을 읽어내지 못하면
+  래치를 세우지 않으므로, 판정 실패는 통과가 아니라 과차단으로 나타난다.
+  철자를 바꾸는 것만으로 guard가 무력화되는 일을 막기 위한 선택이다.
+  - 그 대가인 오차단: 묶음 단축 옵션(`-qBmain`), 대화형 `-p`, 인자 없는
+    `git checkout`, 이전 브랜치(`-`, `@{-1}`), 셸 변수·glob 대상(shlex는
+    확장하지 않는다). 브랜치가 실제로 바뀌지 않는 형태도 여기 섞이지만
+    전부 `ATOM_COMMIT_OVERRIDE=1`로 복구된다.
+  - 대상이 원격 ref 모양이면 접두를 벗긴 이름도 함께 대조하므로,
+    `git checkout origin/main`처럼 detached HEAD가 되는 형태나 마지막 성분이
+    보호 브랜치와 같은 브랜치(`feat/main`)도 오차단된다.
+  - 감지는 세그먼트 선두가 `git`인 경우만 본다(`env`/`xargs`/별칭 경유).
+  - 폴백(shlex 실패) 경로는 checkout을 모른다(#45).
+- 여전히 통과(fail-open)하는 형태:
+  - `--` 없이 경로를 지정하는 복원(`git checkout HEAD~1 src/foo.py`)은 대상이
+    ref로 읽혀 래치가 켜진다. ref와 경로의 구분은 저장소 조회 없이는 불가능하다.
+  - 분리형 옵션 값이 위치 인자를 가리는 형태(`--conflict merge main`).
   - 래치는 커밋의 `git -C <path>`도 조건 실행(`||`)도 고려하지 않고, 한 번
     켜지면 뒤 세그먼트가 되돌리지 못한다 — `git checkout feat/x && git
     checkout main && git commit`은 통과한다. 비보호 브랜치에서 출발하는
     `git checkout main && git commit`도 통과한다(둘 다 #44).
-- 같은 판정의 한계 — 차단(오차단) 방향:
-  - 감지는 세그먼트 선두가 `git`인 경우만 본다(`env`/`xargs`/별칭 경유는
-    브랜치 변경으로 인식되지 않아 오차단이 남는다).
-  - 폴백(shlex 실패) 경로는 checkout을 모른다 — 명령 텍스트만으로는 언급과
-    실행을 구분할 수 없어 새 구멍을 만들지 않는 쪽을 택했다(#45).
 
 종료 코드: 0 통과, 1 내부 오류(비차단 경고), 42 차단(sentinel — settings.json
 래퍼가 2로 되매핑).
@@ -88,9 +88,8 @@ BRANCH_CHANGE_SUBCOMMANDS = {"checkout", "switch"}
 # 브랜치를 새로 만들며 이동하는 플래그 (checkout -b/-B, switch -c/-C).
 NEW_BRANCH_FLAGS = {"-b", "-B", "-c", "-C"}
 
-# `-b`/`-c` 없이도 원격 추적 ref에서 이름을 따 브랜치를 만드는 플래그.
-# 값 결합형(`--track=direct|inherit`)은 `_checkout_target`에서 접두 비교로 잡는다.
-TRACK_FLAGS = {"-t", "--track"}
+# 같은 뜻의 긴 이름 (switch 전용). 값은 `=`로 붙여 온다.
+NEW_BRANCH_LONG_FLAGS = ("--create=", "--force-create=")
 
 GIT_TIMEOUT_SECONDS = 10
 
@@ -304,19 +303,19 @@ def _detect_fallback(command: str) -> list[CommitInvocation]:
     ]
 
 
-def _tracked_branch_name(ref: str | None) -> str | None:
-    """`--track`이 원격 추적 ref에서 파생시키는 새 로컬 브랜치 이름을 구한다.
+def _remote_stripped(ref: str | None) -> str | None:
+    """원격 추적 ref에서 파생되는 로컬 브랜치 이름을 구한다.
 
     `refs/`·`remotes/` 접두를 벗긴 뒤 **첫 경로 성분 하나만** 잘라낸다. 실측
-    기준(git 2.53): `origin/main`은 `main`, `origin/topic`은 `topic`이지만
-    `origin/feature/x`는 `x`가 아니라 `feature/x`다. 실행 파일 경로용
-    `_basename`(rsplit)을 여기 재사용하면 마지막 성분만 남아 틀린다.
+    기준(git 2.53): `--track origin/main`은 로컬 `main`을, `origin/topic`은
+    `topic`을 만들지만 `origin/feature/x`는 `x`가 아니라 `feature/x`다. 실행
+    파일 경로용 `_basename`(rsplit)을 여기 재사용하면 마지막 성분만 남아 틀린다.
 
     Args:
-        ref: `--track`/`-t`와 함께 주어진 원격 추적 ref 토큰.
+        ref: 대상 토큰.
 
     Returns:
-        파생된 로컬 브랜치 이름. `/`가 없어 git이 추측을 포기하는 형태면 None.
+        접두를 벗긴 이름. `/`가 없어 벗길 것이 없으면 None.
     """
     if ref is None:
         return None
@@ -330,12 +329,15 @@ def _tracked_branch_name(ref: str | None) -> str | None:
 def _checkout_target(args: list[str]) -> str | None:
     """checkout/switch가 이동할 대상 브랜치 이름을 찾는다.
 
-    git의 이름 결정 순서를 따른다. (1) 생성 플래그(`-b`/`-B`/`-c`/`-C`)가 있으면
-    위치와 무관하게 그 뒤 토큰이 대상이다 — `git checkout main -b feat/x`도
-    `feat/x`를 만든다. (2) 없이 `--track`/`-t`만 있으면 원격 추적 ref에서 파생된
-    이름이 대상이다 — `--track origin/main`은 로컬 `main`을 만든다. (3) 둘 다
-    없으면 첫 비플래그 토큰이 대상이다 — `-b feat/x main`의 시작점 `main`은
-    대상이 아니다.
+    생성 플래그(`-b`/`-B`/`-c`/`-C`)가 있으면 위치와 무관하게 그 값이 대상이다 —
+    `git checkout main -b feat/x`도 `feat/x`를 만든다. 값은 다음 토큰으로도
+    (`-b feat/x`), 붙여서도(`-bfeat/x`), 긴 이름의 `=` 형태로도
+    (`--create=feat/x`) 올 수 있다. 생성 플래그가 없으면 첫 비플래그 토큰이
+    대상이다 — `-b feat/x main`의 시작점 `main`은 대상이 아니다.
+
+    묶음 단축 옵션(`-qBmain`)처럼 git의 parse-options를 흉내내야만 풀리는
+    형태는 일부러 풀지 않는다. 그런 경우 None을 돌려주고, 호출부가 "대상 불명"을
+    검사 유지 쪽으로 처리한다.
 
     Args:
         args: 서브커맨드 뒤 인자 토큰들.
@@ -346,10 +348,12 @@ def _checkout_target(args: list[str]) -> str | None:
     for i, token in enumerate(args):
         if token in NEW_BRANCH_FLAGS:
             return args[i + 1] if i + 1 < len(args) else None
-    positional = next((t for t in args if not t.startswith("-")), None)
-    if any(t in TRACK_FLAGS or t.startswith("--track=") for t in args):
-        return _tracked_branch_name(positional)
-    return positional
+        for prefix in NEW_BRANCH_LONG_FLAGS:
+            if token.startswith(prefix):
+                return token[len(prefix):] or None
+        if not token.startswith("--") and token[:2] in NEW_BRANCH_FLAGS and len(token) > 2:
+            return token[2:]
+    return next((t for t in args if not t.startswith("-")), None)
 
 
 def _makes_branch_check_unsafe(segment: list[str]) -> bool:
@@ -357,8 +361,10 @@ def _makes_branch_check_unsafe(segment: list[str]) -> bool:
 
     `cd`는 저장소 자체가 바뀌고, 브랜치를 바꾸는 `git checkout`/`git switch`는
     커밋이 얹힐 브랜치가 바뀐다 — 둘 다 hook이 실행 전에 조회한 브랜치를
-    쓸모없게 만든다. 단 브랜치를 바꾸지 않거나(경로 복원) 대상이 보호
-    브랜치인 경우는 검사를 유지해야 하므로 제외한다.
+    쓸모없게 만든다. 단 브랜치를 바꾸지 않거나(경로 복원) 대상이 보호 브랜치인
+    경우, 그리고 **대상을 읽어내지 못한 경우**는 검사를 유지한다. 마지막 항목이
+    핵심이다 — 판정 실패가 곧 통과가 되면 철자를 바꾸는 것만으로 guard가
+    무력화되므로, 모르면 막는 쪽으로 기운다.
 
     Args:
         segment: 연산자로 분리된 토큰 세그먼트.
@@ -380,10 +386,17 @@ def _makes_branch_check_unsafe(segment: list[str]) -> bool:
     # 뒤가 빈 `--`는 복원이 아니라 실제로 브랜치를 바꾼다(git 2.53 확인).
     if subcommand == "checkout" and "--" in args and args.index("--") < len(args) - 1:
         return False
+    target = _checkout_target(args)
+    if target is None:
+        return False
     # 대상이 보호 브랜치면 커밋이 거기에 얹히므로 검사를 건너뛰면 안 된다.
-    # `--track origin/main`처럼 원격 ref에서 이름을 따는 형태도 여기에 포함된다.
+    # 원격 접두를 벗긴 형태도 함께 본다 — `--track origin/main`은 로컬 `main`을
+    # 만들고, `-qt origin/main`처럼 플래그를 못 알아본 경우도 이쪽에서 걸린다.
     # 단 앞선 세그먼트가 이미 래치를 켰다면 이 판정은 뒤집지 못한다(#44).
-    return _checkout_target(args) not in PROTECTED_BRANCHES
+    return (
+        target not in PROTECTED_BRANCHES
+        and _remote_stripped(target) not in PROTECTED_BRANCHES
+    )
 
 
 def detect_invocations(command: str) -> list[CommitInvocation]:

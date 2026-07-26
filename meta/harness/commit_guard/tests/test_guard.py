@@ -198,12 +198,14 @@ def test_track_to_feature_remote_still_marks_unsafe() -> None:
     assert inv.branch_check_unsafe
 
 
-def test_no_track_is_not_a_track_flag() -> None:
-    # `--no-track origin/main`은 브랜치를 만들지 않고 detached HEAD가 된다.
+def test_remote_ref_target_keeps_branch_check_even_when_detaching() -> None:
+    # 의도한 과차단: `--no-track origin/main`은 detached HEAD가 되므로 커밋이
+    # main에 얹히지 않는다. 그래도 검사를 유지한다 — 원격 접두를 벗긴 형태까지
+    # 보는 규칙이 `-qt origin/main` 같은 미인식 플래그를 막아주는 대가다.
     (inv,) = guard.detect_invocations(
         'git checkout --no-track origin/main && git commit -m "feat: x"'
     )
-    assert inv.branch_check_unsafe
+    assert not inv.branch_check_unsafe
 
 
 @pytest.mark.parametrize(
@@ -239,6 +241,60 @@ def test_create_flag_to_protected_keeps_branch_check() -> None:
 def test_degenerate_branch_change_args_do_not_raise(command: str) -> None:
     # 예외가 나면 run()이 삼켜 exit 1이 되고 해당 형태에서 guard가 무력화된다.
     assert len(guard.detect_invocations(command)) == 1
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # 값이 붙은 생성 플래그.
+        'git checkout -bmain && git commit -m "feat: x"',
+        'git checkout -Bmain && git commit -m "feat: x"',
+        'git switch -cmain && git commit -m "feat: x"',
+        'git switch -Cmain && git commit -m "feat: x"',
+        'git switch --create=main && git commit -m "feat: x"',
+        'git switch --force-create=main && git commit -m "feat: x"',
+        # 묶음 단축 옵션 — 대상을 못 읽으므로 검사 유지로 떨어진다.
+        'git checkout -qBmain && git commit -m "feat: x"',
+        'git checkout -fBmain && git commit -m "feat: x"',
+        'git switch -qCmain && git commit -m "feat: x"',
+        # 플래그를 못 알아봐도 원격 접두를 벗긴 형태에서 걸린다.
+        'git checkout -qt origin/main && git commit -m "feat: x"',
+        'git checkout -tdirect origin/main && git commit -m "feat: x"',
+    ],
+)
+def test_protected_target_spellings_keep_branch_check(command: str) -> None:
+    # 전부 실제 git에서 로컬 `main`에 올라간다(git 2.53 실측). 철자를 바꾼다고
+    # guard가 뚫리면 안 된다.
+    (inv,) = guard.detect_invocations(command)
+    assert not inv.branch_check_unsafe
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'git checkout -p && git commit -m "feat: x"',
+        'git checkout - && git commit -m "feat: x"',
+        'git checkout && git commit -m "feat: x"',
+    ],
+)
+def test_unresolved_target_keeps_branch_check(command: str) -> None:
+    # 대상을 못 읽으면 검사를 유지한다. 브랜치가 안 바뀌는 형태에서는 과차단이지만
+    # override로 복구되고, 반대 방향은 main 직커밋이 조용히 통과하는 것이다.
+    (inv,) = guard.detect_invocations(command)
+    assert not inv.branch_check_unsafe
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'git checkout -bfeat/x main && git commit -m "feat: x"',
+        'git switch --create=feat/x main && git commit -m "feat: x"',
+    ],
+)
+def test_attached_create_value_is_the_target(command: str) -> None:
+    # 붙여 쓴 값이 대상이다 — 시작점 `main`이 아니다.
+    (inv,) = guard.detect_invocations(command)
+    assert inv.branch_check_unsafe
 
 
 def test_git_branch_does_not_mark_branch_check_unsafe() -> None:
@@ -476,8 +532,8 @@ def test_malformed_input_warns_not_blocks(monkeypatch) -> None:
         (None, None),
     ],
 )
-def test_tracked_branch_name_strips_only_the_remote(ref, expected) -> None:
-    assert guard._tracked_branch_name(ref) == expected
+def test_remote_stripped_removes_only_the_first_component(ref, expected) -> None:
+    assert guard._remote_stripped(ref) == expected
 
 
 def test_current_branch_timeout_returns_none(monkeypatch) -> None:
