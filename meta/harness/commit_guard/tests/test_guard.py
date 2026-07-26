@@ -108,6 +108,76 @@ def test_cd_before_commit_marks_branch_check_unsafe() -> None:
     assert inv.branch_check_unsafe
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        'git checkout -b feat/x main && git commit -m "feat: x"',
+        'git switch -c feat/x && git commit -m "feat: x"',
+        'git checkout feat/x && git commit -m "feat: x"',
+    ],
+)
+def test_branch_change_before_commit_marks_branch_check_unsafe(command: str) -> None:
+    (inv,) = guard.detect_invocations(command)
+    assert inv.branch_check_unsafe
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'git checkout -- src/foo.py && git commit -m "fix: x"',
+        'git checkout HEAD~1 -- src/foo.py && git commit -m "fix: x"',
+    ],
+)
+def test_path_restore_checkout_keeps_branch_check(command: str) -> None:
+    # `--` 뒤 경로를 되돌리는 형태는 브랜치를 바꾸지 않는다.
+    (inv,) = guard.detect_invocations(command)
+    assert not inv.branch_check_unsafe
+
+
+def test_trailing_bare_dashes_still_changes_branch() -> None:
+    # `git checkout side --`는 경로가 없어 복원이 아니라 실제 브랜치 이동이다.
+    (inv,) = guard.detect_invocations('git checkout side -- && git commit -m "feat: x"')
+    assert inv.branch_check_unsafe
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'git checkout main && git commit -m "feat: x"',
+        'git switch master && git commit -m "feat: x"',
+    ],
+)
+def test_move_to_protected_branch_keeps_branch_check(command: str) -> None:
+    # 대상이 보호 브랜치면 커밋이 거기 얹히므로 검사를 건너뛰면 안 된다.
+    (inv,) = guard.detect_invocations(command)
+    assert not inv.branch_check_unsafe
+
+
+def test_protected_start_point_still_marks_unsafe() -> None:
+    # `-b` 뒤 토큰이 대상이다 — 시작점 main은 대상이 아니다(이슈 #39의 핵심 형태).
+    (inv,) = guard.detect_invocations(
+        'git checkout -b feat/x main && git commit -m "feat: x"'
+    )
+    assert inv.branch_check_unsafe
+
+
+def test_git_branch_does_not_mark_branch_check_unsafe() -> None:
+    (inv,) = guard.detect_invocations('git branch feat/x && git commit -m "feat: x"')
+    assert not inv.branch_check_unsafe
+
+
+def test_commit_before_branch_change_is_still_checked() -> None:
+    (inv,) = guard.detect_invocations('git commit -m "feat: x" && git checkout main')
+    assert not inv.branch_check_unsafe
+
+
+def test_branch_change_latch_spans_lines() -> None:
+    (inv,) = guard.detect_invocations(
+        'git checkout -b feat/x\ngit commit -m "feat: x"'
+    )
+    assert inv.branch_check_unsafe
+
+
 def test_override_prefix_detected() -> None:
     (inv,) = guard.detect_invocations(
         'ATOM_COMMIT_OVERRIDE=1 git commit -m "whatever"'
@@ -182,6 +252,54 @@ def test_cd_prefix_skips_branch_check(monkeypatch) -> None:
     payload = _bash_payload('cd /elsewhere && git commit -m "feat: x"')
     assert _run_main(monkeypatch, payload) == 0
     assert calls == []  # 브랜치 조회 자체를 하지 않는다
+
+
+def test_checkout_prefix_skips_branch_check(monkeypatch) -> None:
+    calls = _set_branch(monkeypatch, "main")  # 차단됐어야 할 브랜치
+    payload = _bash_payload('git checkout -b feat/x main && git commit -m "feat: x"')
+    assert _run_main(monkeypatch, payload) == 0
+    assert calls == []  # 브랜치 조회 자체를 하지 않는다
+
+
+def test_switch_prefix_skips_branch_check(monkeypatch) -> None:
+    _set_branch(monkeypatch, "main")
+    payload = _bash_payload('git switch -c feat/x && git commit -m "feat: x"')
+    assert _run_main(monkeypatch, payload) == 0
+
+
+def test_header_check_survives_branch_change(monkeypatch) -> None:
+    # 브랜치 검사는 건너뛰되 헤더 검사는 그대로 — 42의 원인이 헤더임을 calls로 증명한다.
+    calls = _set_branch(monkeypatch, "feat/x")
+    payload = _bash_payload('git checkout -b feat/x && git commit -m "Update stuff"')
+    assert _run_main(monkeypatch, payload) == 42
+    assert calls == []
+
+
+def test_path_restore_checkout_still_blocks_on_main(monkeypatch) -> None:
+    _set_branch(monkeypatch, "main")
+    payload = _bash_payload('git checkout -- src/foo.py && git commit -m "fix: x"')
+    assert _run_main(monkeypatch, payload) == 42
+
+
+def test_checkout_to_main_while_on_main_still_blocks(monkeypatch) -> None:
+    # 래치가 대상을 안 보면 `git checkout main && ` 한 토큰으로 guard가 무력화된다.
+    _set_branch(monkeypatch, "main")
+    payload = _bash_payload('git checkout main && git commit -m "feat: x"')
+    assert _run_main(monkeypatch, payload) == 42
+
+
+def test_checkout_to_main_from_feature_branch_passes(monkeypatch) -> None:
+    # 설계상 통과한다: hook이 실행 전에 돌아 조회되는 브랜치가 아직 feat/x다.
+    # 결함을 방치하는 게 아니라 알려진 한계를 코드베이스에 고정한다 — #44.
+    _set_branch(monkeypatch, "feat/x")
+    payload = _bash_payload('git checkout main && git commit -m "feat: x"')
+    assert _run_main(monkeypatch, payload) == 0
+
+
+def test_branch_change_mention_in_string_does_not_unlatch(monkeypatch) -> None:
+    _set_branch(monkeypatch, "main")
+    payload = _bash_payload('echo "git checkout -b x" && git commit -m "feat: y"')
+    assert _run_main(monkeypatch, payload) == 42
 
 
 def test_branch_lookup_failure_passes(monkeypatch) -> None:

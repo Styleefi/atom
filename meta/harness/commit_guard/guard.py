@@ -18,8 +18,12 @@ Claude Code의 PreToolUse(Bash) hook으로 실행되어 `git commit` 명령을 �
 - 브랜치 판정 기준 디렉터리는 hook 페이로드의 `cwd`(Bash 도구의 작업
   디렉터리는 호출 간 유지되므로 프로세스 cwd만으로는 어긋날 수 있다).
   명령에 `git -C <path>`가 있으면 동일하게 전달하고, 선행 세그먼트에
-  `cd`가 있으면 해석 기준이 불명이므로 브랜치 검사를 건너뛴다(타 저장소
-  오차단 방지). rev-parse 실패·timeout·detached HEAD(`HEAD`)는 통과.
+  `cd`나 브랜치를 바꾸는 `git checkout`/`git switch`가 있으면 커밋이 얹힐
+  대상이 불명이므로 브랜치 검사를 건너뛴다(타 저장소·선행 브랜치 생성
+  오차단 방지 — hook은 실행 *전*에 돌므로 `git checkout -b feat/x && git
+  commit`의 현재 브랜치는 아직 main이다). 단 `--` 뒤에 경로를 지정하는
+  복원 형태와, 대상이 보호 브랜치인 이동은 커밋이 실제로 보호 브랜치에
+  얹히므로 제외한다. rev-parse 실패·timeout·detached HEAD(`HEAD`)는 통과.
 - 메시지는 첫 `-m`/`--message`(결합 단축 `-am` 등 포함)의 첫 줄만 검사.
   heredoc(`-m "$(cat <<'EOF' ...)"`) 형태는 첫 줄을 추출한다. 추출 불가
   (`-F`, 에디터, `--amend --no-edit`)와 빈 제목은 메시지 검사만 통과시키고
@@ -29,6 +33,15 @@ Claude Code의 PreToolUse(Bash) hook으로 실행되어 `git commit` 명령을 �
 - 감지 못하는 형태(`bash -c` 내부, 스크립트 경유)와 push 차단은 v1 범위
   밖이며 fail-open 방향의 한계다(commit 차단으로 main에 신규 커밋 자체가
   생기지 않아 실효 공백은 작다 — 잔여 경로는 #4에서 검토).
+- 브랜치 변경 판정의 알려진 한계(모두 fail-open 방향):
+  `--` 없이 경로를 지정하는 복원(`git checkout HEAD~1 src/foo.py`), 대화형
+  `-p`, 인자 없는 `git checkout`은 브랜치 변경으로 오분류돼 브랜치 검사가
+  생략된다 — ref와 경로의 구분은 저장소 조회 없이는 불가능하다. 래치는
+  커밋의 `git -C <path>`도 조건 실행(`||`)도 고려하지 않으며, 세그먼트
+  선두가 `git`인 경우만 본다(`env`/`xargs`/별칭 경유는 오차단이 남는다).
+  폴백(shlex 실패) 경로는 checkout을 모른다 — 명령 텍스트만으로는 언급과
+  실행을 구분할 수 없어 새 구멍을 만들지 않는 쪽을 택했다(#45).
+  비보호 브랜치에서 `git checkout main && git commit`은 통과한다(#44).
 
 종료 코드: 0 통과, 1 내부 오류(비차단 경고), 42 차단(sentinel — settings.json
 래퍼가 2로 되매핑).
@@ -56,6 +69,12 @@ EXIT_BLOCK = 42
 OPERATORS = {"&&", "||", "|", ";", ";;", "&", "(", ")"}
 
 PROTECTED_BRANCHES = {"main", "master"}
+
+# 커밋이 얹힐 브랜치를 바꿀 수 있는 서브커맨드.
+BRANCH_CHANGE_SUBCOMMANDS = {"checkout", "switch"}
+
+# 브랜치를 새로 만들며 이동하는 플래그 (checkout -b/-B, switch -c/-C).
+NEW_BRANCH_FLAGS = {"-b", "-B", "-c", "-C"}
 
 GIT_TIMEOUT_SECONDS = 10
 
@@ -90,7 +109,8 @@ class CommitInvocation:
         subject: 추출된 커밋 메시지 제목(첫 줄). 추출 불가면 None.
         c_path: `git -C`로 지정된 대상 디렉터리. 없으면 None.
         override: 세그먼트 선두에 ATOM_COMMIT_OVERRIDE=1이 있었는지.
-        branch_check_unsafe: 선행 `cd` 때문에 브랜치 판정 기준이 불명인지.
+        branch_check_unsafe: 선행 `cd`나 브랜치 변경(`git checkout`/`git switch`)
+            때문에 커밋이 얹힐 브랜치가 불명인지.
     """
 
     subject: str | None
@@ -268,12 +288,66 @@ def _detect_fallback(command: str) -> list[CommitInvocation]:
     ]
 
 
+def _checkout_target(args: list[str]) -> str | None:
+    """checkout/switch가 이동할 대상 브랜치 토큰을 찾는다.
+
+    생성 플래그(`-b`/`-B`/`-c`/`-C`)가 있으면 그 뒤 토큰이 대상이고, 없으면 첫
+    비플래그 토큰이 대상이다. 이래야 `git checkout -b feat/x main`에서 시작점인
+    `main`이 아니라 실제 대상인 `feat/x`를 고른다.
+
+    Args:
+        args: 서브커맨드 뒤 인자 토큰들.
+
+    Returns:
+        대상 토큰. 판정 불가면 None.
+    """
+    for i, token in enumerate(args):
+        if token in NEW_BRANCH_FLAGS:
+            return args[i + 1] if i + 1 < len(args) else None
+        if not token.startswith("-"):
+            return token
+    return None
+
+
+def _makes_branch_check_unsafe(segment: list[str]) -> bool:
+    """이 세그먼트가 이후 커밋의 브랜치 판정 기준을 불명으로 만드는지 판정한다.
+
+    `cd`는 저장소 자체가 바뀌고, 브랜치를 바꾸는 `git checkout`/`git switch`는
+    커밋이 얹힐 브랜치가 바뀐다 — 둘 다 hook이 실행 전에 조회한 브랜치를
+    쓸모없게 만든다. 단 브랜치를 바꾸지 않거나(경로 복원) 대상이 보호
+    브랜치인 경우는 검사를 유지해야 하므로 제외한다.
+
+    Args:
+        segment: 연산자로 분리된 토큰 세그먼트.
+
+    Returns:
+        이후 커밋의 브랜치 검사를 건너뛰어야 하면 True.
+    """
+    first = next((t for t in segment if not _ENV_ASSIGNMENT_RE.match(t)), None)
+    if first is not None and _basename(first) == "cd":
+        return True
+
+    parsed = _git_subcommand(segment)
+    if parsed is None:
+        return False
+    subcommand, args, _, _ = parsed
+    if subcommand not in BRANCH_CHANGE_SUBCOMMANDS:
+        return False
+    # `git checkout [<ref>] -- <path>`는 경로 복원이라 브랜치를 안 바꾼다.
+    # 뒤가 빈 `--`는 복원이 아니라 실제로 브랜치를 바꾼다(git 2.53 확인).
+    if subcommand == "checkout" and "--" in args and args.index("--") < len(args) - 1:
+        return False
+    # 대상이 보호 브랜치면 커밋이 거기에 얹히므로 검사를 건너뛰면 안 된다.
+    return _checkout_target(args) not in PROTECTED_BRANCHES
+
+
 def detect_invocations(command: str) -> list[CommitInvocation]:
     """Bash 명령 문자열에서 모든 git commit 명령을 감지한다.
 
     줄 단위 토큰화 → 전체 문자열 토큰화 → 정규식 폴백 순서로 내려간다
-    (dup guard와 동일한 전략). 어떤 세그먼트든 커밋 이전에 `cd`가 나오면
-    이후 커밋들의 브랜치 판정 기준이 불명이므로 unsafe로 표시한다.
+    (dup guard와 동일한 전략). 커밋보다 앞선 세그먼트가 브랜치 판정 기준을
+    불명으로 만들면(`_makes_branch_check_unsafe`) 이후 커밋들을 unsafe로
+    표시한다.
 
     Args:
         command: Bash 도구가 실행하려는 명령 전체.
@@ -291,24 +365,21 @@ def detect_invocations(command: str) -> list[CommitInvocation]:
             return _detect_fallback(command)
 
     invocations: list[CommitInvocation] = []
-    saw_cd = False
+    branch_unsafe = False
     for tokens in token_groups:
         for segment in _split_segments(tokens):
-            first = next(
-                (t for t in segment if not _ENV_ASSIGNMENT_RE.match(t)), None
-            )
-            if first is not None and _basename(first) == "cd":
-                saw_cd = True
-                continue
             parsed = _parse_segment(segment)
-            if parsed is not None:
+            if parsed is None:
+                if _makes_branch_check_unsafe(segment):
+                    branch_unsafe = True
+            else:
                 subject, c_path, override = parsed
                 invocations.append(
                     CommitInvocation(
                         subject=subject,
                         c_path=c_path,
                         override=override,
-                        branch_check_unsafe=saw_cd,
+                        branch_check_unsafe=branch_unsafe,
                     )
                 )
     return invocations
