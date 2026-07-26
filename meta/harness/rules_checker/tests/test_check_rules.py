@@ -637,6 +637,26 @@ def test_non_utf8_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
     assert any("harness.legacy" in v for v in violations)
 
 
+def test_pathological_rule_yaml_does_not_kill_the_sweep(tmp_path: Path) -> None:
+    # 파싱 중 예외(YAML 중첩의 RecursionError — OSError도 UnicodeDecodeError도
+    # 아님)도 스윕을 뭉개면 안 된다(탈출 관찰 2R: 가드가 예외 타입만 넓히고
+    # 영역을 안 넓혀 같은 가림이 세 번째 재발).
+    root = make_repo(tmp_path)
+    (root / "meta" / "rules" / "deep.md").write_text(
+        "---\nx: " + "[" * 8000 + "\n---\n", encoding="utf-8"
+    )
+    legacy = (
+        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
+        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.legacy; fi'
+    )
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text(
+        hook_settings(legacy), encoding="utf-8"
+    )
+    violations = rule_violations(root)
+    assert any("harness.legacy" in v for v in violations)
+
+
 def test_skill_missing_target_does_not_mask_shape(tmp_path: Path) -> None:
     # 대상 파일 부재가 SKILL.md 형태 위반을 가리면 안 된다(탈출 관찰 라운드:
     # bad_path만 고치고 missing-target 경로에 같은 가림이 남아 있었다).

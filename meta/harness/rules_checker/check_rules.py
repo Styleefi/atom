@@ -217,8 +217,9 @@ def _references_module(command: str, module: str) -> bool:
 def _skill_path_shape_violations(rel: Path, deployed_to: str) -> list[str]:
     """skill 그릇 deployed-to의 경로 형태 위반을 돌려준다(문자열 검사).
 
-    파일 존재와 무관한 검사라 경로 위반(bad_path) 시에도 수행 가능하다 —
-    본 분기와 bad_path 경로가 공유해 메시지 드리프트를 막는다.
+    파일 존재·경로 유효성과 무관한 검사라 check_rule_file이 존재 검사 앞
+    단일 지점에서 호출한다 — bad_path/missing-target 어느 조기 return도
+    형태 위반을 가리지 못하게. 다른 곳에서 재호출하면 이중 보고가 된다.
     """
     deployed = Path(deployed_to)
     if deployed.parts[:2] != (".claude", "skills") or deployed.name != "SKILL.md":
@@ -642,7 +643,10 @@ def check_hook_wiring(root: Path) -> list[str]:
     과잉 규제하지 않기 위함).
 
     한계: settings.local.json은 커밋되지 않으므로 CI에서는 검증 불가(로컬
-    실행에서만 잡힘). 읽기 실패(OSError)·JSON 파싱 실패·비객체 대상은 규칙
+    실행에서만 잡힘). 읽기·파싱이 불가능한 규칙 파일이 선언한 비표준
+    deployed-to는 대상을 알 수 없어 그 파일이 고쳐질 때까지 스윕할 수 없다 —
+    해당 규칙은 per-rule 전역 방어가 internal error로 보고해 run이 red이므로
+    침묵 통과는 아니며, 인벤토리 보류와 같은 공표된 지연 패턴이다. 읽기 실패(OSError)·JSON 파싱 실패·비객체 대상은 규칙
     유무와 무관하게 위반으로 소리낸다 — 규칙별 검사가 frontmatter 오류로
     조기 종료하면 아무도 보고하지 않는 조합이 생기기 때문이며(최종 게이트
     리뷰), 건강한 ruled 대상의 이중 보고는 수용된 패턴이다.
@@ -663,16 +667,16 @@ def check_hook_wiring(root: Path) -> list[str]:
     ruled: set[Path] = set()
     for rule_path in rule_files(root):
         try:
-            text = rule_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            # 규칙 파일 자체가 안 읽힘(깨진 symlink, 비UTF-8 인코딩 등) —
-            # per-rule 전역 방어가 internal error로 보고한다. 여기서 전파되면
-            # 스윕 전체가 하나의 internal error로 뭉개져 배선 위반이 전부
-            # 사라진다. "읽기 실패"라는 부류로 잡는다 — OSError만 잡던 첫
-            # 수정이 UnicodeDecodeError(ValueError 계열)를 놓쳐 같은 가림이
-            # 재발했다(탈출 관찰 라운드).
+            data, error = parse_frontmatter(rule_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 — 아래 참조
+            # 규칙 파일 하나가 스윕 전체를 뭉개면 안 된다. 가드는 예외 "타입"이
+            # 아니라 반복 "영역"을 감싼다 — OSError만(깨진 symlink), 다음엔
+            # UnicodeDecodeError(비UTF-8), 다음엔 파싱 예외(YAML RecursionError)
+            # 로 같은 가림이 세 번 재발한 교훈. 문제의 규칙 파일 자체는
+            # per-rule 전역 방어가 internal error로 보고하고(run은 red), 그
+            # 파일이 선언한 비표준 deployed-to는 파일이 고쳐질 때까지 스윕
+            # 불가 — 인벤토리 보류와 같은 공표된 지연 패턴(docstring 참조).
             continue
-        data, error = parse_frontmatter(text)
         if error or data is None:
             continue
         if data.get("enforce") == "hook" and data.get("deployed-to"):
