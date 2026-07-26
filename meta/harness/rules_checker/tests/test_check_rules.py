@@ -293,8 +293,10 @@ def test_hook_rule_with_broken_settings_json(tmp_path: Path) -> None:
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
     make_hook_deployment(root, "my-guard", "{not json")
     violations = rule_violations(root)
-    assert len(violations) == 1
-    assert "is not valid JSON" in violations[0]
+    # per-rule의 정밀 메시지 + 스윕의 검증 불가 보고(면제 없음 — 최종 게이트 리뷰).
+    assert len(violations) == 2
+    assert any("is not valid JSON" in v for v in violations)
+    assert any("cannot verify hook wiring" in v for v in violations)
 
 
 def test_hook_rule_without_module_reference(tmp_path: Path) -> None:
@@ -575,9 +577,60 @@ def test_non_object_settings_does_not_mask_package(tmp_path: Path) -> None:
     (root / ".claude").mkdir()
     (root / ".claude" / "settings.json").write_text("[]", encoding="utf-8")
     violations = rule_violations(root)
-    assert len(violations) == 2
+    assert len(violations) == 3
     assert any("is not a JSON object" in v for v in violations)
     assert any("does not exist" in v for v in violations)
+    assert any("cannot verify hook wiring" in v for v in violations)
+
+
+def test_broken_rule_plus_corrupt_settings_both_reported(tmp_path: Path) -> None:
+    # frontmatter가 깨진 hook 규칙 + 깨진 settings 조합 — 규칙별 검사가 조기
+    # 종료해도 스윕이 검증 불가를 보고해야 한다(최종 게이트 리뷰: 면제 전제
+    # 붕괴로 아무도 보고하지 않던 침묵 통과).
+    root = make_repo(tmp_path)
+    body = (
+        "---\nid: my-guard\ntier: bogus\nenforce: hook\n"
+        "deployed-to: .claude/settings.json\nblocking: true\n---\n\nbody\n"
+    )
+    write_rule(root, "my-guard.md", body)
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text("{not json", encoding="utf-8")
+    violations = rule_violations(root)
+    assert any("invalid tier" in v for v in violations)
+    assert any("cannot verify hook wiring" in v for v in violations)
+
+
+def test_broken_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
+    # 규칙 파일 하나가 안 읽혀도(깨진 symlink) 스윕의 배선 위반은 살아야
+    # 한다(최종 게이트 리뷰: 스윕 전체가 internal error 하나로 뭉개지던 가림).
+    root = make_repo(tmp_path)
+    (root / "meta" / "rules" / "broken.md").symlink_to(root / "nonexistent.md")
+    legacy = (
+        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
+        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.legacy; fi'
+    )
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text(
+        hook_settings(legacy), encoding="utf-8"
+    )
+    violations = rule_violations(root)
+    assert any("internal checker error" in v for v in violations)
+    assert any("harness.legacy" in v for v in violations)
+
+
+def test_skill_bad_path_does_not_mask_shape(tmp_path: Path) -> None:
+    # skill 그릇의 경로 위반이 SKILL.md 형태 위반을 가리면 안 된다(최종 게이트
+    # 리뷰: 가림 부류의 skill 잔재).
+    root = make_repo(tmp_path)
+    body = (
+        "---\nid: my-style\ntier: convention\nenforce: skill\n"
+        "deployed-to: /abs/not-a-skill.txt\n---\n\nbody\n"
+    )
+    write_rule(root, "my-style.md", body)
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("repo-root-relative" in v for v in violations)
+    assert any("must be a SKILL.md under .claude/skills/" in v for v in violations)
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root는 mode 000도 읽을 수 있다")
@@ -590,8 +643,9 @@ def test_unreadable_settings_is_a_violation_not_a_crash(tmp_path: Path) -> None:
     make_hook_deployment(root, "my-guard", settings)
     (root / ".claude" / "settings.json").chmod(0o000)
     violations = rule_violations(root)
-    assert len(violations) == 1
-    assert "cannot be read" in violations[0]
+    assert len(violations) == 2
+    assert any("cannot be read" in v for v in violations)
+    assert any("cannot verify hook wiring" in v for v in violations)
 
 
 def test_sweep_reports_unruled_corrupt_settings(tmp_path: Path) -> None:
@@ -710,13 +764,25 @@ def test_missing_blocking_does_not_mask_other_defects(tmp_path: Path) -> None:
 
 def test_hook_rule_with_non_object_settings(tmp_path: Path) -> None:
     # 배열 등 비객체 settings는 전용 메시지로 보고한다(리뷰 발견: "not
-    # referenced"로 오도하던 케이스).
+    # referenced"로 오도하던 케이스). 스윕도 예외 없이 함께 보고한다.
     root = make_repo(tmp_path)
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
     make_hook_deployment(root, "my-guard", "[]")
     violations = rule_violations(root)
-    assert len(violations) == 1
-    assert "is not a JSON object" in violations[0]
+    assert len(violations) == 2
+    assert any("is not a JSON object" in v for v in violations)
+    assert any("cannot verify hook wiring" in v for v in violations)
+
+
+def test_null_settings_is_rejected(tmp_path: Path) -> None:
+    # JSON 리터럴 null은 무위반 통과가 아니라 비객체 위반이다(최종 게이트
+    # 리뷰: parsed의 None 겸용 sentinel이 만든 침묵 통과 회귀).
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    make_hook_deployment(root, "my-guard", "null")
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("is not a JSON object" in v for v in violations)
 
 
 def test_sweep_ignores_non_harness_commands(tmp_path: Path) -> None:

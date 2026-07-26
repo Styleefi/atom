@@ -214,6 +214,21 @@ def _references_module(command: str, module: str) -> bool:
     return re.search(pattern, command) is not None
 
 
+def _skill_path_shape_violations(rel: Path, deployed_to: str) -> list[str]:
+    """skill 그릇 deployed-to의 경로 형태 위반을 돌려준다(문자열 검사).
+
+    파일 존재와 무관한 검사라 경로 위반(bad_path) 시에도 수행 가능하다 —
+    본 분기와 bad_path 경로가 공유해 메시지 드리프트를 막는다.
+    """
+    deployed = Path(deployed_to)
+    if deployed.parts[:2] != (".claude", "skills") or deployed.name != "SKILL.md":
+        return [
+            f"{rel}: skill deployed-to '{deployed_to}' must be a "
+            "SKILL.md under .claude/skills/"
+        ]
+    return []
+
+
 def check_rule_file(rule_path: Path, root: Path) -> list[str]:
     """규칙 파일 하나를 검증하고 위반 목록을 돌려준다.
 
@@ -309,27 +324,25 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
                     f"{rel}: deployed-to target '{data['deployed-to']}' does not exist"
                 )
             else:
-                parsed: object | None
+                # problem 변수로 실패를 명시 추적한다 — parsed의 None을 실패
+                # sentinel로 겸용하면 JSON 리터럴 null이 무위반 통과한다
+                # (최종 게이트 리뷰: 침묵 통과 회귀).
+                problem: str | None = None
+                parsed: object = None
                 try:
                     parsed = json.loads(target.read_text(encoding="utf-8"))
                 except OSError:
-                    violations.append(
-                        f"{rel}: deployed-to target '{data['deployed-to']}' "
-                        "cannot be read"
-                    )
-                    parsed = None
+                    problem = "cannot be read"
                 except ValueError:
+                    problem = "is not valid JSON"
+                if problem is None and not isinstance(parsed, dict):
+                    problem = "is not a JSON object"
+                if problem is not None:
                     violations.append(
-                        f"{rel}: deployed-to target '{data['deployed-to']}' "
-                        "is not valid JSON"
+                        f"{rel}: deployed-to target '{data['deployed-to']}' {problem}"
                     )
-                    parsed = None
-                if parsed is not None and not isinstance(parsed, dict):
-                    violations.append(
-                        f"{rel}: deployed-to target '{data['deployed-to']}' "
-                        "is not a JSON object"
-                    )
-                elif isinstance(parsed, dict):
+                else:
+                    assert isinstance(parsed, dict)
                     settings = parsed
         if settings is not None:
             commands = _hook_commands(settings)
@@ -365,6 +378,13 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         return violations
 
     if bad_path:
+        # 파일 검사는 불가하지만 문자열 기반 검사(skill 경로 형태)는 수행한다 —
+        # 조기 return이 같은 규칙의 다른 결함을 가리지 않게(최종 게이트 리뷰:
+        # 가림 부류가 skill 그릇에 남아 있던 잔재).
+        if enforce == "skill":
+            violations.extend(
+                _skill_path_shape_violations(rel, str(data["deployed-to"]))
+            )
         return violations
 
     target = root / str(data["deployed-to"])
@@ -386,12 +406,9 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         # skill 그릇 규약(v1): deployed-to는 .claude/skills/ 아래의 SKILL.md여야
         # 하고, 그 SKILL.md가 규칙 파일을 참조해야 실배포로 본다. 규칙 본문의
         # SSOT는 meta/rules/이고 SKILL.md는 참조만 한다(내용 드리프트 방지).
-        deployed = Path(str(data["deployed-to"]))
-        if deployed.parts[:2] != (".claude", "skills") or deployed.name != "SKILL.md":
-            violations.append(
-                f"{rel}: skill deployed-to '{data['deployed-to']}' must be a "
-                "SKILL.md under .claude/skills/"
-            )
+        shape_violations = _skill_path_shape_violations(rel, str(data["deployed-to"]))
+        if shape_violations:
+            violations.extend(shape_violations)
             return violations
         reference = f"meta/rules/{rule_path.name}"
         if reference not in target.read_text(encoding="utf-8"):
@@ -621,10 +638,11 @@ def check_hook_wiring(root: Path) -> list[str]:
     과잉 규제하지 않기 위함).
 
     한계: settings.local.json은 커밋되지 않으므로 CI에서는 검증 불가(로컬
-    실행에서만 잡힘). 읽기 실패(OSError)·JSON 파싱 실패·비객체는 hook 규칙이
-    가리키는 대상이면 건너뛰고(규칙별 검사가 정확한 메시지로 보고), 규칙이
-    없는 무조건 대상이면 위반으로 소리낸다 — 아무도 대신 보고하지 않기
-    때문이다(#40 리뷰 2R). 따옴표 감싼 모듈명(`-m "harness.x"`)은 미감지 —
+    실행에서만 잡힘). 읽기 실패(OSError)·JSON 파싱 실패·비객체 대상은 규칙
+    유무와 무관하게 위반으로 소리낸다 — 규칙별 검사가 frontmatter 오류로
+    조기 종료하면 아무도 보고하지 않는 조합이 생기기 때문이며(최종 게이트
+    리뷰), 건강한 ruled 대상의 이중 보고는 수용된 패턴이다.
+    따옴표 감싼 모듈명(`-m "harness.x"`)은 미감지 —
     ruled hook이면 "not referenced" 위반으로 표면화되고, unruled는
     bash -c 간접 실행과 같은 기존 잔여 클래스.
 
@@ -640,7 +658,15 @@ def check_hook_wiring(root: Path) -> list[str]:
     }
     ruled: set[Path] = set()
     for rule_path in rule_files(root):
-        data, error = parse_frontmatter(rule_path.read_text(encoding="utf-8"))
+        try:
+            text = rule_path.read_text(encoding="utf-8")
+        except OSError:
+            # 규칙 파일 자체가 안 읽힘(깨진 symlink 등) — per-rule 전역 방어가
+            # internal error로 보고한다. 여기서 전파되면 스윕 전체가 하나의
+            # internal error로 뭉개져 배선 위반이 전부 사라진다(최종 게이트
+            # 리뷰: 가림 부류의 repo-check 단위 재발).
+            continue
+        data, error = parse_frontmatter(text)
         if error or data is None:
             continue
         if data.get("enforce") == "hook" and data.get("deployed-to"):
@@ -661,12 +687,14 @@ def check_hook_wiring(root: Path) -> list[str]:
         except (OSError, ValueError):
             settings = None
         if not isinstance(settings, dict):
-            if target not in ruled:
-                violations.append(
-                    f"{rel}: cannot verify hook wiring — file is unreadable or "
-                    "not a JSON object (no hook rule covers this file, so "
-                    "nothing else will report it)"
-                )
+            # ruled 대상도 예외 없이 보고한다 — 규칙별 검사는 frontmatter 오류
+            # 등으로 조기 종료하면 여기까지 못 오므로, "규칙이 대신 보고한다"는
+            # 면제 전제는 성립하지 않는다(최종 게이트 리뷰). ruled 대상의 이중
+            # 보고는 per-rule/스윕 이중 검사와 같은 수용된 패턴.
+            violations.append(
+                f"{rel}: cannot verify hook wiring — file is unreadable or "
+                "not a JSON object"
+            )
             continue
         for command in _hook_commands(settings):
             tokens = _HOOK_MODULE_RE.findall(command)
