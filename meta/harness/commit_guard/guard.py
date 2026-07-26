@@ -161,18 +161,21 @@ def _extract_subject(raw_message: str | None) -> str | None:
     return subject or None
 
 
-def _parse_segment(segment: list[str]) -> tuple[str | None, str | None, bool] | None:
-    """세그먼트 하나에서 git commit 명령을 파싱한다.
+def _git_subcommand(
+    segment: list[str],
+) -> tuple[str, list[str], str | None, bool] | None:
+    """세그먼트가 실행하는 git 서브커맨드를 뽑는다.
 
     명령 위치 판정: 선행 VAR=val 할당을 건너뛴 첫 토큰이 git이고, git 글로벌
-    옵션(`-C <path>`, `-c k=v` 등 `-` 시작 토큰)을 지나 처음 만나는 서브커맨드가
-    commit이어야 한다. 인자 위치의 리터럴("git commit" 언급)은 대상이 아니다.
+    옵션(`-C <path>`, `-c k=v` 등 `-` 시작 토큰)을 지나 처음 만나는 토큰이
+    서브커맨드다. 인자 위치의 리터럴("git commit" 언급)은 대상이 아니다.
 
     Args:
         segment: 연산자로 분리된 토큰 세그먼트.
 
     Returns:
-        (subject, c_path, override) 튜플, 대상이 아니면 None.
+        (서브커맨드, 그 뒤 인자들, `-C` 경로, override 여부) 튜플.
+        git 명령이 아니거나 서브커맨드가 없으면 None.
     """
     index = 0
     override = False
@@ -195,11 +198,28 @@ def _parse_segment(segment: list[str]) -> tuple[str | None, str | None, bool] | 
         else:
             # 값 결합형(--git-dir=x 등)은 단일 토큰이라 그냥 건너뛴다.
             i += 1
-    if i >= len(rest) or rest[i] != "commit":
+    if i >= len(rest):
+        return None
+    return rest[i], rest[i + 1:], c_path, override
+
+
+def _parse_segment(segment: list[str]) -> tuple[str | None, str | None, bool] | None:
+    """세그먼트 하나에서 git commit 명령을 파싱한다.
+
+    Args:
+        segment: 연산자로 분리된 토큰 세그먼트.
+
+    Returns:
+        (subject, c_path, override) 튜플, 대상이 아니면 None.
+    """
+    parsed = _git_subcommand(segment)
+    if parsed is None:
+        return None
+    subcommand, args, c_path, override = parsed
+    if subcommand != "commit":
         return None
 
     raw_message: str | None = None
-    args = rest[i + 1:]
     j = 0
     while j < len(args):
         token = args[j]
