@@ -50,6 +50,10 @@ Claude Code의 PreToolUse(Bash) hook으로 실행되어 `git commit` 명령을 �
   - `--` 없이 경로를 지정하는 복원(`git checkout HEAD~1 src/foo.py`)은 대상이
     ref로 읽혀 래치가 켜진다. ref와 경로의 구분은 저장소 조회 없이는 불가능하다.
   - 분리형 옵션 값이 위치 인자를 가리는 형태(`--conflict merge main`).
+  - **실행되지 않는 checkout도 래치를 켠다.** 래치는 명령 텍스트만 보므로
+    heredoc 본문에 적힌 checkout, 실패한 checkout(브랜치가 이미 있어서),
+    단락된 `false && git checkout …`, 선택되지 않은 `if`/`case` 가지가 모두
+    검사를 끈다. 실행 여부 판정은 셸 의미론이 필요해 범위 밖이다(#49).
   - 래치는 커밋의 `git -C <path>`도 조건 실행(`||`)도 고려하지 않는다.
   - 비보호 브랜치에서 출발하는 `git checkout main && git commit`은 통과한다 —
     hook이 실행 전에 조회한 브랜치가 아직 비보호라 막을 근거가 없다(#44).
