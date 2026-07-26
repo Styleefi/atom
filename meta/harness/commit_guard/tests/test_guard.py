@@ -458,6 +458,35 @@ def test_track_to_main_from_feature_branch_passes(monkeypatch) -> None:
     assert calls == [(None, None)]
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        "git checkout -b feat/x",
+        "git switch -c feat/x",
+        "\tgit checkout -b feat/x",
+        "```bash\ngit checkout -b feat/x\n```",
+    ],
+)
+def test_heredoc_body_does_not_latch(monkeypatch, body: str) -> None:
+    # 본문은 파일에 쓰이는 내용이라 실행되지 않는다 — 커밋은 여전히 main에 얹힌다.
+    _set_branch(monkeypatch, "main")
+    command = (
+        "cat > notes.md <<'EOF'\n" + body + "\nEOF\ngit commit -m \"docs: notes\""
+    )
+    assert _run_main(monkeypatch, _bash_payload(command)) == 42
+
+
+def test_real_checkout_after_a_heredoc_still_latches(monkeypatch) -> None:
+    # 종료어 뒤의 checkout은 진짜 명령이다.
+    calls = _set_branch(monkeypatch, "main")
+    command = (
+        "cat > notes.md <<'EOF'\nplain text\nEOF\n"
+        'git checkout -b feat/x\ngit commit -m "feat: x"'
+    )
+    assert _run_main(monkeypatch, _bash_payload(command)) == 0
+    assert calls == []
+
+
 def test_later_move_to_protected_restores_branch_check(monkeypatch) -> None:
     # 마지막 브랜치 변경이 이긴다 — 커밋은 main에 얹히므로 검사가 되살아난다.
     _set_branch(monkeypatch, "main")

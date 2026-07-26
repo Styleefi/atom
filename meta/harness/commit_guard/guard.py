@@ -105,6 +105,9 @@ _MESSAGE_FLAG_RE = re.compile(r"^-[a-zA-Z]*m$")
 # heredoc 마커 다음 첫 줄 추출: <<EOF / <<'EOF' / << "EOF" 변형 모두.
 _HEREDOC_FIRST_LINE_RE = re.compile(r"<<\s*['\"]?\w+['\"]?[ \t]*\n([^\n]*)")
 
+# heredoc 시작 마커와 종료어. `<<-`는 종료어의 선행 탭을 무시한다.
+_HEREDOC_START_RE = re.compile(r"<<-?\s*(['\"]?)(\w+)\1")
+
 # shlex 실패 시 폴백: 명령 위치(문자열 시작 또는 연산자 뒤)에 앵커된 감지.
 _FALLBACK_CMD_RE = re.compile(
     r"(?:^|[;&|(]\s*)(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:\S*/)?git\s+(?:-\S+\s+)*commit\b",
@@ -355,6 +358,41 @@ def _checkout_target(args: list[str]) -> str | None:
     return next((t for t in args if not t.startswith("-")), None)
 
 
+def _heredoc_body_flags(lines: list[str]) -> list[bool]:
+    """각 줄이 heredoc 본문인지 표시한다.
+
+    heredoc 본문은 파일에 쓰이는 내용이지 실행되는 명령이 아니다. 그런데 줄
+    단위 토큰화는 `git checkout -b feat/x`라고 적힌 본문 줄을 진짜 명령처럼
+    읽는다. 이 표시는 그런 줄이 브랜치 래치를 건드리지 못하게 하는 데만 쓴다 —
+    본문을 아예 버리지 않는 이유는, 이 판정이 과하게 잡더라도(따옴표 안의
+    `<<` 등) 결과가 "래치를 안 세운다"= 검사 유지 쪽이라 안전하기 때문이다.
+
+    Args:
+        lines: 명령을 개행으로 나눈 줄 목록.
+
+    Returns:
+        줄마다 본문 여부를 담은 같은 길이의 목록.
+    """
+    flags: list[bool] = []
+    terminator: str | None = None
+    indented = False
+    for line in lines:
+        if terminator is None:
+            flags.append(False)
+            match = _HEREDOC_START_RE.search(line)
+            if match:
+                terminator = match.group(2)
+                indented = "<<-" in line
+            continue
+        candidate = line.lstrip("\t") if indented else line
+        if candidate.strip() == terminator:
+            terminator = None
+            flags.append(False)
+        else:
+            flags.append(True)
+    return flags
+
+
 def _changes_repository(segment: list[str]) -> bool:
     """세그먼트가 작업 저장소 자체를 옮기는지 판정한다.
 
@@ -426,19 +464,22 @@ def detect_invocations(command: str) -> list[CommitInvocation]:
     Returns:
         감지된 커밋 명령 목록. 대상이 없으면 빈 목록.
     """
+    lines = command.split("\n")
     token_groups: list[list[str]] | None = None
+    heredoc_body = _heredoc_body_flags(lines)
     try:
-        token_groups = [_tokenize(line) for line in command.split("\n")]
+        token_groups = [_tokenize(line) for line in lines]
     except ValueError:
         try:
             token_groups = [_tokenize(command)]
+            heredoc_body = [False]
         except ValueError:
             return _detect_fallback(command)
 
     invocations: list[CommitInvocation] = []
     other_repository = False
     branch_unsafe = False
-    for tokens in token_groups:
+    for tokens, in_body in zip(token_groups, heredoc_body):
         for segment in _split_segments(tokens):
             parsed = _parse_segment(segment)
             if parsed is not None:
@@ -451,6 +492,8 @@ def detect_invocations(command: str) -> list[CommitInvocation]:
                         branch_check_unsafe=other_repository or branch_unsafe,
                     )
                 )
+            elif in_body:
+                continue  # 파일에 쓰이는 내용이지 실행되는 명령이 아니다
             elif _changes_repository(segment):
                 other_repository = True
             else:
