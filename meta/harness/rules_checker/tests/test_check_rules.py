@@ -654,6 +654,9 @@ def test_pathological_rule_yaml_does_not_kill_the_sweep(tmp_path: Path) -> None:
         hook_settings(legacy), encoding="utf-8"
     )
     violations = rule_violations(root)
+    # 형제 테스트들과 동일하게 "run은 red" 절반도 핀한다 — 규칙이 조용히
+    # 건너뛰어지는 회귀를 이 테스트만 놓치면 안 된다(최종 게이트 R6).
+    assert any("meta/rules/deep.md: internal checker error" in v for v in violations)
     assert any("harness.legacy" in v for v in violations)
 
 
