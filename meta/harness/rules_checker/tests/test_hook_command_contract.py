@@ -22,8 +22,6 @@ from pathlib import Path
 
 import pytest
 
-from harness.commit_guard import guard as commit_guard
-from harness.issue_duplicate_guard import guard as issue_duplicate_guard
 from harness.rules_checker.check_rules import (
     HOOK_COMMAND_BLOCKING,
     HOOK_COMMAND_NON_BLOCKING,
@@ -136,7 +134,13 @@ def test_blocking_template_remaps_the_guards_sentinel() -> None:
     # 가드 상수 ↔ 래퍼 템플릿의 실결합(리뷰 발견: 트리비얼 ==42 단정은 아무
     # 것도 묶지 못함). 값이 갈라지면 차단이 조용히 비차단 경고로 강등되므로,
     # 템플릿 문자열이 각 가드의 EXIT_BLOCK을 되매핑 조건으로 쓰는지 대조한다.
-    for guard in (commit_guard, issue_duplicate_guard):
+    # importorskip: 가드를 정합하게 제거한 자식 프로젝트에서 이 파일 수집이
+    # 통째로 죽지 않도록(리뷰 2R) 모듈 부재는 이 테스트만 skip으로 수렴시킨다.
+    for module_name in (
+        "harness.commit_guard.guard",
+        "harness.issue_duplicate_guard.guard",
+    ):
+        guard = pytest.importorskip(module_name)
         assert f'-eq {guard.EXIT_BLOCK} ' in HOOK_COMMAND_BLOCKING
 
 

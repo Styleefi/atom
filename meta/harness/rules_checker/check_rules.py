@@ -81,11 +81,12 @@ HOOK_COMMAND_NON_BLOCKING = (
 
 # 훅 커맨드에서 `-m` 플래그로 실행되는 harness 모듈을 뽑는 패턴. 독립 `-m`만
 # 인정해(좌측 (?<!\S)) `--m`·`run-m` 같은 내부 매치를 배제하고, 인터프리터
-# 표기(python/python3/uv run)와 무관하게 변형 배선을 잡는다. 점 포함 캡처로
-# 하위모듈 진입점(harness.a.b)도 온전히 뽑는다. 한계: 따옴표로 감싼 모듈명
+# 표기(python/python3/uv run)와 무관하게 변형 배선을 잡는다. `\s*`는 붙여쓰기
+# (`-mharness.x` — 유효한 인터프리터 호출)까지 커버. 점 포함 캡처로 하위모듈
+# 진입점(harness.a.b)도 온전히 뽑는다. 한계: 따옴표로 감싼 모듈명
 # (`-m "harness.x"`)은 미감지 — ruled hook이면 "not referenced" 위반으로
 # 표면화되고, unruled는 bash -c 간접 실행과 같은 기존 잔여 클래스.
-_HOOK_MODULE_RE = re.compile(r"(?<!\S)-m\s+(harness\.\w+(?:\.\w+)*)")
+_HOOK_MODULE_RE = re.compile(r"(?<!\S)-m\s*(harness\.\w+(?:\.\w+)*)")
 
 # CLAUDE.md/템플릿에서 규칙 import 줄을 뽑는 패턴.
 IMPORT_RE = re.compile(r"@meta/rules/\S+\.md")
@@ -198,8 +199,9 @@ def _references_module(command: str, module: str) -> bool:
     """커맨드가 해당 harness 모듈을 `-m`으로 실행하는지 판정한다.
 
     `python -m` 리터럴이 아니라 독립 `-m` 플래그에 앵커해 python3·공백 변형·
-    `uv run -m` 배선도 잡는다. 우측 lookahead로 harness.foo가 harness.foo_v2나
-    하위모듈(harness.foo.cli)에 오매치되는 것을 막는다.
+    붙여쓰기(`-mharness.x`)·`uv run -m` 배선도 잡는다. 우측 lookahead로
+    harness.foo가 harness.foo_v2나 하위모듈(harness.foo.cli)에 오매치되는
+    것을 막는다.
 
     Args:
         command: 훅 커맨드 문자열.
@@ -208,7 +210,7 @@ def _references_module(command: str, module: str) -> bool:
     Returns:
         참조하면 True.
     """
-    pattern = r"(?<!\S)-m\s+" + re.escape(module) + r"(?![\w.])"
+    pattern = r"(?<!\S)-m\s*" + re.escape(module) + r"(?![\w.])"
     return re.search(pattern, command) is not None
 
 
@@ -255,16 +257,17 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         )
         return violations
 
-    # deployed-to는 저장소 내 상대 경로여야 한다. 절대경로는 root와의 join을
-    # 통째로 대체해(#40 리뷰: relative_to가 ValueError로 체커를 죽임) 검증
-    # 자체를 무의미하게 만들므로 위반으로 거부한다.
+    # deployed-to는 저장소 내 상대 경로여야 한다. 절대경로/..는 root와의 join을
+    # 통째로 대체하거나 검사 대상을 저장소 밖으로 보낸다(#40 리뷰). 위반이어도
+    # 진행한다 — 경로와 무관한 검사(blocking 스키마, hook 패키지 실존)는 여전히
+    # 수행 가능하며, 조기 return은 같은 규칙의 다른 결함을 가린다.
     deployed = PurePosixPath(str(data["deployed-to"]))
-    if deployed.is_absolute() or ".." in deployed.parts:
+    bad_path = deployed.is_absolute() or ".." in deployed.parts
+    if bad_path:
         violations.append(
             f"{rel}: deployed-to '{data['deployed-to']}' must be a "
             "repo-root-relative path inside the repository"
         )
-        return violations
 
     # blocking 스키마(hook 전용). 위반이어도 계속 진행한다 — 존재·참조·패키지
     # 검사는 blocking과 무관하고, 템플릿 비교만 유효한 bool을 요구하므로 그
@@ -284,6 +287,86 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
             f"{rel}: 'blocking' is only valid for hook rules (enforce: hook)"
         )
 
+    if enforce == "hook":
+        # hook 그릇 규약(v2): 규칙 id에서 harness 모듈명을 도출해
+        # (1) 대상 settings JSON의 hooks 구조 안에 그 모듈을 `-m`으로 참조하는
+        #     커맨드가 1개 이상 있고(복수 matcher/이벤트 배선 허용),
+        # (2) 참조하는 모든 커맨드가 blocking 여부가 고르는 정본 래퍼 템플릿과
+        #     정확히 일치하며(#31 — uv 자체 exit 2가 차단으로 새는 배선 차단),
+        # (3) meta/harness/ 아래에 해당 패키지가 실존해야 실배포로 본다.
+        # 이 분기는 조기 return 없이 위반을 끝까지 수집한다(#40 리뷰 2R: 새로
+        # 추가한 조기 return들이 blocking에서 제거했던 가림 패턴을 재도입 —
+        # 사례가 아니라 구조로 닫는다). 경로/대상/JSON 문제는 각자 보고하고
+        # 의존 검사만 건너뛰며, 패키지 실존 검사는 항상 수행한다.
+        # 한계: 이벤트/matcher 위치까지는 보지 않는다 — 차단형 템플릿이
+        # UserPromptSubmit 아래에 있어도 통과한다(기계 검증은 범위 밖 결정).
+        module_name = "harness." + rule_path.stem.replace("-", "_")
+        settings: dict | None = None
+        if not bad_path:
+            target = root / str(data["deployed-to"])
+            if not target.is_file():
+                violations.append(
+                    f"{rel}: deployed-to target '{data['deployed-to']}' does not exist"
+                )
+            else:
+                parsed: object | None
+                try:
+                    parsed = json.loads(target.read_text(encoding="utf-8"))
+                except OSError:
+                    violations.append(
+                        f"{rel}: deployed-to target '{data['deployed-to']}' "
+                        "cannot be read"
+                    )
+                    parsed = None
+                except ValueError:
+                    violations.append(
+                        f"{rel}: deployed-to target '{data['deployed-to']}' "
+                        "is not valid JSON"
+                    )
+                    parsed = None
+                if parsed is not None and not isinstance(parsed, dict):
+                    violations.append(
+                        f"{rel}: deployed-to target '{data['deployed-to']}' "
+                        "is not a JSON object"
+                    )
+                elif isinstance(parsed, dict):
+                    settings = parsed
+        if settings is not None:
+            commands = _hook_commands(settings)
+            matching = [c for c in commands if _references_module(c, module_name)]
+            if not matching:
+                violations.append(
+                    f"{rel}: '{data['deployed-to']}' does not reference the "
+                    f"'{module_name}' hook module — declared but not actually deployed"
+                )
+            elif isinstance(data.get("blocking"), bool):
+                # blocking이 무효(부재/비bool)면 위에서 이미 위반 — 템플릿
+                # 선택이 불가능하므로 형태 비교만 건너뛴다.
+                template = (
+                    HOOK_COMMAND_BLOCKING
+                    if data["blocking"]
+                    else HOOK_COMMAND_NON_BLOCKING
+                )
+                expected = template.replace("{module}", module_name)
+                shape = "blocking" if data["blocking"] else "non-blocking"
+                for command in matching:
+                    if command != expected:
+                        violations.append(
+                            f"{rel}: hook command for '{module_name}' does not "
+                            f"match the canonical {shape} wrapper (#31 fail-open "
+                            f"wiring) — got: {command} — expected exactly: {expected}"
+                        )
+        package_dir = root / "meta" / "harness" / rule_path.stem.replace("-", "_")
+        if not package_dir.is_dir():
+            violations.append(
+                f"{rel}: hook harness package "
+                f"'meta/harness/{rule_path.stem.replace('-', '_')}/' does not exist"
+            )
+        return violations
+
+    if bad_path:
+        return violations
+
     target = root / str(data["deployed-to"])
     if not target.is_file():
         violations.append(
@@ -298,57 +381,6 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
             violations.append(
                 f"{rel}: '{data['deployed-to']}' does not contain the "
                 f"'{import_line}' import — declared but not actually deployed"
-            )
-    elif enforce == "hook":
-        # hook 그릇 규약(v2): 규칙 id에서 harness 모듈명을 도출해
-        # (1) 대상 settings JSON의 hooks 구조 안에 그 모듈을 `-m`으로 참조하는
-        #     커맨드가 1개 이상 있고(복수 matcher/이벤트 배선 허용),
-        # (2) 참조하는 모든 커맨드가 blocking 여부가 고르는 정본 래퍼 템플릿과
-        #     정확히 일치하며(#31 — uv 자체 exit 2가 차단으로 새는 배선 차단),
-        # (3) meta/harness/ 아래에 해당 패키지가 실존해야 실배포로 본다.
-        # 한계: 이벤트/matcher 위치까지는 보지 않는다 — 차단형 템플릿이
-        # UserPromptSubmit 아래에 있어도 통과한다(기계 검증은 범위 밖 결정).
-        module_name = "harness." + rule_path.stem.replace("-", "_")
-        try:
-            settings = json.loads(target.read_text(encoding="utf-8"))
-        except ValueError:
-            violations.append(
-                f"{rel}: deployed-to target '{data['deployed-to']}' is not valid JSON"
-            )
-            return violations
-        if not isinstance(settings, dict):
-            violations.append(
-                f"{rel}: deployed-to target '{data['deployed-to']}' is not a "
-                "JSON object"
-            )
-            return violations
-        commands = _hook_commands(settings)
-        matching = [c for c in commands if _references_module(c, module_name)]
-        if not matching:
-            violations.append(
-                f"{rel}: '{data['deployed-to']}' does not reference the "
-                f"'{module_name}' hook module — declared but not actually deployed"
-            )
-        elif isinstance(data.get("blocking"), bool):
-            # blocking이 무효(부재/비bool)면 위에서 이미 위반 — 템플릿 선택이
-            # 불가능하므로 형태 비교만 건너뛴다.
-            template = (
-                HOOK_COMMAND_BLOCKING if data["blocking"] else HOOK_COMMAND_NON_BLOCKING
-            )
-            expected = template.replace("{module}", module_name)
-            shape = "blocking" if data["blocking"] else "non-blocking"
-            for command in matching:
-                if command != expected:
-                    violations.append(
-                        f"{rel}: hook command for '{module_name}' does not match "
-                        f"the canonical {shape} wrapper (#31 fail-open wiring) — "
-                        f"expected exactly: {expected}"
-                    )
-        package_dir = root / "meta" / "harness" / rule_path.stem.replace("-", "_")
-        if not package_dir.is_dir():
-            violations.append(
-                f"{rel}: hook harness package "
-                f"'meta/harness/{rule_path.stem.replace('-', '_')}/' does not exist"
             )
     elif enforce == "skill":
         # skill 그릇 규약(v1): deployed-to는 .claude/skills/ 아래의 SKILL.md여야
@@ -589,9 +621,10 @@ def check_hook_wiring(root: Path) -> list[str]:
     과잉 규제하지 않기 위함).
 
     한계: settings.local.json은 커밋되지 않으므로 CI에서는 검증 불가(로컬
-    실행에서만 잡힘). 파일 부재·읽기 실패(OSError)·JSON 파싱 실패·비객체는
-    건너뛴다 — 스윕은 best-effort 계층이고, 그 상태의 보고 책임은 규칙별
-    검사가 가진다. 따옴표 감싼 모듈명(`-m "harness.x"`)은 미감지 —
+    실행에서만 잡힘). 읽기 실패(OSError)·JSON 파싱 실패·비객체는 hook 규칙이
+    가리키는 대상이면 건너뛰고(규칙별 검사가 정확한 메시지로 보고), 규칙이
+    없는 무조건 대상이면 위반으로 소리낸다 — 아무도 대신 보고하지 않기
+    때문이다(#40 리뷰 2R). 따옴표 감싼 모듈명(`-m "harness.x"`)은 미감지 —
     ruled hook이면 "not referenced" 위반으로 표면화되고, unruled는
     bash -c 간접 실행과 같은 기존 잔여 클래스.
 
@@ -601,35 +634,50 @@ def check_hook_wiring(root: Path) -> list[str]:
     Returns:
         위반 메시지 목록. 비어 있으면 통과.
     """
-    targets: set[Path] = {
+    unconditional: set[Path] = {
         root / ".claude" / "settings.json",
         root / ".claude" / "settings.local.json",
     }
+    ruled: set[Path] = set()
     for rule_path in rule_files(root):
         data, error = parse_frontmatter(rule_path.read_text(encoding="utf-8"))
         if error or data is None:
             continue
         if data.get("enforce") == "hook" and data.get("deployed-to"):
-            targets.add(root / str(data["deployed-to"]))
+            deployed = PurePosixPath(str(data["deployed-to"]))
+            if deployed.is_absolute() or ".." in deployed.parts:
+                # 저장소 밖 경로 — 규칙별 검사가 위반 보고. relative_to는
+                # 어휘적이라 ..를 못 거르므로(#40 리뷰 2R) 여기서 배제한다.
+                continue
+            ruled.add(root / str(data["deployed-to"]))
 
     violations: list[str] = []
-    for target in sorted(targets):
+    for target in sorted(unconditional | ruled):
         if not target.is_file():
             continue
+        rel = target.relative_to(root)
         try:
-            settings = json.loads(target.read_text(encoding="utf-8"))
+            settings: object = json.loads(target.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            continue
+            settings = None
         if not isinstance(settings, dict):
-            continue
-        try:
-            rel = target.relative_to(root)
-        except ValueError:
-            # 저장소 밖 경로(절대경로 deployed-to) — 규칙별 검사가 위반 보고.
+            if target not in ruled:
+                violations.append(
+                    f"{rel}: cannot verify hook wiring — file is unreadable or "
+                    "not a JSON object (no hook rule covers this file, so "
+                    "nothing else will report it)"
+                )
             continue
         for command in _hook_commands(settings):
             tokens = _HOOK_MODULE_RE.findall(command)
             if not tokens:
+                continue
+            if len(set(tokens)) > 1:
+                violations.append(
+                    f"{rel}: hook command references multiple harness modules "
+                    f"({', '.join(sorted(set(tokens)))}) — split into one "
+                    "canonical hook command per module"
+                )
                 continue
             module = tokens[0]
             expected_blocking = HOOK_COMMAND_BLOCKING.replace("{module}", module)
@@ -639,9 +687,9 @@ def check_hook_wiring(root: Path) -> list[str]:
             if command not in (expected_blocking, expected_non_blocking):
                 violations.append(
                     f"{rel}: hook command referencing '{module}' matches neither "
-                    "canonical wrapper (#31 fail-open wiring) — expected exactly "
-                    f"(blocking): {expected_blocking} — or (non-blocking): "
-                    f"{expected_non_blocking}"
+                    f"canonical wrapper (#31 fail-open wiring) — got: {command} "
+                    f"— expected exactly (blocking): {expected_blocking} — or "
+                    f"(non-blocking): {expected_non_blocking}"
                 )
     return violations
 
@@ -660,15 +708,31 @@ def check_rules(root: Path) -> list[str]:
     if not rules_dir.is_dir():
         return [f"rules directory not found: {rules_dir.relative_to(root)}"]
 
+    # 사망 부류 방어(#40 리뷰 2R: ValueError를 고치자 PermissionError가 나왔다 —
+    # 지점 단위 방어는 이 부류를 못 닫는다). 어떤 예외든 일반 위반과 구별되는
+    # "internal checker error" 위반으로 변환한다 — 검증기는 절대 traceback으로
+    # 죽지 않고, run은 red로 유지되며, 다른 규칙의 판정은 보존된다.
     rule_violations: list[str] = []
     for rule_path in rule_files(root):
-        rule_violations.extend(check_rule_file(rule_path, root))
+        try:
+            rule_violations.extend(check_rule_file(rule_path, root))
+        except Exception as exc:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
+            rule_violations.append(
+                f"{rule_path.relative_to(root)}: internal checker error — "
+                f"{type(exc).__name__}: {exc}"
+            )
 
     violations = list(rule_violations)
-    violations.extend(check_template_sync(root))
     # 역방향 스윕은 인벤토리와 달리 규칙 위반이 있어도 미루지 않는다 —
     # frontmatter 분류에 의존하지 않고, 파싱된 hook 규칙만으로 동작한다.
-    violations.extend(check_hook_wiring(root))
+    for repo_check in (check_template_sync, check_hook_wiring):
+        try:
+            violations.extend(repo_check(root))
+        except Exception as exc:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
+            violations.append(
+                f"internal checker error in {repo_check.__name__} — "
+                f"{type(exc).__name__}: {exc}"
+            )
     if rule_violations:
         # 인벤토리의 아티팩트 분류는 규칙 frontmatter에서 파생된다. 깨진
         # 레지스트리 위에서 분류하면 규칙이 뒷받침하던 하니스/스킬을 '규칙 없는
@@ -679,7 +743,13 @@ def check_rules(root: Path) -> list[str]:
             f"{len(rule_violations)} rule violation(s) above and re-run"
         )
     else:
-        violations.extend(check_inventory(root))
+        try:
+            violations.extend(check_inventory(root))
+        except Exception as exc:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
+            violations.append(
+                f"internal checker error in check_inventory — "
+                f"{type(exc).__name__}: {exc}"
+            )
     return violations
 
 
