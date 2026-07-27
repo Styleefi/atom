@@ -122,10 +122,11 @@ both into one report.
 
 Exactly two endings:
 
-1. **Observed exit** — never declared. A pass over the diff since the last
-   fix commit, run with the procedure recorded in the ledger, finds zero
-   above-bar findings, with no unresolved borderline case and no above-bar
-   backlog (including findings returned by a bar raise). The observation is
+1. **Observed exit** — never declared. A pass scoped per the Rounds
+   section — so every fix commit has been covered by a completed pass — run
+   with the procedure recorded in the ledger, finds zero above-bar findings,
+   with no unresolved borderline case and no above-bar backlog (including
+   findings returned by a bar raise). The observation is
    valid only if the reviewed HEAD is still the PR's HEAD when the pass
    completes — any new commit, whoever pushed it, invalidates the
    observation (not the pass) and requires a new pass. Below-bar findings
