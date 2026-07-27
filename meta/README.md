@@ -39,6 +39,7 @@ Rule bodies live in `meta/rules/`; each is in force only once deployed to its de
 | `korean-output` | convention | claude-md | always loaded | — | Korean sentences end with a period, not a colon. |
 | `plan-deviation` | principle | claude-md | always loaded | — | A decision outside the approved plan stops work and goes back to the owner as options. |
 | `python-stack` | convention | claude-md | always loaded | — | The meta layer is a self-contained uv project on Python 3.12+ with pytest. |
+| `review-loop` | convention | skill | on demand, when running a PR review loop | `/review-loop` | Runs PR review loops under a declared severity bar with a ledger, divergence escalation, a round-3 checkpoint, and an observed — never declared — exit. |
 | `rule-deployment` | principle | claude-md | always loaded | — | A rule is in force only when deployed to exactly one vessel and declared in frontmatter. |
 
 ## Functional artifacts
