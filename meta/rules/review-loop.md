@@ -108,13 +108,14 @@ redesign). The trigger mandates the diagnosis, never a particular remedy.
 
 ## Checkpoint
 
-When a pass yields above-bar findings that would require a fourth fix
-commit, stop before creating it and report to the owner: the per-round
+When a pass yields above-bar findings after three fix rounds have already
+run — it would start a fourth — stop before its first fix commit and report
+to the owner: the per-round
 above-bar trend, remaining above-bar findings, filed issues, rough cost so
 far, and the options — continue (optionally scoped, e.g. "fix these two and
 stop"), stop and file the residue, or rethink the fix altitude — with a
-recommendation. After a "continue", every subsequent fix commit needs the
-same approval. If the divergence trigger fires in the same round, merge
+recommendation. After a "continue", every subsequent fix round needs the
+same approval before its fixes begin. If the divergence trigger fires in the same round, merge
 both into one report.
 
 ## Ending the loop
