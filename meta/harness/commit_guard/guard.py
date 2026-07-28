@@ -11,6 +11,15 @@ Claude Code의 PreToolUse(Bash) hook으로 실행되어 `git commit` 명령을 �
 행동 지침(논리 단위 커밋, 브랜치 명명, PR 전용 머지, push 금지)은 claude-md
 쪽 commit-discipline 규칙이 담당한다 — 이 hook은 기계 검사 가능한 부분만.
 
+**동결 선언 (#52): 이 모듈의 감지 구멍은 더 고치지 않는다.** 텍스트 추론은
+셸 의미론을 판정할 수 없고, PR #46이 실측했듯 구멍을 하나 메울 때마다 새
+구멍이 생긴다. 이 모듈의 역할은 흔한 형태의 사전 차단(best-effort 예방)까지다.
+정확한 적발은 실행 후 커밋 그래프를 보는 commit_backstop(PostToolUse)이
+담당하며, 아래 한계 목록(#30 #44 #49 #50 #51 계열)은 설계상 수용된 상태다.
+메시지 검사가 저장소·브랜치와 무관하게 명령 텍스트만으로 차단하는 잔여
+오차단(스크래치 저장소 실험 등)도 동결된 한계다 — 복구는 언제나
+ATOM_COMMIT_OVERRIDE=1.
+
 설계 불변식:
 - 차단은 "커밋 명령 감지 + 위반 확증 + override 없음"의 교집합에서만.
   그 외 모든 실패 경로는 fail-open(통과) — 이 hook은 모든 Bash 호출에
@@ -45,7 +54,9 @@ Claude Code의 PreToolUse(Bash) hook으로 실행되어 `git commit` 명령을 �
     `git checkout origin/main`처럼 detached HEAD가 되는 형태나 마지막 성분이
     보호 브랜치와 같은 브랜치(`feat/main`)도 오차단된다.
   - 감지는 세그먼트 선두가 `git`인 경우만 본다(`env`/`xargs`/별칭 경유).
-  - 폴백(shlex 실패) 경로는 checkout을 모른다(#45).
+  - shlex가 두 단계(줄 단위→전체) 모두 실패하는 명령은 전면 fail-open이다 —
+    정규식 폴백은 문자열 리터럴 속 텍스트를 실행으로 오인해 무관한 Bash를
+    차단했으므로 제거했다(#45). 그 감지 공백은 commit_backstop이 받는다.
 - 여전히 통과(fail-open)하는 형태:
   - `--` 없이 경로를 지정하는 복원(`git checkout HEAD~1 src/foo.py`)은 대상이
     ref로 읽혀 래치가 켜진다. ref와 경로의 구분은 저장소 조회 없이는 불가능하다.
@@ -108,16 +119,6 @@ _MESSAGE_FLAG_RE = re.compile(r"^-[a-zA-Z]*m$")
 
 # heredoc 마커 다음 첫 줄 추출: <<EOF / <<'EOF' / << "EOF" 변형 모두.
 _HEREDOC_FIRST_LINE_RE = re.compile(r"<<\s*['\"]?\w+['\"]?[ \t]*\n([^\n]*)")
-
-# shlex 실패 시 폴백: 명령 위치(문자열 시작 또는 연산자 뒤)에 앵커된 감지.
-_FALLBACK_CMD_RE = re.compile(
-    r"(?:^|[;&|(]\s*)(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:\S*/)?git\s+(?:-\S+\s+)*commit\b",
-    re.MULTILINE,
-)
-_FALLBACK_MESSAGE_RE = re.compile(r"(?:--message|-[a-zA-Z]*m)(?:=|\s+)(?:\"([^\"\n]*)\"|'([^'\n]*)')")
-_FALLBACK_C_PATH_RE = re.compile(r"git\s+(?:-\S+\s+)*-C\s+(\S+)")
-_FALLBACK_CD_RE = re.compile(r"(?:^|[;&|(]\s*)cd\s", re.MULTILINE)
-
 
 @dataclass
 class CommitInvocation:
@@ -272,40 +273,6 @@ def _parse_segment(segment: list[str]) -> tuple[str | None, str | None, bool] | 
     return _extract_subject(raw_message), c_path, override
 
 
-def _detect_fallback(command: str) -> list[CommitInvocation]:
-    """shlex가 실패한 명령에 대한 보수적 정규식 감지.
-
-    잔여 오탐 가능성은 있으나 모든 오차단은 ATOM_COMMIT_OVERRIDE=1 재실행으로
-    복구 가능하다.
-
-    Args:
-        command: 원본 명령 문자열.
-
-    Returns:
-        감지된 커밋 명령 목록 (폴백에서는 최대 1건으로 요약).
-    """
-    if not _FALLBACK_CMD_RE.search(command):
-        return []
-    subject: str | None = None
-    heredoc = _HEREDOC_FIRST_LINE_RE.search(command)
-    if heredoc:
-        subject = heredoc.group(1).strip() or None
-    else:
-        quoted = _FALLBACK_MESSAGE_RE.search(command)
-        if quoted:
-            subject = next((g for g in quoted.groups() if g is not None), None)
-            subject = (subject or "").strip() or None
-    c_path_match = _FALLBACK_C_PATH_RE.search(command)
-    return [
-        CommitInvocation(
-            subject=subject,
-            c_path=c_path_match.group(1) if c_path_match else None,
-            override=OVERRIDE_TOKEN in command,
-            branch_check_unsafe=bool(_FALLBACK_CD_RE.search(command)),
-        )
-    ]
-
-
 def _remote_stripped(ref: str | None) -> str | None:
     """원격 추적 ref에서 파생되는 로컬 브랜치 이름을 구한다.
 
@@ -418,8 +385,9 @@ def _branch_latch(segment: list[str]) -> bool | None:
 def detect_invocations(command: str) -> list[CommitInvocation]:
     """Bash 명령 문자열에서 모든 git commit 명령을 감지한다.
 
-    줄 단위 토큰화 → 전체 문자열 토큰화 → 정규식 폴백 순서로 내려간다
-    (dup guard와 동일한 전략). 판정 기준은 두 갈래로 추적한다. `cd`는 저장소
+    줄 단위 토큰화 → 전체 문자열 토큰화 순서로 내려가고, 둘 다 실패하면
+    전면 fail-open이다(정규식 폴백은 #45 오차단으로 제거 — 공백은
+    commit_backstop이 받는다). 판정 기준은 두 갈래로 추적한다. `cd`는 저장소
     자체를 옮기므로 한 번 켜지면 유지되고(되돌릴 방법이 없다), 브랜치 변경은
     **마지막 것이 이긴다** — `git checkout feat/x && git checkout main`이면
     커밋은 main에 얹히므로 검사를 되살려야 한다.
@@ -437,7 +405,7 @@ def detect_invocations(command: str) -> list[CommitInvocation]:
         try:
             token_groups = [_tokenize(command)]
         except ValueError:
-            return _detect_fallback(command)
+            return []
 
     invocations: list[CommitInvocation] = []
     other_repository = False
