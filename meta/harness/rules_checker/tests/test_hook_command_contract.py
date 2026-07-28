@@ -137,6 +137,7 @@ def test_blocking_template_remaps_the_guards_sentinel() -> None:
     # importorskip: 가드를 정합하게 제거한 자식 프로젝트에서 이 파일 수집이
     # 통째로 죽지 않도록(리뷰 2R) 모듈 부재는 이 테스트만 skip으로 수렴시킨다.
     for module_name in (
+        "harness.commit_backstop.backstop",
         "harness.commit_guard.guard",
         "harness.issue_duplicate_guard.guard",
     ):

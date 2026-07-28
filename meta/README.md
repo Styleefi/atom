@@ -29,7 +29,8 @@ Rule bodies live in `meta/rules/`; each is in force only once deployed to its de
 | `answer-first-reminder` | convention | hook | automatic on every prompt | — | UserPromptSubmit hook that re-supplies the answer-first reminder when a message looks like a question. Fail-open; never blocks. |
 | `coding-discipline` | principle | claude-md | always loaded | — | Think before coding, keep it minimal, touch only what the request needs, read the actual error. |
 | `commit-discipline` | convention | claude-md | always loaded | — | Conventional Commits in English, feature branches, merge to main only via PR. |
-| `commit-guard` | convention | hook | automatic on `git commit` | `ATOM_COMMIT_OVERRIDE=1` | Blocks commits made directly to main/master and rejects malformed Conventional Commits headers. |
+| `commit-backstop` | convention | hook | automatic after every Bash call | `ATOM_COMMIT_OVERRIDE=1` | Exact post-execution detector: reports any local commit that reached main/master without existing on the remote main/master, plus malformed headers on new commits, with recovery steps. |
+| `commit-guard` | convention | hook | automatic on `git commit` | `ATOM_COMMIT_OVERRIDE=1` | Best-effort pre-execution prevention: blocks obvious direct commits to main/master and malformed Conventional Commits headers; its known text-inference gaps are covered by commit-backstop. |
 | `docstring-standards` | convention | skill | on demand, via the code-comments skill | — | Korean Google-style docstrings for public APIs; identifiers stay English. |
 | `file-header-comments` | convention | skill | on demand, via the code-comments skill | — | One-line Korean role comment at the top of each new source file. |
 | `goal-verification` | principle | claude-md | always loaded | — | Turn work into verifiable goals, write tests, and run them before calling anything done. |
