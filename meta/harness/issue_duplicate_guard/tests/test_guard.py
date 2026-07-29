@@ -47,7 +47,42 @@ def test_bash_dash_c_inner_command_is_not_detected() -> None:
     assert guard.detect_invocations("bash -c 'gh issue create -t x'") == []
 
 
+def test_heredoc_body_mention_is_not_detected() -> None:
+    # 본문 라인은 명령이 아니다 — 무고한 파일 쓰기가 차단되면 안 됨 (#32 괴리 1)
+    cmd = 'cat > notes.sh <<EOF\ngh issue create --title "T"\nEOF'
+    assert guard.detect_invocations(cmd) == []
+
+
+def test_heredoc_file_write_passes_without_search(monkeypatch) -> None:
+    def _fail(argv, cwd=None):
+        raise AssertionError("search must not run for a heredoc body mention")
+
+    monkeypatch.setattr(guard, "_run_search", _fail)
+    cmd = 'cat > notes.sh <<EOF\ngh issue create --title "T"\nEOF'
+    assert _run_main(monkeypatch, _bash_payload(cmd)) == 0
+
+
+def test_arithmetic_shift_with_real_heredoc_still_strips() -> None:
+    # $((...)) 마스킹 검증: 산술 <<가 마커 큐를 오염시켜 스트립을 무효화하면 안 됨
+    cmd = 'echo $(( (1<<2) + 3 ))\ncat > x.sh <<EOF\ngh issue create --title "T"\nEOF'
+    assert guard.detect_invocations(cmd) == []
+
+
 # ---------- 감지: 잡아야 하는 형태 ----------
+
+
+def test_heredoc_fed_create_is_still_detected() -> None:
+    # 마커 라인 자체는 보존된다 — heredoc으로 body를 먹이는 실제 생성은 감지
+    cmd = 'gh issue create -t "T" --body-file - <<EOF\nbody text\nEOF'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
+
+
+def test_arithmetic_shift_does_not_break_detection() -> None:
+    # 산술 시프트가 heredoc 마커로 오인돼 뒤 명령 감지를 지우면 안 됨
+    cmd = 'echo $((1<<2))\ngh issue create -t "T"'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
 
 def test_operator_without_spaces_is_detected() -> None:
     invs = guard.detect_invocations('cd x&&gh issue create -t "T"')

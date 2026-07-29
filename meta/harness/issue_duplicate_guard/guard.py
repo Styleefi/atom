@@ -69,6 +69,66 @@ _FALLBACK_REPO_RE = re.compile(r"(?:--repo|-R)(?:=|\s+)(?:\"([^\"]*)\"|'([^']*)'
 # glab 텍스트 출력에서 이슈로 확신할 수 있는 라인(#번호로 시작)만 채택.
 _GLAB_ISSUE_LINE_RE = re.compile(r"^#\d+\s+\S.*$")
 
+# heredoc 시작 마커: <<EOF / <<-EOF / <<'EOF' / << "EOF" / <<\EOF 변형.
+# (?<!<)와 구분자 문자군이 herestring(<<<)을 배제한다.
+_HEREDOC_MARKER_RE = re.compile(
+    r"(?<!<)<<(-?)\s*\\?(?:'([^'\n]+)'|\"([^\"\n]+)\"|([\w.-]+))"
+)
+
+# 마커 스캔 전에 가릴 산술 확장 스팬. lazy 매칭이라야 중첩 괄호
+# $(( (1<<2) + 3 ))에서도 첫 "))"까지를 통째로 가린다.
+_ARITHMETIC_RE = re.compile(r"\$\(\(.*?\)\)")
+
+
+def _strip_heredocs(command: str) -> str:
+    """토큰화 전에 heredoc 본문 라인을 제거한다.
+
+    heredoc은 shlex를 실패시키지 않아 폴백으로 빠지지 않고, 본문이 줄 단위로
+    명령처럼 파싱돼 "문자열 내부 언급은 명령 위치에 올 수 없다" 불변식을
+    깨뜨린다. 마커 라인 자체는 보존하므로 heredoc으로 body를 먹이는 실제
+    생성 명령은 계속 감지된다. 검사 입력만 바꾸며 실행 명령은 불변이다.
+
+    안전 규칙: 종결자 라인을 실제로 찾은 경우에만 제거하고, 미종결 구분자가
+    하나라도 남으면 전체 원문을 유지한다(all-or-nothing) — 마커 오인이 실제
+    생성 명령의 감지를 지우는 회귀를 막는다. 마커 스캔 전에 한 줄 안의
+    `$((...))` 스팬을 가려 산술 시프트(`1<<2`)의 오인을 배제한다.
+
+    잔여 한계(전부 문서화된 수용 범위): 여러 줄에 걸친 산술 확장 안의 `<<`는
+    못 가린다. 종결자 없이 입력 끝으로 종결되는 heredoc(bash는 경고 후 실행)
+    은 스트립 대상 외라 본문이 여전히 파싱된다. 따옴표 문자열 안의 heredoc
+    언급 뒤에 구분자와 일치하는 단독 줄이 실존하면 그 사이가 통과 방향으로
+    스트립될 수 있다.
+
+    Args:
+        command: Bash 명령 문자열 전체.
+
+    Returns:
+        본문·종결자 라인이 제거된 명령. 미종결 시 원문 그대로.
+    """
+    lines = command.split("\n")
+    kept: list[str] = []
+    # (구분자, <<- 여부) 대기 큐 — 한 줄 다중 heredoc은 선언 순서대로 소비된다.
+    pending: list[tuple[str, bool]] = []
+    for line in lines:
+        if pending:
+            delimiter, tab_stripped = pending[0]
+            candidate = line.rstrip("\r")
+            if tab_stripped:
+                candidate = candidate.lstrip("\t")
+            if candidate == delimiter:
+                pending.pop(0)
+            continue
+        # 길이 보존 마스킹: 빈 문자열 치환은 a<$((x))<b → a<<b 같은 가짜
+        # 마커를 만들 수 있다.
+        masked = _ARITHMETIC_RE.sub(lambda m: " " * len(m.group()), line)
+        for match in _HEREDOC_MARKER_RE.finditer(masked):
+            delimiter = match.group(2) or match.group(3) or match.group(4)
+            pending.append((delimiter, match.group(1) == "-"))
+        kept.append(line)
+    if pending:
+        return command
+    return "\n".join(kept)
+
 
 @dataclass
 class CreateInvocation:
@@ -237,6 +297,7 @@ def detect_invocations(command: str) -> list[CreateInvocation]:
     Returns:
         감지된 생성 명령 목록. 대상이 없으면 빈 목록.
     """
+    command = _strip_heredocs(command)
     token_groups: list[list[str]] | None = None
     try:
         token_groups = [_tokenize(line) for line in command.split("\n")]
