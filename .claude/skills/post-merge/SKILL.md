@@ -24,10 +24,12 @@ forge (gh for GitHub, glab for GitLab).
   `https://host/group/sub/proj.git` both yield `group%2Fsub%2Fproj`,
   used as `projects/group%2Fsub%2Fproj/...`; never a bare `projects/:id`.
 - If any git command fails, read the actual error and report it. Never
-  escalate to a force flag — the single exception is `-D` in step 6, and
-  only after the forge confirms MERGED **and** the local tip equals the
-  forge's recorded head SHA (step 6 spells out the check). The worst
-  outcome of any unlisted failure must be "stop + report".
+  escalate to a force flag — the only force-spelled flags this skill
+  ever uses are step 6's two deletions (local `-D`, remote
+  `--force-with-lease`), each allowed only after the forge confirms
+  MERGED **and** the tip being deleted equals the forge's recorded head
+  SHA (step 6 spells out both checks). The worst outcome of any
+  unlisted failure must be "stop + report".
 - Note the branch you started on before switching anything. On any abort,
   the report must name the current position and the original branch, and
   offer to return — never leave the owner stranded somewhere unexpected
@@ -57,10 +59,12 @@ forge (gh for GitHub, glab for GitLab).
    steps:
    - `<head-sha>` — the head tip the forge merged: gh `headRefOid` /
      glab `sha`. Step 6 compares every deletion against it.
-   - `<ci-sha>` — the commit step 3 CI-checks: gh `mergeCommit`;
-     glab `merge_commit_sha`, null on a squash merge →
-     `squash_commit_sha`, both null (fast-forward merge) → `sha`, which
-     is then itself the target-branch tip.
+   - `<ci-sha>` — the commit step 3 CI-checks: gh — the `.oid` of the
+     `mergeCommit` object in the response (`mergeCommit` is an object,
+     not a SHA; the `--json` field name stays `mergeCommit`); glab —
+     `merge_commit_sha`, null on a squash merge → `squash_commit_sha`,
+     both null (fast-forward merge) → `sha`, which is then itself the
+     target-branch tip.
 3. **Check CI on the merge commit** — read-only, before any state change;
    one-line status, no polling. Query by the merge commit SHA
    (`gh run list -c <ci-sha>` /
@@ -126,7 +130,8 @@ forge (gh for GitHub, glab for GitLab).
      `glab api "projects/<url-encoded-project-path>/merge_requests/<iid>/closes_issues"`
      — `<iid>` is a literal substitution like `<n>`; glab does not
      auto-fill `:iid`) — do not re-implement closing-keyword parsing
-     from the body.
+     from the body. Both responses are arrays of issue objects, not
+     numbers: take each object's `number` (gh) / `iid` (glab).
    - Each expected-to-close issue must now be CLOSED. Still OPEN → report
      the likely cause (e.g. merged into a non-default branch) instead of
      silently passing.
