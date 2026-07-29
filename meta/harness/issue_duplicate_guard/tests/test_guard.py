@@ -68,8 +68,20 @@ def test_arithmetic_shift_with_real_heredoc_still_strips() -> None:
     assert guard.detect_invocations(cmd) == []
 
 
-# ---------- 감지: 잡아야 하는 형태 ----------
+def test_bare_arithmetic_with_real_heredoc_still_strips() -> None:
+    # bash의 산술 명령 (( ... ))는 $ 없이도 산술이다 — 마스킹 대상 (라운드 1 C3)
+    cmd = '(( 1<<2 ))\ncat > x.sh <<EOF\ngh issue create --title "T"\nEOF'
+    assert guard.detect_invocations(cmd) == []
 
+
+def test_exotic_delimiter_heredoc_body_not_detected() -> None:
+    # bash는 +@! 등이 든 구분자도 허용한다 — 문자군이 좁으면 종결자를 못 찾아
+    # all-or-nothing이 원문을 유지하고 본문 오차단이 되살아난다 (라운드 1 C1)
+    cmd = 'cat > x.sh <<MY+DELIM\ngh issue create --title "T"\nMY+DELIM'
+    assert guard.detect_invocations(cmd) == []
+
+
+# ---------- 감지: 잡아야 하는 형태 ----------
 
 def test_heredoc_fed_create_is_still_detected() -> None:
     # 마커 라인 자체는 보존된다 — heredoc으로 body를 먹이는 실제 생성은 감지
@@ -83,6 +95,14 @@ def test_arithmetic_shift_does_not_break_detection() -> None:
     cmd = 'echo $((1<<2))\ngh issue create -t "T"'
     invs = guard.detect_invocations(cmd)
     assert len(invs) == 1 and invs[0].title == "T"
+
+
+def test_bare_arithmetic_does_not_erase_real_create() -> None:
+    # (( x << y ))의 시프트가 마커로 오인되면 실감지가 통째로 지워진다 (라운드 1 C3)
+    cmd = '(( total << shift ))\ngh issue create --title "T"\nshift'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
+
 
 def test_operator_without_spaces_is_detected() -> None:
     invs = guard.detect_invocations('cd x&&gh issue create -t "T"')
