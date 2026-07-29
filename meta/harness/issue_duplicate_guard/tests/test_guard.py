@@ -86,6 +86,13 @@ def test_attached_repo_flag_is_parsed() -> None:
     assert invs[0].repo == "owner/repo"
 
 
+def test_attached_repo_flag_with_equals_is_parsed() -> None:
+    # pflag는 -R=owner/repo에서 =를 벗긴다 — 그대로 두면 검색 --repo가
+    # "=owner/repo"로 실패해 중복 검사가 조용히 스킵된다 (리뷰 라운드 1 C3)
+    invs = guard.detect_invocations("gh issue create -t x -R=owner/repo")
+    assert invs[0].repo == "owner/repo"
+
+
 def test_cd_on_earlier_line_marks_cwd_unsafe() -> None:
     invs = guard.detect_invocations('cd /elsewhere\ngh issue create -t "T"')
     assert len(invs) == 1 and invs[0].cwd_unsafe is True

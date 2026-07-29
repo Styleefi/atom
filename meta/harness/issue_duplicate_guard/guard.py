@@ -173,7 +173,8 @@ def _parse_segment(segment: list[str]) -> CreateInvocation | None:
         elif token.startswith("--repo="):
             repo = token[len("--repo="):]
         elif token.startswith("-R") and not token.startswith("--") and len(token) > 2:
-            repo = token[2:]
+            # pflag는 -R=값 형태에서 =를 벗기고 값을 취한다.
+            repo = token[2:].removeprefix("=") or None
         j += 1
     return CreateInvocation(cli=_basename(rest[0]), title=title, repo=repo, override=override)
 
