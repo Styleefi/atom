@@ -75,10 +75,151 @@ _HEREDOC_MARKER_RE = re.compile(
     r"(?<!<)<<(-?)\s*\\?(?:'([^'\n]+)'|\"([^\"\n]+)\"|([^\s'\"\\<>|&;()]+))"
 )
 
-# 마커 스캔 전에 가릴 산술 스팬 — $((...)) 확장과 $ 없는 산술 명령 ((...))
-# 둘 다. lazy 매칭이라야 중첩 괄호 $(( (1<<2) + 3 ))에서도 첫 "))"까지를
-# 통째로 가린다.
-_ARITHMETIC_RE = re.compile(r"\$?\(\(.*?\)\)")
+def _mask_arithmetic(line: str) -> str:
+    """마커 스캔 전에 한 줄의 산술 스팬을 공백으로 가린 사본을 만든다.
+
+    정규식 마스킹은 두 번 깨졌다 — lazy 스팬이 따옴표 산문 속 `((`/`))`
+    조각을 가로질러 실제 마커를 가렸고(오차단), 내부 금지문자 베토는
+    `${var:-((}` 괄호 주입·산술 내 따옴표(`(( x = "1" ))`)·이중 괄호 중첩
+    (`$(( ((a)) << 2 ))`)에서 반증됐다. 균형 괄호는 정규식으로 불가능하므로
+    문자 단위 스캔으로 교체한다(리뷰 루프 divergence 수리, 구조적 선택지).
+
+    규칙: 인용('·"·백틱)되지 않고 `${...}` 확장 내부가 아닌 인접 `((`
+    (선택적 `$` 프리픽스 포함)부터 균형 잡힌 `))`까지가 산술 스팬이다.
+    스팬 내부에서도 같은 인용 규칙으로 괄호를 세되, **명령 치환 내용물**
+    (단일 괄호 `$(...)`와 백틱)은 마스킹에서 면제한다 — 시프트는 산술식
+    레벨에만, 진짜 리다이렉션은 명령 치환 내부에만 오기 때문이다
+    (`$(( $(cat <<XX) + 1 ))`의 실마커 보존). 산술 내부의 인접 `$((`는
+    명령 치환이 아니라 중첩 산술이라 마스킹을 계속한다. 산술 내 따옴표
+    내용은 산술식의 일부라 마스킹한다. 큰따옴표 안 `\`는 "다음 한 문자
+    이스케이프"로 단순화 — bash 정밀 규칙($ ` " \\만 이스케이프)과 인용
+    상태 판정이 등가임을 전수 대조로 확인했다.
+
+    미폐쇄 처리: 줄 끝까지 안 닫힌 산술 스팬은 마스킹하지 않는다(여러 줄
+    산술식 — 문서화된 한계). 잔여 한계는 _strip_heredocs docstring 참조.
+
+    Args:
+        line: 명령의 한 줄.
+
+    Returns:
+        산술 스팬이 공백으로 치환된(길이 보존) 마커 스캔용 사본.
+    """
+    masked = list(line)
+    n = len(line)
+    to_mask: list[int] = []      # 확정된 마스킹 인덱스
+    span: list[int] | None = None  # 진행 중인 산술 스팬의 마스킹 후보
+    stack: list[str] = []        # 산술 내 괄호 종류: "arith" | "cmdsub" | "plain"
+    in_single = in_double = in_backtick = False
+    escaped = False
+    brace_depth = 0
+    i = 0
+    while i < n:
+        c = line[i]
+        exempt = any(kind == "cmdsub" for kind in stack)
+
+        def keep(idx: int) -> None:
+            if span is not None and not exempt:
+                span.append(idx)
+
+        if escaped:
+            escaped = False
+            keep(i)
+            i += 1
+            continue
+        if in_single:
+            if c == "'":
+                in_single = False
+            keep(i)
+            i += 1
+            continue
+        if in_double:
+            if c == "\\":
+                escaped = True
+            elif c == '"':
+                in_double = False
+            keep(i)
+            i += 1
+            continue
+        if in_backtick:
+            # 백틱 내용물은 명령 치환 — 마스킹 면제
+            if c == "`":
+                in_backtick = False
+            i += 1
+            continue
+        if c == "\\":
+            escaped = True
+            keep(i)
+            i += 1
+            continue
+        if c == "'":
+            in_single = True
+            keep(i)
+            i += 1
+            continue
+        if c == '"':
+            in_double = True
+            keep(i)
+            i += 1
+            continue
+        if c == "`":
+            in_backtick = True
+            i += 1
+            continue
+        if brace_depth > 0:
+            if c == "{":
+                brace_depth += 1
+            elif c == "}":
+                brace_depth -= 1
+            keep(i)
+            i += 1
+            continue
+        if c == "$" and i + 1 < n and line[i + 1] == "{":
+            brace_depth = 1
+            keep(i)
+            keep(i + 1)
+            i += 2
+            continue
+        if span is None:
+            if c == "(" and i + 1 < n and line[i + 1] == "(":
+                start = i - 1 if i > 0 and line[i - 1] == "$" else i
+                span = list(range(start, i + 2))
+                stack = ["arith", "arith"]
+            i += 1 if c != "(" or i + 1 >= n or line[i + 1] != "(" else 2
+            continue
+        # --- 산술 스팬 내부 ---
+        if c == "$" and i + 1 < n and line[i + 1] == "(":
+            if i + 2 < n and line[i + 2] == "(":
+                # 인접 $(( → 중첩 산술: 마스킹 계속
+                keep(i)
+                keep(i + 1)
+                keep(i + 2)
+                stack.extend(["arith", "arith"])
+                i += 3
+                continue
+            # 단일 $( → 명령 치환: 내용물 면제
+            stack.append("cmdsub")
+            i += 2
+            continue
+        if c == "(":
+            keep(i)
+            stack.append("plain")
+            i += 1
+            continue
+        if c == ")":
+            keep(i)
+            if stack:
+                stack.pop()
+            if not stack:
+                to_mask.extend(span)
+                span = None
+            i += 1
+            continue
+        keep(i)
+        i += 1
+    # 미폐쇄 스팬(span이 남음)은 버린다 — 마스킹하지 않음.
+    for idx in to_mask:
+        masked[idx] = " "
+    return "".join(masked)
 
 
 def _strip_heredocs(command: str) -> str:
@@ -91,16 +232,20 @@ def _strip_heredocs(command: str) -> str:
 
     안전 규칙: 종결자 라인을 실제로 찾은 경우에만 제거하고, 미종결 구분자가
     하나라도 남으면 전체 원문을 유지한다(all-or-nothing) — 마커 오인이 실제
-    생성 명령의 감지를 지우는 회귀를 막는다. 마커 스캔 전에 한 줄 안의
-    산술 스팬(`$((...))`와 `((...))` 모두)을 가려 시프트(`1<<2`)의 오인을
-    배제한다.
+    생성 명령의 감지를 지우는 회귀를 막는다. 마커 스캔 전에 _mask_arithmetic
+    (라인 수준 인용·확장 인지 스캔 — 정규식 휴리스틱이 아님)으로 산술
+    스팬을 가려 시프트(`1<<2`)의 오인을 배제한다.
 
-    잔여 한계(전부 문서화된 수용 범위): 여러 줄에 걸친 산술식 안의 `<<`는
-    못 가린다. 종결자 없이 입력 끝으로 종결되는 heredoc(bash는 경고 후 실행)
-    은 스트립 대상 외라 본문이 여전히 파싱된다. 따옴표 문자열이나 `#` 주석 등
-    실행되지 않는 텍스트 안의 heredoc 언급 뒤에 구분자와 일치하는 단독 줄이
-    실존하면 그 사이가 통과 방향으로 스트립될 수 있다(이 hook은 리터럴 `#`
-    보존을 위해 주석 해석을 끄므로 주석과 명령을 구분하지 못한다).
+    잔여 한계(전부 문서화된 수용 범위): 여러 줄에 걸친 산술식 안의 `<<`와
+    괄호 밖 산술 시프트(`let x=1<<2` 등)는 못 가린다. 명령 치환 내부의
+    case 패턴 단독 괄호는 산술 스팬 종료를 어긋나게 할 수 있다(abort 방향).
+    마스킹 면제 구역(산술 내 명령 치환 내용물)의 quoted `<<` 언급이나 3중
+    중첩 산술은 아래 언급 계열과 같은 한계다. 종결자 없이 입력 끝으로
+    종결되는 heredoc(bash는 경고 후 실행)은 스트립 대상 외라 본문이 여전히
+    파싱된다. 따옴표 문자열이나 `#` 주석 등 실행되지 않는 텍스트 안의
+    heredoc 언급 뒤에 구분자와 일치하는 단독 줄이 실존하면 그 사이가 통과
+    방향으로 스트립될 수 있다(이 hook은 리터럴 `#` 보존을 위해 주석 해석을
+    끄므로 주석과 명령을 구분하지 못한다).
 
     Args:
         command: Bash 명령 문자열 전체.
@@ -123,7 +268,7 @@ def _strip_heredocs(command: str) -> str:
             continue
         # 길이 보존 마스킹: 빈 문자열 치환은 a<$((x))<b → a<<b 같은 가짜
         # 마커를 만들 수 있다.
-        masked = _ARITHMETIC_RE.sub(lambda m: " " * len(m.group()), line)
+        masked = _mask_arithmetic(line)
         for match in _HEREDOC_MARKER_RE.finditer(masked):
             delimiter = match.group(2) or match.group(3) or match.group(4)
             pending.append((delimiter, match.group(1) == "-"))

@@ -81,6 +81,32 @@ def test_exotic_delimiter_heredoc_body_not_detected() -> None:
     assert guard.detect_invocations(cmd) == []
 
 
+def test_quoted_paren_prose_does_not_hide_real_heredoc() -> None:
+    # 라운드 2 divergence 재현: 따옴표 산문 속 (( )) 조각을 가로지른 마스킹이
+    # 실제 마커를 가리면 본문이 명령으로 파싱된다 (C1 재발 방지)
+    cmd = 'echo "shift is ((" ; cat > n.md <<EOF ; echo "))"\ngh issue create --title "X"\nEOF'
+    assert guard.detect_invocations(cmd) == []
+
+
+def test_quoted_dollar_paren_prose_does_not_hide_real_heredoc() -> None:
+    # 같은 구멍의 $(( 철자 — 스트립 도입 시점부터 잠재했던 형태
+    cmd = 'echo "cost $((" ; cat > n.md <<EOF ; echo "))"\ngh issue create --title "X"\nEOF'
+    assert guard.detect_invocations(cmd) == []
+
+
+def test_parameter_expansion_paren_injection_does_not_hide_marker() -> None:
+    # ${var:-((}는 따옴표·백슬래시 없이 괄호 리터럴을 주입한다 (제미나이 F1)
+    cmd = 'echo ${var:-((} ; cat > t.md <<EOF ; echo ${var:-))}\ngh issue create --title "X"\nEOF'
+    assert guard.detect_invocations(cmd) == []
+
+
+def test_real_heredoc_inside_command_substitution_in_arith() -> None:
+    # 산술 → 명령 치환 → 진짜 heredoc (Amendment A): 마커가 마스킹으로
+    # 지워지면 본문이 복구 불능 형태로 오차단된다
+    cmd = 'echo $(( $(cat <<XX) + 1 ))\ngh issue create --title "X"\nXX'
+    assert guard.detect_invocations(cmd) == []
+
+
 # ---------- 감지: 잡아야 하는 형태 ----------
 
 def test_heredoc_fed_create_is_still_detected() -> None:
@@ -100,6 +126,36 @@ def test_arithmetic_shift_does_not_break_detection() -> None:
 def test_bare_arithmetic_does_not_erase_real_create() -> None:
     # (( x << y ))의 시프트가 마커로 오인되면 실감지가 통째로 지워진다 (라운드 1 C3)
     cmd = '(( total << shift ))\ngh issue create --title "T"\nshift'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
+
+
+def test_double_nested_arithmetic_does_not_expose_shift() -> None:
+    # $(( ((a)) << 2 ))의 안쪽 ))에서 마스킹이 조기 종료되면 노출된 << 2가
+    # 우연한 종결자 줄로 닫혀 실감지를 지운다 (제미나이 F3)
+    cmd = 'echo $(( ((a)) << 2 ))\ngh issue create --title "T"\n2'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
+
+
+def test_nested_arith_expansion_stays_masked() -> None:
+    # 산술 내부의 인접 $((는 명령 치환이 아니라 중첩 산술 (Amendment A-1)
+    cmd = 'echo $(( $((1<<2)) + 1 ))\ngh issue create --title "T"\n2'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
+
+
+def test_quoted_value_arithmetic_stays_masked() -> None:
+    # 진짜 산술에는 따옴표가 올 수 있다 — (( x = "1" << 2 ))는 유효 bash
+    cmd = '(( x = "1" << 2 ))\ngh issue create --title "T"\n2'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
+
+
+def test_keyword_context_arithmetic_stays_masked() -> None:
+    # if (( x << y ))처럼 키워드 뒤 산술도 마스킹돼야 한다 — 명령 위치
+    # 앵커 방식이었다면 놓쳤을 형태의 잠금
+    cmd = 'if (( x << y )); then\ngh issue create --title "T"\ny\nfi'
     invs = guard.detect_invocations(cmd)
     assert len(invs) == 1 and invs[0].title == "T"
 
