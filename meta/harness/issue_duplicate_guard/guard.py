@@ -16,6 +16,13 @@ Claude Code의 PreToolUse(Bash) hook으로 실행되어, `gh issue create` 또�
 - 오탐 방지가 최우선: 전체 명령을 shlex로 먼저 토큰화해 따옴표 문자열을
   단일 토큰으로 만든 뒤 연산자 위치에서 세그먼트를 나누므로, 커밋 메시지
   등 문자열 내부의 "gh issue create" 언급은 명령 위치에 올 수 없다.
+- 검색 기준 디렉터리는 hook 페이로드의 `cwd`(Bash 도구의 작업 디렉터리는
+  호출 간 유지되므로 프로세스 cwd만으로는 어긋날 수 있다). `--repo`/`-R`가
+  없으면 gh/glab이 그 디렉터리로 대상 저장소를 해석하므로, 선행 세그먼트에
+  `cd`가 있으면 대상이 불명 → 검색을 건너뛴다(fail-open). 이 표시는 한 번
+  켜지면 유지된다. 서브셸에 갇힌 cd(`(cd x) && ...`)도 래치를 켜는 오판과
+  `pushd`/`cd -` 미커버는 sibling commit_guard와 동일한 수용 한계다 —
+  실행 의미론 판정은 범위 밖.
 - 감지 못하는 형태(`bash -c` 내부, backtick 치환, `env` 프리픽스)는 전부
   통과 방향의 한계이며, claude-md 쪽 issue-workflow 규칙의 관례가 커버한다.
 
@@ -72,12 +79,14 @@ class CreateInvocation:
         title: `--title`/`-t`로 지정된 제목. 없으면 None.
         repo: `-R`/`--repo`로 지정된 대상 저장소. 없으면 None.
         override: 같은 세그먼트 선두에 ATOM_DUP_REVIEWED=1이 있었는지.
+        cwd_unsafe: 선행 `cd` 때문에 검색 기준 디렉터리가 불명인지.
     """
 
     cli: str
     title: str | None
     repo: str | None
     override: bool
+    cwd_unsafe: bool = False
 
 
 def _basename(token: str) -> str:
@@ -163,8 +172,26 @@ def _parse_segment(segment: list[str]) -> CreateInvocation | None:
                 j += 1
         elif token.startswith("--repo="):
             repo = token[len("--repo="):]
+        elif token.startswith("-R") and not token.startswith("--") and len(token) > 2:
+            repo = token[2:]
         j += 1
     return CreateInvocation(cli=_basename(rest[0]), title=title, repo=repo, override=override)
+
+
+def _changes_directory(segment: list[str]) -> bool:
+    """세그먼트가 검색 기준 디렉터리를 옮기는지 판정한다 (sibling과 동일 규약).
+
+    `cd` 뒤로는 페이로드의 `cwd`가 어느 디렉터리를 가리키는지 알 수 없다.
+    되돌릴 방법이 없으므로 이 표시는 한 번 켜지면 유지된다.
+
+    Args:
+        segment: 연산자로 분리된 토큰 세그먼트.
+
+    Returns:
+        디렉터리가 바뀌면 True.
+    """
+    first = next((t for t in segment if not _ENV_ASSIGNMENT_RE.match(t)), None)
+    return first is not None and _basename(first) == "cd"
 
 
 def _detect_fallback(command: str) -> list[CreateInvocation]:
@@ -219,22 +246,27 @@ def detect_invocations(command: str) -> list[CreateInvocation]:
             return _detect_fallback(command)
 
     invocations: list[CreateInvocation] = []
+    directory_changed = False
     for tokens in token_groups:
         for segment in _split_segments(tokens):
             invocation = _parse_segment(segment)
             if invocation is not None:
+                invocation.cwd_unsafe = directory_changed
                 invocations.append(invocation)
+            elif _changes_directory(segment):
+                directory_changed = True
     return invocations
 
 
-def _run_search(argv: list[str]) -> str | None:
+def _run_search(argv: list[str], cwd: str | None = None) -> str | None:
     """검색 명령을 실행하고 stdout을 돌려준다.
 
-    비정상 종료·타임아웃·CLI 부재는 전부 None(→ fail-open)으로 수렴한다.
-    리스트 인자 + shell=False라 제목의 특수문자가 셸로 새지 않는다.
+    비정상 종료·타임아웃·CLI 부재·소멸한 cwd는 전부 None(→ fail-open)으로
+    수렴한다. 리스트 인자 + shell=False라 제목의 특수문자가 셸로 새지 않는다.
 
     Args:
         argv: 실행할 명령과 인자.
+        cwd: hook 페이로드가 알려준 Bash 작업 디렉터리 (없으면 프로세스 cwd).
 
     Returns:
         성공 시 stdout, 실패 시 None.
@@ -245,6 +277,7 @@ def _run_search(argv: list[str]) -> str | None:
             capture_output=True,
             text=True,
             timeout=SEARCH_TIMEOUT_SECONDS,
+            cwd=cwd,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -253,11 +286,14 @@ def _run_search(argv: list[str]) -> str | None:
     return result.stdout
 
 
-def search_duplicates(invocation: CreateInvocation) -> list[str] | None:
+def search_duplicates(
+    invocation: CreateInvocation, cwd: str | None = None
+) -> list[str] | None:
     """생성하려는 제목으로 기존 이슈(열림+닫힘)를 검색한다.
 
     Args:
         invocation: 감지된 이슈 생성 명령 (title은 비어 있지 않아야 함).
+        cwd: hook 페이로드가 알려준 Bash 작업 디렉터리 (없으면 프로세스 cwd).
 
     Returns:
         후보 설명 문자열 목록(없으면 빈 목록), 검색 실패 시 None.
@@ -273,7 +309,7 @@ def search_duplicates(invocation: CreateInvocation) -> list[str] | None:
         ]
         if invocation.repo:
             argv += ["--repo", invocation.repo]
-        output = _run_search(argv)
+        output = _run_search(argv, cwd)
         if output is None:
             return None
         try:
@@ -294,7 +330,7 @@ def search_duplicates(invocation: CreateInvocation) -> list[str] | None:
     ]
     if invocation.repo:
         argv += ["--repo", invocation.repo]
-    output = _run_search(argv)
+    output = _run_search(argv, cwd)
     if output is None:
         return None
     return [
@@ -332,6 +368,9 @@ def main() -> int:
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
     if not isinstance(command, str) or not command.strip():
         return 0
+    cwd = payload.get("cwd")
+    if not isinstance(cwd, str) or not cwd:
+        cwd = None
 
     for invocation in detect_invocations(command):
         if invocation.override:
@@ -344,7 +383,16 @@ def main() -> int:
                 file=sys.stderr,
             )
             return EXIT_BLOCK
-        candidates = search_duplicates(invocation)
+        # 제목 검사보다 뒤: 제목 없는 create는 검색이 필요 없어 cd와 무관하게
+        # 차단되고, 검색만이 기준 디렉터리에 의존한다.
+        if invocation.cwd_unsafe and not invocation.repo:
+            print(
+                f"[issue-duplicate-guard] duplicate check skipped: {invocation.cli} "
+                "target repo unknown (working directory changed by cd)",
+                file=sys.stderr,
+            )
+            continue
+        candidates = search_duplicates(invocation, cwd)
         if candidates is None:
             print(
                 f"[issue-duplicate-guard] duplicate check skipped: {invocation.cli} "
