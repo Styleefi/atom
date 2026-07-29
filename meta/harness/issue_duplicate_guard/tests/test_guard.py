@@ -201,7 +201,19 @@ def test_override_skips_search_entirely(monkeypatch) -> None:
 
 def test_missing_title_blocks(monkeypatch, capsys) -> None:
     assert _run_main(monkeypatch, _bash_payload("gh issue create --body x")) == 42
-    assert "--title" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    # 모든 차단 메시지는 override 복구 경로를 안내해야 한다 (#32 괴리 3)
+    assert "--title" in err and guard.OVERRIDE_TOKEN in err
+
+
+def test_whole_command_prefix_does_not_override_later_segment(monkeypatch) -> None:
+    # 의미론 잠금(#32 괴리 4): 마커는 gh/glab이 있는 세그먼트 선두에서만
+    # 유효하다 — 셸 의미론과 동일. 이 테스트는 문서 정합 커밋에서 기존
+    # 동작을 고정하며, 수정 전에도 통과한다(선실패 원칙의 명시적 예외).
+    issues = json.dumps([{"number": 12, "state": "OPEN", "title": "T"}])
+    monkeypatch.setattr(guard, "_run_search", lambda argv, cwd=None: issues)
+    cmd = f'{guard.OVERRIDE_TOKEN} git add . && gh issue create -t "T"'
+    assert _run_main(monkeypatch, _bash_payload(cmd)) == 42
 
 
 def test_empty_title_blocks(monkeypatch, capsys) -> None:

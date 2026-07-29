@@ -5,14 +5,18 @@ Claude Code의 PreToolUse(Bash) hook으로 실행되어, `gh issue create` 또�
 `glab issue create` 명령을 감지하면 같은 CLI로 열림+닫힘 전체 이슈를 제목
 검색하고, 유사 이슈가 있으면 차단(exit 42 — 래퍼가 2로 되매핑)하며 후보
 목록을 제시한다.
-모델이 후보를 검토한 뒤 진짜 신규라고 판단하면 `ATOM_DUP_REVIEWED=1`
-프리픽스로 같은 명령을 재실행해 통과한다 — 판단은 모델이, 검색이 반드시
-일어났다는 사실은 기계가 보장한다.
+모델이 후보를 검토한 뒤 진짜 신규라고 판단하면 gh/glab이 있는 **세그먼트
+선두**에 `ATOM_DUP_REVIEWED=1`을 붙여 재실행해 통과한다(복합 명령이면 마커를
+gh/glab 호출 바로 앞에 — 환경 변수의 셸 의미론과 동일) — 판단은 모델이,
+검색이 반드시 일어났다는 사실은 기계가 보장한다.
 
 설계 불변식:
-- 차단은 "대상 명령 + 검색 성공 + 유사 이슈 존재 + override 없음"의
-  교집합에서만 일어난다. 그 외 모든 실패 경로는 fail-open(통과)이다 —
-  이 hook은 모든 Bash 호출에 실행되므로 절대 Bash 전체를 막으면 안 된다.
+- 차단 경로는 정확히 두 가지다. (1) "대상 명령 + 검색 성공 + 유사 이슈
+  존재 + override 없음"의 교집합, (2) `--title` 없는 생성 명령(`--web`
+  포함) — 제목이 없으면 검색 자체가 불가능하므로 검색 없이 차단한다.
+  두 경로 모두 override로 복구된다. 그 외 모든 실패 경로는 fail-open
+  (통과)이다 — 이 hook은 모든 Bash 호출에 실행되므로 절대 Bash 전체를
+  막으면 안 된다.
 - 오탐 방지가 최우선: 전체 명령을 shlex로 먼저 토큰화해 따옴표 문자열을
   단일 토큰으로 만든 뒤 연산자 위치에서 세그먼트를 나누므로, 커밋 메시지
   등 문자열 내부의 "gh issue create" 언급은 명령 위치에 올 수 없다.
@@ -375,7 +379,8 @@ def _block_message(invocation: CreateInvocation, candidates: list[str]) -> str:
         f"[issue-duplicate-guard] similar existing issues found for title {invocation.title!r}:",
         *(f"  {candidate}" for candidate in candidates),
         "Review them first: comment on or reopen an existing issue instead of creating a duplicate.",
-        "If this is genuinely new, re-run the SAME command prefixed with the override marker:",
+        "If this is genuinely new, re-run with the override marker prefixed to the",
+        f"command segment that runs {invocation.cli} (immediately before the invocation):",
         f"  {OVERRIDE_TOKEN} {invocation.cli} issue create ...",
     ]
     return "\n".join(lines)
@@ -409,7 +414,11 @@ def main() -> int:
             print(
                 "[issue-duplicate-guard] issue creation without --title is blocked: "
                 "pass an explicit --title so the duplicate search can run "
-                "(interactive creation does not work in this environment anyway).",
+                "(without a title there is nothing to search — this includes "
+                "interactive and --web creation).\n"
+                "If it must run without --title, re-run with the override marker "
+                f"prefixed to the {invocation.cli} segment: "
+                f"{OVERRIDE_TOKEN} {invocation.cli} issue create ...",
                 file=sys.stderr,
             )
             return EXIT_BLOCK
