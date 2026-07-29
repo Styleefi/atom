@@ -23,8 +23,10 @@ Claude Code의 PreToolUse(Bash) hook으로 실행되어, `gh issue create` 또�
   켜지면 유지된다. 서브셸에 갇힌 cd(`(cd x) && ...`)도 래치를 켜는 오판과
   `pushd`/`cd -` 미커버는 sibling commit_guard와 동일한 수용 한계다 —
   실행 의미론 판정은 범위 밖.
-- 감지 못하는 형태(`bash -c` 내부, backtick 치환, `env` 프리픽스)는 전부
-  통과 방향의 한계이며, claude-md 쪽 issue-workflow 규칙의 관례가 커버한다.
+- 감지 못하는 형태(`bash -c` 내부, backtick 치환, `env` 프리픽스, 그리고
+  유효 bash지만 shlex가 두 단계 모두 실패하는 계열 — 주석 뒤 불균형 따옴표,
+  ANSI-C 인용 `$'...\''` 등)는 전부 통과 방향의 한계이며, claude-md 쪽
+  issue-workflow 규칙의 관례가 커버한다.
 
 종료 코드: 0 통과, 1 내부 오류(비차단 경고), 42 차단(sentinel — settings.json
 래퍼가 2로 되매핑).
@@ -57,14 +59,6 @@ SEARCH_TIMEOUT_SECONDS = 15
 MAX_CANDIDATES = 10
 
 _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-
-# shlex 실패 시 폴백: 명령 위치(문자열 시작 또는 연산자 뒤)에 앵커된 감지.
-_FALLBACK_CMD_RE = re.compile(
-    r"(?:^|[;&|(]\s*)(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:\S*/)?(gh|glab)\s+issue\s+create\b",
-    re.MULTILINE,
-)
-_FALLBACK_TITLE_RE = re.compile(r"(?:--title|-t)(?:=|\s+)(?:\"([^\"]*)\"|'([^']*)'|(\S+))")
-_FALLBACK_REPO_RE = re.compile(r"(?:--repo|-R)(?:=|\s+)(?:\"([^\"]*)\"|'([^']*)'|(\S+))")
 
 # glab 텍스트 출력에서 이슈로 확신할 수 있는 라인(#번호로 시작)만 채택.
 _GLAB_ISSUE_LINE_RE = re.compile(r"^#\d+\s+\S.*$")
@@ -255,41 +249,15 @@ def _changes_directory(segment: list[str]) -> bool:
     return first is not None and _basename(first) == "cd"
 
 
-def _detect_fallback(command: str) -> list[CreateInvocation]:
-    """shlex가 실패한 명령(heredoc 등)에 대한 보수적 정규식 감지.
-
-    잔여 오탐 가능성은 있으나 모든 오차단은 ATOM_DUP_REVIEWED=1 재실행으로
-    복구 가능하다.
-
-    Args:
-        command: 원본 명령 문자열.
-
-    Returns:
-        감지된 생성 명령 목록 (폴백에서는 최대 1건으로 요약).
-    """
-    match = _FALLBACK_CMD_RE.search(command)
-    if not match:
-        return []
-    title_match = _FALLBACK_TITLE_RE.search(command)
-    repo_match = _FALLBACK_REPO_RE.search(command)
-    title = next((g for g in title_match.groups() if g is not None), None) if title_match else None
-    repo = next((g for g in repo_match.groups() if g is not None), None) if repo_match else None
-    return [
-        CreateInvocation(
-            cli=match.group(1),
-            title=title,
-            repo=repo,
-            override=OVERRIDE_TOKEN in command,
-        )
-    ]
-
-
 def detect_invocations(command: str) -> list[CreateInvocation]:
     """Bash 명령 문자열에서 모든 이슈 생성 명령을 감지한다.
 
     개행으로 나뉜 다중 명령을 잡기 위해 줄 단위 토큰화를 먼저 시도하고
-    (따옴표가 줄을 넘는 경우엔 실패하므로) 전체 문자열 토큰화, 그것도
-    실패하면 정규식 폴백 순서로 내려간다.
+    (따옴표가 줄을 넘는 경우엔 실패하므로) 전체 문자열 토큰화 순서로
+    내려간다. 둘 다 실패하면 전면 fail-open이다 — 정규식 폴백은 따옴표
+    문자열 속 언급을 명령으로 오인해 무관한 Bash를 차단했으므로 제거했다
+    (sibling commit_guard의 #45와 같은 결론). 그 감지 공백은 claude-md 쪽
+    issue-workflow 규칙의 관례가 커버한다.
 
     Args:
         command: Bash 도구가 실행하려는 명령 전체.
@@ -305,7 +273,7 @@ def detect_invocations(command: str) -> list[CreateInvocation]:
         try:
             token_groups = [_tokenize(command)]
         except ValueError:
-            return _detect_fallback(command)
+            return []
 
     invocations: list[CreateInvocation] = []
     directory_changed = False

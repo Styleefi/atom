@@ -144,10 +144,26 @@ def test_override_prefix_alone_and_in_compound() -> None:
     assert invs[0].override
 
 
-def test_fallback_on_unclosed_quote_still_detects() -> None:
-    # shlex ValueError 경로: 보수적 정규식 폴백
-    invs = guard.detect_invocations('gh issue create --title "T" --body "unclosed')
-    assert len(invs) == 1 and invs[0].title == "T"
+def test_unparseable_command_fails_open() -> None:
+    # shlex 이중 실패(따옴표 불균형)는 전면 fail-open — 규칙 파일의 계약
+    # "unparseable command fails open"을 코드가 그대로 이행한다 (#32 괴리 2)
+    assert guard.detect_invocations('gh issue create --title "T" --body "unclosed') == []
+
+
+def test_quoted_mention_in_unparseable_command_is_not_detected() -> None:
+    # 구 폴백의 오차단 재현 케이스: 따옴표 속 언급이 절대 걸리면 안 됨
+    assert guard.detect_invocations('echo "todo; gh issue create for tracker later') == []
+
+
+def test_comment_with_unbalanced_quote_fails_open(monkeypatch) -> None:
+    # 수용 한계 잠금: 주석 뒤 불균형 따옴표는 유효 bash지만 shlex가 이중
+    # 실패한다(commenters=""). 감지가 아니라 통과가 의도된 행동이다.
+    def _fail(argv, cwd=None):
+        raise AssertionError("no search may run for an undetected command")
+
+    monkeypatch.setattr(guard, "_run_search", _fail)
+    cmd = 'gh issue create -t "T" # comment with " unclosed quote'
+    assert _run_main(monkeypatch, _bash_payload(cmd)) == 0
 
 
 # ---------- 판정 흐름 (main) ----------
