@@ -134,14 +134,18 @@ def _mask_arithmetic(line: str) -> str:
     기억해 로컬 문맥의 작은따옴표를 리터럴로 처리한다 — bash는
     `"${u:-'$((1<<2))'}"`에서 `'`를 리터럴로 두고 산술을 수행하지만
     (출력 `'4'`), 인용 밖 `${u:-'...'}`의 `'`는 진짜 인용이다(리터럴
-    출력 — 실측). 닫는 `}` 판정은 brace-로컬 인용 상태 기준이라
+    출력 — 실측). 이 큰따옴표 문맥은 중첩 brace로 상속되고
+    (`"${u:-${v:-'$((1<<2))'}}"`도 출력 `'4'` — 실측), cmdsub·백틱
+    경계에서는 새 스크립트 문맥이라 끊긴다. 닫는 `}` 판정은 brace-로컬
+    인용 상태 기준이라
     `"${x:-y}"`가 정상 닫히고(`}`가 바깥 인용의 리터럴로 삼켜지면 이후
     라인 전체의 마스킹이 죽는다 — 실측 회귀) `"${x:-"}"}"`의 인용된
     `}`는 닫지 않는다. 닫는 괄호는 최상단이 arith/cmdsub/plain일 때만
     pop하고(brace/백틱 위에서는 리터럴), 인용 문맥 내부의 여는·닫는
     괄호는 모두 리터럴이다. 백틱 프레임이 열려 있으면 작은따옴표 안의
-    `\`도 다음 문자를 소비한다(bash 백틱 렉서가 인용보다 먼저 이스케이프
-    처리 — `` `echo 'a\\`b'` `` → ``a`b`` 실측). 마스킹 판정은
+    백슬래시도 bash 백틱 렉서의 이스케이프 집합(백틱·달러·백슬래시)
+    앞에서만 다음 문자를 소비한다 — 집합 밖 문자 앞에서는 리터럴로 남아
+    작은따옴표가 정상 닫힌다(둘 다 실측). 마스킹 판정은
     plain·brace를 투명하게 본 최근접 프레임이 arith인 문자만 후보로
     삼고, 닫는 괄호는 pop 이전 스택 기준이다.
 
@@ -199,12 +203,21 @@ def _mask_arithmetic(line: str) -> str:
 
     def push(kind: str, marks: list[int] | None = None) -> None:
         nonlocal in_single, in_double
-        stack.append(_Frame(kind, in_single, in_double, marks))
+        frame = _Frame(kind, in_single, in_double, marks)
         # 모든 비-plain 프레임은 독립(로컬) 인용 추적을 시작한다. brace는
         # 추가로 opened_in_double을 기억해, 큰따옴표 안에서 열린 경우
         # 로컬 문맥의 작은따옴표를 리터럴로 처리한다(bash 실측 — 아래
         # `'` 분기). 로컬 리셋이라야 닫는 `}`가 바깥 인용의 리터럴로
-        # 삼켜지지 않는다(`"${x:-y}" ; (( 1<<2 ))` 회귀의 원인).
+        # 삼켜지지 않는다(`"${x:-y}" ; (( 1<<2 ))` 회귀의 원인). 큰따옴표
+        # 문맥은 중첩 brace로 상속된다 — bash는
+        # `"${u:-${v:-'$((1<<2))'}}"`에서도 안쪽 작은따옴표를 리터럴로
+        # 두고 산술을 수행한다(출력 `'4'` — 실측). cmdsub·백틱 경계는
+        # 새 스크립트 문맥이라 상속하지 않는다.
+        if kind == "brace" and stack and stack[-1].kind == "brace":
+            frame.opened_in_double = (
+                frame.opened_in_double or stack[-1].opened_in_double
+            )
+        stack.append(frame)
         if kind != "plain":
             in_single = False
             in_double = False
@@ -244,10 +257,13 @@ def _mask_arithmetic(line: str) -> str:
 
         if in_single:
             # 백틱 프레임이 열려 있으면 bash의 백틱 렉서가 인용보다 먼저
-            # 이스케이프를 처리한다 — 작은따옴표 안 `\`도 다음 문자를
-            # 소비해야 이스케이프된 백틱이 조기 닫힘으로 새지 않는다
-            # (`` `echo 'a\`b'` `` → bash 출력 a`b — 실측).
-            if c == "\\" and any(f.kind == "backtick" for f in stack):
+            # 이스케이프를 처리한다 — 단 그 이스케이프 집합은 백틱·달러·
+            # 백슬래시뿐이다. 집합 밖 문자 앞의 백슬래시는 리터럴로
+            # 유지되고 뒤 문자는 정상 처리된다(작은따옴표면 인용이
+            # 닫힌다: `'a\' ; ...` → bash 출력 a\ — 실측. 집합 문자는
+            # 소비: `'a\`b'` → 출력 a`b — 실측).
+            if (c == "\\" and i + 1 < n and line[i + 1] in "`$\\"
+                    and any(f.kind == "backtick" for f in stack)):
                 escaped = True
                 keep(i)
                 i += 1

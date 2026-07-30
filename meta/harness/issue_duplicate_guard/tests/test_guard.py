@@ -344,6 +344,21 @@ _ORACLE_CORPUS = [
      "create 실행됨",
      'echo `echo \'a\\`b\'` ; (( 1 << 2 ))\ngh issue create --title "T"\n2',
      ("T",)),
+    # --- 이하 라운드 7 Critical 수정분 ---
+    ("R7-A: 큰따옴표 문맥은 중첩 brace로 상속 — bash: 출력 '4', create 실행됨",
+     'echo "${u:-${v:-\'$((1<<2))\'}}"\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("R7-A 오차단 방향: 중첩 brace의 산술이 마스킹돼야 뒤 heredoc 본문이 "
+     "보존됨 — bash: create 미실행 (본문)",
+     'echo "${u:-${v:-\'$((1<<2))\'}}"\ncat > /dev/null <<EOF\ngh issue create --title "T"\nEOF',
+     ()),
+    ("R7-B: 백틱 렉서 이스케이프 집합 밖의 백슬래시-작은따옴표는 인용을 "
+     "닫음 — bash: 출력 a\\ 4, create 실행됨",
+     "echo `echo 'a\\' ; echo $((1<<2))`\ngh issue create --title \"T\"\n2",
+     ("T",)),
+    ("R7-B 오차단 방향 — bash: create 미실행 (본문)",
+     "echo `echo 'a\\' ; echo $((1<<2))`\ncat > /dev/null <<EOF\ngh issue create --title \"T\"\nEOF",
+     ()),
 ]
 
 
