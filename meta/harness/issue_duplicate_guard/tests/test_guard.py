@@ -47,7 +47,147 @@ def test_bash_dash_c_inner_command_is_not_detected() -> None:
     assert guard.detect_invocations("bash -c 'gh issue create -t x'") == []
 
 
+def test_heredoc_body_mention_is_not_detected() -> None:
+    # 본문 라인은 명령이 아니다 — 무고한 파일 쓰기가 차단되면 안 됨 (#32 괴리 1)
+    cmd = 'cat > notes.sh <<EOF\ngh issue create --title "T"\nEOF'
+    assert guard.detect_invocations(cmd) == []
+
+
+def test_heredoc_file_write_passes_without_search(monkeypatch) -> None:
+    def _fail(argv, cwd=None):
+        raise AssertionError("search must not run for a heredoc body mention")
+
+    monkeypatch.setattr(guard, "_run_search", _fail)
+    cmd = 'cat > notes.sh <<EOF\ngh issue create --title "T"\nEOF'
+    assert _run_main(monkeypatch, _bash_payload(cmd)) == 0
+
+
+def test_arithmetic_shift_with_real_heredoc_still_strips() -> None:
+    # $((...)) 마스킹 검증: 산술 <<가 마커 큐를 오염시켜 스트립을 무효화하면 안 됨
+    cmd = 'echo $(( (1<<2) + 3 ))\ncat > x.sh <<EOF\ngh issue create --title "T"\nEOF'
+    assert guard.detect_invocations(cmd) == []
+
+
+def test_bare_arithmetic_with_real_heredoc_still_strips() -> None:
+    # bash의 산술 명령 (( ... ))는 $ 없이도 산술이다 — 마스킹 대상 (라운드 1 C3)
+    cmd = '(( 1<<2 ))\ncat > x.sh <<EOF\ngh issue create --title "T"\nEOF'
+    assert guard.detect_invocations(cmd) == []
+
+
+def test_exotic_delimiter_heredoc_body_not_detected() -> None:
+    # bash는 +@! 등이 든 구분자도 허용한다 — 문자군이 좁으면 종결자를 못 찾아
+    # all-or-nothing이 원문을 유지하고 본문 오차단이 되살아난다 (라운드 1 C1)
+    cmd = 'cat > x.sh <<MY+DELIM\ngh issue create --title "T"\nMY+DELIM'
+    assert guard.detect_invocations(cmd) == []
+
+
+def test_quoted_paren_prose_does_not_hide_real_heredoc() -> None:
+    # 라운드 2 divergence 재현: 따옴표 산문 속 (( )) 조각을 가로지른 마스킹이
+    # 실제 마커를 가리면 본문이 명령으로 파싱된다 (C1 재발 방지)
+    cmd = 'echo "shift is ((" ; cat > n.md <<EOF ; echo "))"\ngh issue create --title "X"\nEOF'
+    assert guard.detect_invocations(cmd) == []
+
+
+def test_quoted_dollar_arith_prose_is_real_arithmetic() -> None:
+    # 라운드 2에서 산문 조각으로 오판했던 형태의 기대값 정정 — bash 실측:
+    # 큰따옴표 안 $((는 진짜 산술 시작이라 ))까지 삼키고(런타임 산술 오류가
+    # 나도) 다음 줄은 본문이 아니라 실행되는 명령이다(create 실행 확인).
+    # 스팬이 마스킹되고 heredoc은 등록되지 않으며 create가 감지돼야 한다.
+    cmd = 'echo "cost $((" ; cat > n.md <<EOF ; echo "))"\ngh issue create --title "X"\nEOF'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "X"
+
+
+def test_parameter_expansion_paren_injection_does_not_hide_marker() -> None:
+    # ${var:-((}는 따옴표·백슬래시 없이 괄호 리터럴을 주입한다 (제미나이 F1)
+    cmd = 'echo ${var:-((} ; cat > t.md <<EOF ; echo ${var:-))}\ngh issue create --title "X"\nEOF'
+    assert guard.detect_invocations(cmd) == []
+
+
+def test_real_heredoc_inside_command_substitution_in_arith() -> None:
+    # 산술 → 명령 치환 → 진짜 heredoc (Amendment A): 마커가 마스킹으로
+    # 지워지면 본문이 복구 불능 형태로 오차단된다
+    cmd = 'echo $(( $(cat <<XX) + 1 ))\ngh issue create --title "X"\nXX'
+    assert guard.detect_invocations(cmd) == []
+
+
 # ---------- 감지: 잡아야 하는 형태 ----------
+
+def test_heredoc_fed_create_is_still_detected() -> None:
+    # 마커 라인 자체는 보존된다 — heredoc으로 body를 먹이는 실제 생성은 감지
+    cmd = 'gh issue create -t "T" --body-file - <<EOF\nbody text\nEOF'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
+
+
+def test_arithmetic_shift_does_not_break_detection() -> None:
+    # 산술 시프트가 heredoc 마커로 오인돼 뒤 명령 감지를 지우면 안 됨
+    cmd = 'echo $((1<<2))\ngh issue create -t "T"'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
+
+
+def test_bare_arithmetic_does_not_erase_real_create() -> None:
+    # (( x << y ))의 시프트가 마커로 오인되면 실감지가 통째로 지워진다 (라운드 1 C3)
+    cmd = '(( total << shift ))\ngh issue create --title "T"\nshift'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
+
+
+def test_double_nested_arithmetic_does_not_expose_shift() -> None:
+    # $(( ((a)) << 2 ))의 안쪽 ))에서 마스킹이 조기 종료되면 노출된 << 2가
+    # 우연한 종결자 줄로 닫혀 실감지를 지운다 (제미나이 F3)
+    cmd = 'echo $(( ((a)) << 2 ))\ngh issue create --title "T"\n2'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
+
+
+def test_nested_arith_expansion_stays_masked() -> None:
+    # 산술 내부의 인접 $((는 명령 치환이 아니라 중첩 산술 (Amendment A-1)
+    cmd = 'echo $(( $((1<<2)) + 1 ))\ngh issue create --title "T"\n2'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
+
+
+def test_quoted_value_arithmetic_stays_masked() -> None:
+    # 진짜 산술에는 따옴표가 올 수 있다 — (( x = "1" << 2 ))는 유효 bash
+    cmd = '(( x = "1" << 2 ))\ngh issue create --title "T"\n2'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
+
+
+def test_keyword_context_arithmetic_stays_masked() -> None:
+    # if (( x << y ))처럼 키워드 뒤 산술도 마스킹돼야 한다 — 명령 위치
+    # 앵커 방식이었다면 놓쳤을 형태의 잠금
+    cmd = 'if (( x << y )); then\ngh issue create --title "T"\ny\nfi'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
+
+
+def test_escaped_backtick_does_not_flip_quote_state() -> None:
+    # bash는 백틱 안에서 백슬래시+백틱으로 백틱을 이스케이프한다(중첩 치환의
+    # 고전 문법) — 상태가 역전되면 이후 산술이 면제 구역으로 새어 실감지가
+    # 삼켜진다 (라운드 3 H1, C3)
+    cmd = 'echo `a\\`b` $((1<<2))\ngh issue create --title "T"\n2'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
+
+
+def test_arith_inside_cmdsub_inside_arith_stays_masked() -> None:
+    # 3중 중첩(산술→명령치환→산술)의 안쪽 산술은 어떤 깊이에서든 산술이다 —
+    # 면제 판정은 최근접 비-plain 프레임 기준 (라운드 3 H2)
+    cmd = 'echo $(( $(echo $((1<<2))) + 1 ))\ngh issue create --title "T"\n2'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
+
+
+def test_close_paren_inside_brace_expansion_does_not_pop() -> None:
+    # ${...} 내부의 닫는 괄호는 brace 분기가 소비해 스택 pop이 없다 —
+    # 스팬 조기 종료로 시프트가 노출되면 안 된다 (제미나이 3차 F2 방어 잠금)
+    cmd = 'echo $(( ${var:-)} + 1 << 2 ))\ngh issue create --title "T"\n2'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
+
 
 def test_operator_without_spaces_is_detected() -> None:
     invs = guard.detect_invocations('cd x&&gh issue create -t "T"')
@@ -109,10 +249,123 @@ def test_override_prefix_alone_and_in_compound() -> None:
     assert invs[0].override
 
 
-def test_fallback_on_unclosed_quote_still_detects() -> None:
-    # shlex ValueError 경로: 보수적 정규식 폴백
-    invs = guard.detect_invocations('gh issue create --title "T" --body "unclosed')
-    assert len(invs) == 1 and invs[0].title == "T"
+def test_unparseable_command_fails_open() -> None:
+    # shlex 이중 실패(따옴표 불균형)는 전면 fail-open — 규칙 파일의 계약
+    # "unparseable command fails open"을 코드가 그대로 이행한다 (#32 괴리 2)
+    assert guard.detect_invocations('gh issue create --title "T" --body "unclosed') == []
+
+
+def test_quoted_mention_in_unparseable_command_is_not_detected() -> None:
+    # 구 폴백의 오차단 재현 케이스: 따옴표 속 언급이 절대 걸리면 안 됨
+    assert guard.detect_invocations('echo "todo; gh issue create for tracker later') == []
+
+
+def test_comment_with_unbalanced_quote_fails_open(monkeypatch) -> None:
+    # 수용 한계 잠금: 주석 뒤 불균형 따옴표는 유효 bash지만 shlex가 이중
+    # 실패한다(commenters=""). 감지가 아니라 통과가 의도된 행동이다.
+    def _fail(argv, cwd=None):
+        raise AssertionError("no search may run for an undetected command")
+
+    monkeypatch.setattr(guard, "_run_search", _fail)
+    cmd = 'gh issue create -t "T" # comment with " unclosed quote'
+    assert _run_main(monkeypatch, _bash_payload(cmd)) == 0
+
+
+# ---------- bash 오라클 코퍼스 (리뷰 루프 프로브 승격) ----------
+# 각 항목의 기대값은 작성 시점에 실제 bash로 "create 줄이 실행되는가"를
+# 실측해 결정했다(주석에 근거 병기). 회고 교훈: 임시 프로브에서 검증된
+# 성질은 메커니즘 교체 때 조용히 뒤집힌다 — 전부 여기로 승격해 게이트로
+# 만든다. 형식: (설명, 명령, 기대 감지 제목 튜플).
+
+_ORACLE_CORPUS = [
+    ("톱레벨 cmdsub 안 bare 산술 명령 — bash: create 실행됨",
+     'echo $( echo foo ; (( x = 1 << 2 )) )\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("cmdsub 안 인용된 닫는 괄호는 프레임을 닫지 않음 — bash: create 실행됨",
+     'echo $(( $(echo ")") + 1 << 2 ))\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("이스케이프된 닫는 중괄호는 확장을 닫지 않음 — bash: create 실행됨",
+     'echo ${var:-\\}} ; (( 1<<2 ))\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("brace 확장 안 unquoted 닫는 괄호는 리터럴 — bash: 출력 ')', create 실행됨",
+     'echo ${x:- ) } $(( 1 << 2 ))\ngh issue create --title "T"\n2',
+     ("T",)),
+    # --- 이하 수정 라운드 4 red 승격분 (bash 오라클 실측 병기) ---
+    ("K2: 큰따옴표 안 산술 확장은 활성 — bash: create 실행됨 (관용 입력)",
+     'echo "count: $((1<<2))"\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("K1b: brace 안 cmdsub의 진짜 heredoc — bash: create 미실행 (본문)",
+     'echo $(( ${x:-$(cat <<EOF)} + 1 ))\ngh issue create --title "T"\nEOF',
+     ()),
+    ("K1a: 4중 중첩형 동형 — bash: create 미실행 (본문)",
+     'echo $(( $(echo $(( ${x:-$(cat <<EOF)} + 1 ))) + 1 ))\ngh issue create --title "T"\nEOF',
+     ()),
+    ("K3: cmdsub 직속 bare 산술 명령 — bash: create 실행됨",
+     'echo $(( $( ((y=1<<2)); echo $y ) ))\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("F3in: plain 개재 cmdsub 안 bare 산술 — bash: create 실행됨",
+     'echo $(( $( ( ((y=1<<2)) ) ) ))\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("F4q: 큰따옴표 안 cmdsub의 명령 문맥 리셋 — bash: create 실행됨",
+     'echo "$( (( x = 1 << 2 )); echo $x )"\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("F4b: brace 안 cmdsub의 명령 문맥 리셋 — bash: create 실행됨",
+     'echo ${var:-$( ((1<<2)) )}\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("brace 안 산술 확장은 활성 — bash: create 실행됨",
+     'echo ${x:-$((1<<2))}\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("P1: 백틱 안 중첩 산술 마스킹 (uniform cmdsub) — bash: 출력 5, create 실행됨",
+     'echo $(( `echo $((1<<2))` + 1 ))\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("SL1: cmdsub pop 후 바깥 큰따옴표 복원 — bash: 출력 'A B ...', create 실행됨",
+     'echo "A $(echo "B") C $(( 1 << 2 ))"\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("SL2: brace 안 중첩 큰따옴표의 독립 인용+복원 — bash: create 실행됨",
+     'echo "${x:-" ) "} $(( 1 << 2 ))"\ngh issue create --title "T"\n2',
+     ("T",)),
+    # --- 이하 수정 라운드 5 (마지막) red 승격분 ---
+    ("R5-1: arith 안 brace 내부도 마스킹 관통 — bash: 출력 4, create 실행됨",
+     'echo $(( ${SHIFT:-1<<2 } ))\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("R5-2: dq 안 brace 안 작은따옴표는 리터럴, 산술은 활성 — bash: 출력 '4', "
+     "다음 heredoc 본문은 미실행",
+     'echo "${u:-\'$((1<<2))\'}"\ncat > /dev/null <<EOF\ntrue && gh issue create --title "T"\nEOF',
+     ()),
+    # --- 이하 라운드 6 Critical 수정분 ---
+    ("C1: dq 안 brace가 정상 닫혀 이후 마스킹 유지 — bash: create 실행됨",
+     'echo "${u:-x}" ; (( 1 << 2 ))\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("C1 오차단 방향: brace 누수로 뒤 heredoc 본문이 파싱되면 안 됨 — "
+     "bash: create 미실행 (본문)",
+     'echo "${x:-y}"; (( 1<<2 )); cat > /dev/null <<EOF\ngh issue create --title "T"\nEOF',
+     ()),
+    ("C2: 백틱 안 작은따옴표 안 이스케이프 백틱은 닫지 않음 — bash: 출력 a`b, "
+     "create 실행됨",
+     'echo `echo \'a\\`b\'` ; (( 1 << 2 ))\ngh issue create --title "T"\n2',
+     ("T",)),
+    # --- 이하 라운드 7 Critical 수정분 ---
+    ("R7-A: 큰따옴표 문맥은 중첩 brace로 상속 — bash: 출력 '4', create 실행됨",
+     'echo "${u:-${v:-\'$((1<<2))\'}}"\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("R7-A 오차단 방향: 중첩 brace의 산술이 마스킹돼야 뒤 heredoc 본문이 "
+     "보존됨 — bash: create 미실행 (본문)",
+     'echo "${u:-${v:-\'$((1<<2))\'}}"\ncat > /dev/null <<EOF\ngh issue create --title "T"\nEOF',
+     ()),
+    ("R7-B: 백틱 렉서 이스케이프 집합 밖의 백슬래시-작은따옴표는 인용을 "
+     "닫음 — bash: 출력 a\\ 4, create 실행됨",
+     "echo `echo 'a\\' ; echo $((1<<2))`\ngh issue create --title \"T\"\n2",
+     ("T",)),
+    ("R7-B 오차단 방향 — bash: create 미실행 (본문)",
+     "echo `echo 'a\\' ; echo $((1<<2))`\ncat > /dev/null <<EOF\ngh issue create --title \"T\"\nEOF",
+     ()),
+]
+
+
+def test_oracle_corpus() -> None:
+    for description, cmd, expected_titles in _ORACLE_CORPUS:
+        titles = tuple(inv.title for inv in guard.detect_invocations(cmd))
+        assert titles == expected_titles, f"{description}: got {titles!r}"
 
 
 # ---------- 판정 흐름 (main) ----------
@@ -150,7 +403,19 @@ def test_override_skips_search_entirely(monkeypatch) -> None:
 
 def test_missing_title_blocks(monkeypatch, capsys) -> None:
     assert _run_main(monkeypatch, _bash_payload("gh issue create --body x")) == 42
-    assert "--title" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    # 모든 차단 메시지는 override 복구 경로를 안내해야 한다 (#32 괴리 3)
+    assert "--title" in err and guard.OVERRIDE_TOKEN in err
+
+
+def test_whole_command_prefix_does_not_override_later_segment(monkeypatch) -> None:
+    # 의미론 잠금(#32 괴리 4): 마커는 gh/glab이 있는 세그먼트 선두에서만
+    # 유효하다 — 셸 의미론과 동일. 이 테스트는 문서 정합 커밋에서 기존
+    # 동작을 고정하며, 수정 전에도 통과한다(선실패 원칙의 명시적 예외).
+    issues = json.dumps([{"number": 12, "state": "OPEN", "title": "T"}])
+    monkeypatch.setattr(guard, "_run_search", lambda argv, cwd=None: issues)
+    cmd = f'{guard.OVERRIDE_TOKEN} git add . && gh issue create -t "T"'
+    assert _run_main(monkeypatch, _bash_payload(cmd)) == 42
 
 
 def test_empty_title_blocks(monkeypatch, capsys) -> None:
