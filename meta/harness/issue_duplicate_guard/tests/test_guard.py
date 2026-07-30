@@ -24,8 +24,11 @@ def _run_main(monkeypatch, payload) -> int:
     return guard.main()
 
 
-def _bash_payload(command: str) -> dict:
-    return {"tool_name": "Bash", "tool_input": {"command": command}}
+def _bash_payload(command: str, cwd: str | None = None) -> dict:
+    payload = {"tool_name": "Bash", "tool_input": {"command": command}}
+    if cwd is not None:
+        payload["cwd"] = cwd
+    return payload
 
 
 # ---------- 감지: 오탐 방지 ----------
@@ -49,6 +52,7 @@ def test_bash_dash_c_inner_command_is_not_detected() -> None:
 def test_operator_without_spaces_is_detected() -> None:
     invs = guard.detect_invocations('cd x&&gh issue create -t "T"')
     assert len(invs) == 1 and invs[0].title == "T"
+    assert invs[0].cwd_unsafe is True
 
 
 def test_multiline_command_is_detected() -> None:
@@ -76,6 +80,29 @@ def test_repo_flag_is_parsed() -> None:
     assert invs[0].repo == "owner/repo"
 
 
+def test_attached_repo_flag_is_parsed() -> None:
+    # -t 결합형(-tX)과 대칭 — 놓치면 cd 래치·검색 대상 판정이 둘 다 틀어진다
+    invs = guard.detect_invocations("gh issue create -t x -Rowner/repo")
+    assert invs[0].repo == "owner/repo"
+
+
+def test_attached_repo_flag_with_equals_is_parsed() -> None:
+    # pflag는 -R=owner/repo에서 =를 벗긴다 — 그대로 두면 검색 --repo가
+    # "=owner/repo"로 실패해 중복 검사가 조용히 스킵된다 (리뷰 라운드 1 C3)
+    invs = guard.detect_invocations("gh issue create -t x -R=owner/repo")
+    assert invs[0].repo == "owner/repo"
+
+
+def test_cd_on_earlier_line_marks_cwd_unsafe() -> None:
+    invs = guard.detect_invocations('cd /elsewhere\ngh issue create -t "T"')
+    assert len(invs) == 1 and invs[0].cwd_unsafe is True
+
+
+def test_cd_after_invocation_does_not_mark() -> None:
+    invs = guard.detect_invocations('gh issue create -t "T" && cd /elsewhere')
+    assert len(invs) == 1 and invs[0].cwd_unsafe is False
+
+
 def test_override_prefix_alone_and_in_compound() -> None:
     assert guard.detect_invocations(f"{guard.OVERRIDE_TOKEN} gh issue create -t x")[0].override
     invs = guard.detect_invocations(f"cd y && {guard.OVERRIDE_TOKEN} gh issue create -t x")
@@ -100,20 +127,20 @@ def test_malformed_stdin_warns_without_blocking(monkeypatch, capsys) -> None:
 
 
 def test_no_duplicates_passes_silently(monkeypatch) -> None:
-    monkeypatch.setattr(guard, "_run_search", lambda argv: "[]")
+    monkeypatch.setattr(guard, "_run_search", lambda argv, cwd=None: "[]")
     assert _run_main(monkeypatch, _bash_payload("gh issue create -t brand-new")) == 0
 
 
 def test_duplicates_block_with_candidates_and_override_hint(monkeypatch, capsys) -> None:
     issues = json.dumps([{"number": 12, "state": "OPEN", "title": "같은 작업"}])
-    monkeypatch.setattr(guard, "_run_search", lambda argv: issues)
+    monkeypatch.setattr(guard, "_run_search", lambda argv, cwd=None: issues)
     assert _run_main(monkeypatch, _bash_payload('gh issue create -t "같은 작업"')) == 42
     err = capsys.readouterr().err
     assert "#12" in err and guard.OVERRIDE_TOKEN in err
 
 
 def test_override_skips_search_entirely(monkeypatch) -> None:
-    def _fail(argv):
+    def _fail(argv, cwd=None):
         raise AssertionError("search was invoked despite override")
 
     monkeypatch.setattr(guard, "_run_search", _fail)
@@ -132,7 +159,7 @@ def test_empty_title_blocks(monkeypatch, capsys) -> None:
 
 
 def test_search_failure_fails_open(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(guard, "_run_search", lambda argv: None)
+    monkeypatch.setattr(guard, "_run_search", lambda argv, cwd=None: None)
     assert _run_main(monkeypatch, _bash_payload("gh issue create -t x")) == 0
     assert "skipped" in capsys.readouterr().err
 
@@ -140,13 +167,52 @@ def test_search_failure_fails_open(monkeypatch, capsys) -> None:
 def test_repo_is_forwarded_to_search(monkeypatch) -> None:
     seen: list[list[str]] = []
 
-    def _capture(argv):
+    def _capture(argv, cwd=None):
         seen.append(argv)
         return "[]"
 
     monkeypatch.setattr(guard, "_run_search", _capture)
     _run_main(monkeypatch, _bash_payload("gh issue create -t x -R owner/repo"))
     assert ["--repo", "owner/repo"] == seen[0][-2:]
+
+
+def test_payload_cwd_is_forwarded_to_search(monkeypatch) -> None:
+    # #33 회귀: 훅 프로세스 cwd가 아니라 Bash 도구의 작업 디렉터리에서 검색해야 한다
+    seen: list[str | None] = []
+
+    def _capture(argv, cwd=None):
+        seen.append(cwd)
+        return "[]"
+
+    monkeypatch.setattr(guard, "_run_search", _capture)
+    payload = _bash_payload("gh issue create -t x", cwd="/divergent/dir")
+    assert _run_main(monkeypatch, payload) == 0
+    assert seen == ["/divergent/dir"]
+
+
+def test_cd_makes_search_unsafe_and_fails_open(monkeypatch, capsys) -> None:
+    # 선행 cd 뒤에는 검색 대상 저장소가 불명 → 검색 없이 통과 (fail-open)
+    def _fail(argv, cwd=None):
+        raise AssertionError("search must not run after cd")
+
+    monkeypatch.setattr(guard, "_run_search", _fail)
+    payload = _bash_payload("cd /elsewhere && gh issue create -t x", cwd="/orig")
+    assert _run_main(monkeypatch, payload) == 0
+    assert "skipped" in capsys.readouterr().err
+
+
+def test_cd_with_explicit_repo_still_searches(monkeypatch) -> None:
+    # 명시적 --repo는 디렉터리와 무관하므로 cd가 있어도 검색은 수행돼야 한다
+    seen: list[list[str]] = []
+
+    def _capture(argv, cwd=None):
+        seen.append(argv)
+        return "[]"
+
+    monkeypatch.setattr(guard, "_run_search", _capture)
+    payload = _bash_payload("cd /elsewhere && gh issue create -t x -R owner/repo")
+    assert _run_main(monkeypatch, payload) == 0
+    assert len(seen) == 1 and ["--repo", "owner/repo"] == seen[0][-2:]
 
 
 # ---------- glab 어댑터 (보수 파싱) ----------
@@ -161,14 +227,14 @@ def test_glab_confident_lines_block(monkeypatch, capsys) -> None:
         "#3\tcapture sample issue\t\tless than a minute ago\n"
         "\n"
     )
-    monkeypatch.setattr(guard, "_run_search", lambda argv: out)
+    monkeypatch.setattr(guard, "_run_search", lambda argv, cwd=None: out)
     assert _run_main(monkeypatch, _bash_payload("glab issue create -t x")) == 42
     assert "#3" in capsys.readouterr().err
 
 
 def test_glab_ambiguous_output_fails_open(monkeypatch) -> None:
     out = "No issues match your search in root/scratch.\n\n\n"
-    monkeypatch.setattr(guard, "_run_search", lambda argv: out)
+    monkeypatch.setattr(guard, "_run_search", lambda argv, cwd=None: out)
     assert _run_main(monkeypatch, _bash_payload("glab issue create -t x")) == 0
 
 
@@ -180,6 +246,23 @@ def test_run_search_timeout_returns_none(monkeypatch) -> None:
 
     monkeypatch.setattr(subprocess, "run", _timeout)
     assert guard._run_search(["gh", "issue", "list"]) is None
+
+
+def test_run_search_passes_cwd_to_subprocess(monkeypatch) -> None:
+    captured: dict = {}
+
+    def _record(argv, **kwargs):
+        captured.update(kwargs)
+
+        class Result:
+            returncode = 0
+            stdout = "[]"
+
+        return Result()
+
+    monkeypatch.setattr(subprocess, "run", _record)
+    guard._run_search(["gh", "issue", "list"], cwd="/somewhere")
+    assert captured["cwd"] == "/somewhere"
 
 
 def test_run_wrapper_converts_crash_to_nonblocking(monkeypatch, capsys) -> None:
