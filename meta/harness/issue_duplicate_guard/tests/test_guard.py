@@ -267,6 +267,34 @@ def test_comment_with_unbalanced_quote_fails_open(monkeypatch) -> None:
     assert _run_main(monkeypatch, _bash_payload(cmd)) == 0
 
 
+# ---------- bash 오라클 코퍼스 (리뷰 루프 프로브 승격) ----------
+# 각 항목의 기대값은 작성 시점에 실제 bash로 "create 줄이 실행되는가"를
+# 실측해 결정했다(주석에 근거 병기). 회고 교훈: 임시 프로브에서 검증된
+# 성질은 메커니즘 교체 때 조용히 뒤집힌다 — 전부 여기로 승격해 게이트로
+# 만든다. 형식: (설명, 명령, 기대 감지 제목 튜플).
+
+_ORACLE_CORPUS = [
+    ("톱레벨 cmdsub 안 bare 산술 명령 — bash: create 실행됨",
+     'echo $( echo foo ; (( x = 1 << 2 )) )\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("cmdsub 안 인용된 닫는 괄호는 프레임을 닫지 않음 — bash: create 실행됨",
+     'echo $(( $(echo ")") + 1 << 2 ))\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("이스케이프된 닫는 중괄호는 확장을 닫지 않음 — bash: create 실행됨",
+     'echo ${var:-\\}} ; (( 1<<2 ))\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("brace 확장 안 unquoted 닫는 괄호는 리터럴 — bash: 출력 ')', create 실행됨",
+     'echo ${x:- ) } $(( 1 << 2 ))\ngh issue create --title "T"\n2',
+     ("T",)),
+]
+
+
+def test_oracle_corpus() -> None:
+    for description, cmd, expected_titles in _ORACLE_CORPUS:
+        titles = tuple(inv.title for inv in guard.detect_invocations(cmd))
+        assert titles == expected_titles, f"{description}: got {titles!r}"
+
+
 # ---------- 판정 흐름 (main) ----------
 
 def test_non_bash_tool_passes(monkeypatch) -> None:
