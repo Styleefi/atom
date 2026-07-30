@@ -83,7 +83,8 @@ class _Frame:
     (bash 관용구 `"A $(echo "B") C"` 실측 근거).
     """
 
-    __slots__ = ("kind", "saved_single", "saved_double", "marks", "brace_depth")
+    __slots__ = ("kind", "saved_single", "saved_double", "marks", "brace_depth",
+                 "opened_in_double")
 
     def __init__(self, kind: str, saved_single: bool, saved_double: bool,
                  marks: list[int] | None = None) -> None:
@@ -92,6 +93,12 @@ class _Frame:
         self.saved_double = saved_double
         self.marks = marks          # arith 그룹 하단 프레임만 버퍼 보유
         self.brace_depth = 1        # brace 프레임 전용 (중첩 리터럴 중괄호)
+        # brace 프레임 전용: 큰따옴표 안에서 열렸는지. bash는 `"${...}"`
+        # 내부에서 작은따옴표를 리터럴로 두지만(`"${u:-'$((1<<2))'}"` →
+        # `'4'`), 인용 밖 `${...}` 내부의 작은따옴표는 진짜 인용이다
+        # (`${u:-'$((1<<2))'}` → 리터럴 출력 — 실측). 닫는 `}` 판정은
+        # brace-로컬 인용 상태로 한다(`"${x:-"}"}"`의 인용된 `}`는 안 닫힘).
+        self.opened_in_double = saved_double
 
 
 # 닫는 괄호가 pop할 수 있는 프레임 — brace는 `}`로만, 백틱은 백틱으로만
@@ -121,11 +128,20 @@ def _mask_arithmetic(line: str) -> str:
       백틱)에서만 산술 시작. arith 내부에서는 그룹핑(plain), brace
       내부에서는 리터럴(`${var:-((}` 주입 방어).
 
-    상태 생명주기: cmdsub·백틱·arith 프레임은 push 시 인용 상태를
-    저장·리셋하고 pop 시 복원하며(`"A $(echo "B") C $((1<<2))"` 실측),
-    brace 프레임은 저장·보존한다(위 `${...}` 규칙). 닫는 괄호는 최상단이
-    arith/cmdsub/plain일 때만 pop하고(brace/백틱 위에서는 리터럴), 인용
-    문맥 내부의 여는·닫는 괄호는 모두 리터럴이다. 마스킹 판정은
+    상태 생명주기: 모든 비-plain 프레임은 push 시 인용 상태를 저장하고
+    로컬 인용 추적을 새로 시작하며 pop 시 복원한다(`"A $(echo "B") C
+    $((1<<2))"` 실측). brace 프레임은 추가로 "큰따옴표 안에서 열렸는지"를
+    기억해 로컬 문맥의 작은따옴표를 리터럴로 처리한다 — bash는
+    `"${u:-'$((1<<2))'}"`에서 `'`를 리터럴로 두고 산술을 수행하지만
+    (출력 `'4'`), 인용 밖 `${u:-'...'}`의 `'`는 진짜 인용이다(리터럴
+    출력 — 실측). 닫는 `}` 판정은 brace-로컬 인용 상태 기준이라
+    `"${x:-y}"`가 정상 닫히고(`}`가 바깥 인용의 리터럴로 삼켜지면 이후
+    라인 전체의 마스킹이 죽는다 — 실측 회귀) `"${x:-"}"}"`의 인용된
+    `}`는 닫지 않는다. 닫는 괄호는 최상단이 arith/cmdsub/plain일 때만
+    pop하고(brace/백틱 위에서는 리터럴), 인용 문맥 내부의 여는·닫는
+    괄호는 모두 리터럴이다. 백틱 프레임이 열려 있으면 작은따옴표 안의
+    `\`도 다음 문자를 소비한다(bash 백틱 렉서가 인용보다 먼저 이스케이프
+    처리 — `` `echo 'a\\`b'` `` → ``a`b`` 실측). 마스킹 판정은
     plain·brace를 투명하게 본 최근접 프레임이 arith인 문자만 후보로
     삼고, 닫는 괄호는 pop 이전 스택 기준이다.
 
@@ -184,11 +200,12 @@ def _mask_arithmetic(line: str) -> str:
     def push(kind: str, marks: list[int] | None = None) -> None:
         nonlocal in_single, in_double
         stack.append(_Frame(kind, in_single, in_double, marks))
-        # cmdsub·백틱·arith는 독립 문맥(인용 리셋). brace는 바깥 인용을
-        # 보존한다 — bash는 `"${u:-'...'}"`에서 작은따옴표를 리터럴로 두고
-        # 산술을 수행한다(실측 출력 4). 리셋했다면 가짜 작은따옴표 스팬이
-        # 열려 산술을 놓치고 뒤 heredoc 본문이 오차단된다.
-        if kind in ("cmdsub", "backtick", "arith"):
+        # 모든 비-plain 프레임은 독립(로컬) 인용 추적을 시작한다. brace는
+        # 추가로 opened_in_double을 기억해, 큰따옴표 안에서 열린 경우
+        # 로컬 문맥의 작은따옴표를 리터럴로 처리한다(bash 실측 — 아래
+        # `'` 분기). 로컬 리셋이라야 닫는 `}`가 바깥 인용의 리터럴로
+        # 삼켜지지 않는다(`"${x:-y}" ; (( 1<<2 ))` 회귀의 원인).
+        if kind != "plain":
             in_single = False
             in_double = False
 
@@ -226,6 +243,15 @@ def _mask_arithmetic(line: str) -> str:
             continue
 
         if in_single:
+            # 백틱 프레임이 열려 있으면 bash의 백틱 렉서가 인용보다 먼저
+            # 이스케이프를 처리한다 — 작은따옴표 안 `\`도 다음 문자를
+            # 소비해야 이스케이프된 백틱이 조기 닫힘으로 새지 않는다
+            # (`` `echo 'a\`b'` `` → bash 출력 a`b — 실측).
+            if c == "\\" and any(f.kind == "backtick" for f in stack):
+                escaped = True
+                keep(i)
+                i += 1
+                continue
             if c == "'":
                 in_single = False
             keep(i)
@@ -251,7 +277,12 @@ def _mask_arithmetic(line: str) -> str:
                 continue
             # $ / 백틱은 아래 확장 감지로 내려간다.
         elif c == "'":
-            in_single = True
+            # 큰따옴표 안에서 열린 brace 프레임의 로컬 문맥에서 bash는
+            # 작은따옴표를 리터럴로 둔다(`"${u:-'$((1<<2))'}"` → `'4'`).
+            top_frame = stack[-1] if stack else None
+            if not (top_frame is not None and top_frame.kind == "brace"
+                    and top_frame.opened_in_double):
+                in_single = True
             keep(i)
             i += 1
             continue

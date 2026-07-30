@@ -332,6 +332,18 @@ _ORACLE_CORPUS = [
      "다음 heredoc 본문은 미실행",
      'echo "${u:-\'$((1<<2))\'}"\ncat > /dev/null <<EOF\ntrue && gh issue create --title "T"\nEOF',
      ()),
+    # --- 이하 라운드 6 Critical 수정분 ---
+    ("C1: dq 안 brace가 정상 닫혀 이후 마스킹 유지 — bash: create 실행됨",
+     'echo "${u:-x}" ; (( 1 << 2 ))\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("C1 오차단 방향: brace 누수로 뒤 heredoc 본문이 파싱되면 안 됨 — "
+     "bash: create 미실행 (본문)",
+     'echo "${x:-y}"; (( 1<<2 )); cat > /dev/null <<EOF\ngh issue create --title "T"\nEOF',
+     ()),
+    ("C2: 백틱 안 작은따옴표 안 이스케이프 백틱은 닫지 않음 — bash: 출력 a`b, "
+     "create 실행됨",
+     'echo `echo \'a\\`b\'` ; (( 1 << 2 ))\ngh issue create --title "T"\n2',
+     ("T",)),
 ]
 
 
