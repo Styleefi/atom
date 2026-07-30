@@ -160,6 +160,31 @@ def test_keyword_context_arithmetic_stays_masked() -> None:
     assert len(invs) == 1 and invs[0].title == "T"
 
 
+def test_escaped_backtick_does_not_flip_quote_state() -> None:
+    # bash는 백틱 안에서 백슬래시+백틱으로 백틱을 이스케이프한다(중첩 치환의
+    # 고전 문법) — 상태가 역전되면 이후 산술이 면제 구역으로 새어 실감지가
+    # 삼켜진다 (라운드 3 H1, C3)
+    cmd = 'echo `a\\`b` $((1<<2))\ngh issue create --title "T"\n2'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
+
+
+def test_arith_inside_cmdsub_inside_arith_stays_masked() -> None:
+    # 3중 중첩(산술→명령치환→산술)의 안쪽 산술은 어떤 깊이에서든 산술이다 —
+    # 면제 판정은 최근접 비-plain 프레임 기준 (라운드 3 H2)
+    cmd = 'echo $(( $(echo $((1<<2))) + 1 ))\ngh issue create --title "T"\n2'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
+
+
+def test_close_paren_inside_brace_expansion_does_not_pop() -> None:
+    # ${...} 내부의 닫는 괄호는 brace 분기가 소비해 스택 pop이 없다 —
+    # 스팬 조기 종료로 시프트가 노출되면 안 된다 (제미나이 3차 F2 방어 잠금)
+    cmd = 'echo $(( ${var:-)} + 1 << 2 ))\ngh issue create --title "T"\n2'
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "T"
+
+
 def test_operator_without_spaces_is_detected() -> None:
     invs = guard.detect_invocations('cd x&&gh issue create -t "T"')
     assert len(invs) == 1 and invs[0].title == "T"
