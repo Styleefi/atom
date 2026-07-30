@@ -88,10 +88,14 @@ def test_quoted_paren_prose_does_not_hide_real_heredoc() -> None:
     assert guard.detect_invocations(cmd) == []
 
 
-def test_quoted_dollar_paren_prose_does_not_hide_real_heredoc() -> None:
-    # 같은 구멍의 $(( 철자 — 스트립 도입 시점부터 잠재했던 형태
+def test_quoted_dollar_arith_prose_is_real_arithmetic() -> None:
+    # 라운드 2에서 산문 조각으로 오판했던 형태의 기대값 정정 — bash 실측:
+    # 큰따옴표 안 $((는 진짜 산술 시작이라 ))까지 삼키고(런타임 산술 오류가
+    # 나도) 다음 줄은 본문이 아니라 실행되는 명령이다(create 실행 확인).
+    # 스팬이 마스킹되고 heredoc은 등록되지 않으며 create가 감지돼야 한다.
     cmd = 'echo "cost $((" ; cat > n.md <<EOF ; echo "))"\ngh issue create --title "X"\nEOF'
-    assert guard.detect_invocations(cmd) == []
+    invs = guard.detect_invocations(cmd)
+    assert len(invs) == 1 and invs[0].title == "X"
 
 
 def test_parameter_expansion_paren_injection_does_not_hide_marker() -> None:
@@ -285,6 +289,40 @@ _ORACLE_CORPUS = [
      ("T",)),
     ("brace 확장 안 unquoted 닫는 괄호는 리터럴 — bash: 출력 ')', create 실행됨",
      'echo ${x:- ) } $(( 1 << 2 ))\ngh issue create --title "T"\n2',
+     ("T",)),
+    # --- 이하 수정 라운드 4 red 승격분 (bash 오라클 실측 병기) ---
+    ("K2: 큰따옴표 안 산술 확장은 활성 — bash: create 실행됨 (관용 입력)",
+     'echo "count: $((1<<2))"\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("K1b: brace 안 cmdsub의 진짜 heredoc — bash: create 미실행 (본문)",
+     'echo $(( ${x:-$(cat <<EOF)} + 1 ))\ngh issue create --title "T"\nEOF',
+     ()),
+    ("K1a: 4중 중첩형 동형 — bash: create 미실행 (본문)",
+     'echo $(( $(echo $(( ${x:-$(cat <<EOF)} + 1 ))) + 1 ))\ngh issue create --title "T"\nEOF',
+     ()),
+    ("K3: cmdsub 직속 bare 산술 명령 — bash: create 실행됨",
+     'echo $(( $( ((y=1<<2)); echo $y ) ))\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("F3in: plain 개재 cmdsub 안 bare 산술 — bash: create 실행됨",
+     'echo $(( $( ( ((y=1<<2)) ) ) ))\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("F4q: 큰따옴표 안 cmdsub의 명령 문맥 리셋 — bash: create 실행됨",
+     'echo "$( (( x = 1 << 2 )); echo $x )"\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("F4b: brace 안 cmdsub의 명령 문맥 리셋 — bash: create 실행됨",
+     'echo ${var:-$( ((1<<2)) )}\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("brace 안 산술 확장은 활성 — bash: create 실행됨",
+     'echo ${x:-$((1<<2))}\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("P1: 백틱 안 중첩 산술 마스킹 (uniform cmdsub) — bash: 출력 5, create 실행됨",
+     'echo $(( `echo $((1<<2))` + 1 ))\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("SL1: cmdsub pop 후 바깥 큰따옴표 복원 — bash: 출력 'A B ...', create 실행됨",
+     'echo "A $(echo "B") C $(( 1 << 2 ))"\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("SL2: brace 안 중첩 큰따옴표의 독립 인용+복원 — bash: create 실행됨",
+     'echo "${x:-" ) "} $(( 1 << 2 ))"\ngh issue create --title "T"\n2',
      ("T",)),
 ]
 

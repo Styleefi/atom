@@ -75,32 +75,62 @@ _HEREDOC_MARKER_RE = re.compile(
     r"(?<!<)<<(-?)\s*\\?(?:'([^'\n]+)'|\"([^\"\n]+)\"|([^\s'\"\\<>|&;()]+))"
 )
 
+class _Frame:
+    """전역 문맥 스택의 프레임 하나 (종류 + 진입 시점 인용 상태).
+
+    push 시 인용 상태를 저장하고 pop 시 복원해, cmdsub/brace/arith가
+    큰따옴표 안에서 열리고 닫혀도 바깥 인용 경계가 역전되지 않는다
+    (bash 관용구 `"A $(echo "B") C"` 실측 근거).
+    """
+
+    __slots__ = ("kind", "saved_single", "saved_double", "marks", "brace_depth")
+
+    def __init__(self, kind: str, saved_single: bool, saved_double: bool,
+                 marks: list[int] | None = None) -> None:
+        self.kind = kind
+        self.saved_single = saved_single
+        self.saved_double = saved_double
+        self.marks = marks          # arith 그룹 하단 프레임만 버퍼 보유
+        self.brace_depth = 1        # brace 프레임 전용 (중첩 리터럴 중괄호)
+
+
+# 닫는 괄호가 pop할 수 있는 프레임 — brace는 `}`로만, 백틱은 백틱으로만
+# 닫힌다 (`echo ${var:- ) }`가 유효 bash로 `)`를 출력함을 실측).
+_PAREN_POPPABLE = {"arith", "cmdsub", "plain"}
+
+
 def _mask_arithmetic(line: str) -> str:
     """마커 스캔 전에 한 줄의 산술 스팬을 공백으로 가린 사본을 만든다.
 
-    정규식 마스킹은 두 번 깨졌다 — lazy 스팬이 따옴표 산문 속 `((`/`))`
-    조각을 가로질러 실제 마커를 가렸고(오차단), 내부 금지문자 베토는
-    `${var:-((}` 괄호 주입·산술 내 따옴표(`(( x = "1" ))`)·이중 괄호 중첩
-    (`$(( ((a)) << 2 ))`)에서 반증됐다. 균형 괄호는 정규식으로 불가능하므로
-    문자 단위 스캔으로 교체한다(리뷰 루프 divergence 수리, 구조적 선택지).
+    전역 문맥 스택 모델. 이전 설계("따옴표·중괄호는 불투명")는 bash가
+    큰따옴표·`${...}` 안에서도 확장을 수행한다는 사실과 어긋나
+    `echo "count: $((1<<2))"`(관용 입력) 등에서 반증됐다. bash 충실 규칙:
 
-    규칙: 인용('·"·백틱)되지 않고 `${...}` 확장 내부가 아닌 인접 `((`
-    (선택적 `$` 프리픽스 포함)부터 균형 잡힌 `))`까지가 산술 스팬이다.
-    스팬 내부에서도 같은 인용 규칙으로 괄호를 세되, **명령 치환 내용물**
-    (단일 괄호 `$(...)`와 백틱)은 마스킹에서 면제한다 — 시프트는 산술식
-    레벨에만, 진짜 리다이렉션은 명령 치환 내부에만 오기 때문이다
-    (`$(( $(cat <<XX) + 1 ))`의 실마커 보존). 면제 여부는 문자를 감싸는
-    **가장 안쪽 arith/cmdsub 프레임**이 결정하고(plain 괄호는 투명), 닫는
-    괄호는 pop 이전 스택으로 판정한다. 산술 내부의 인접 `$((`는 명령
-    치환이 아니라 중첩 산술이라 마스킹을 계속한다. 산술 내 따옴표 내용은
-    산술식의 일부라 마스킹한다. 큰따옴표·백틱 안의 백슬래시는 "다음 한
-    문자 이스케이프"로 단순화한다 — 각각 bash의 정밀 이스케이프 집합
-    (큰따옴표: 달러·백틱·큰따옴표·백슬래시 / 백틱: 달러·백틱·백슬래시)에
-    상태 관련 문자가 전부 포함되므로 인용 상태 판정이 등가다(큰따옴표
-    쪽은 전수 대조로도 확인).
+    - 작은따옴표: 완전 불투명 (bash도 모든 확장 억제).
+    - 큰따옴표: `$((`(산술)·`$(`(cmdsub)·백틱·`${`는 활성, bare `((`와
+      작은따옴표는 리터럴 (bash의 큰따옴표 확장 규칙과 동일).
+    - `${...}`: 내부 확장 활성, bare `((`·괄호는 리터럴, 닫힘은 리터럴
+      중괄호 깊이를 센 `}` (`${x:-{a}}` 계열).
+    - 백틱: `$(`형과 동일한 cmdsub 프레임 — 명령 문맥 리셋, 내부 확장
+      감지, 닫힘은 비이스케이프 백틱(인용 내부라도 — bash 실측), `\\`는
+      한 문자 소비(백틱 이스케이프 집합과 상태 등가).
+    - bare `((`: 명령 문맥(톱레벨 또는 최근접 비-plain 프레임이 cmdsub/
+      백틱)에서만 산술 시작. arith 내부에서는 그룹핑(plain), brace
+      내부에서는 리터럴(`${var:-((}` 주입 방어).
 
-    미폐쇄 처리: 줄 끝까지 안 닫힌 산술 스팬은 마스킹하지 않는다(여러 줄
-    산술식 — 문서화된 한계). 잔여 한계는 _strip_heredocs docstring 참조.
+    상태 생명주기: 비-plain 프레임은 push 시 인용 상태를 저장·리셋하고
+    pop 시 복원한다(`"A $(echo "B") C $((1<<2))"` 실측). 닫는 괄호는
+    최상단이 arith/cmdsub/plain일 때만 pop하고(brace/백틱 위에서는
+    리터럴), 인용 문맥 내부의 여는·닫는 괄호는 모두 리터럴이다. 면제
+    판정(마스킹 여부)은 최근접 비-plain 프레임이 arith인 문자만 마스킹
+    후보로 삼고, 닫는 괄호는 pop 이전 스택 기준이다.
+
+    알려진 근사(전부 실측 근거): cmdsub 안 인자 위치의 bare `((`를
+    산술로 취급하지만 그런 입력은 bash가 문법 오류로 거부해 무해하다.
+    `$(((`는 greedy로 `$((` 우선 해석하며 bash 선호와 일치한다
+    (`echo $(((1<<2)))` → 4). 이스케이프된 백틱 중첩(`` \\` ``)의 내부는
+    감지하지 않는다. 미폐쇄 arith 스팬은 마스킹하지 않는다(여러 줄 —
+    문서화 한계). 잔여 한계는 _strip_heredocs docstring 참조.
 
     Args:
         line: 명령의 한 줄.
@@ -110,130 +140,197 @@ def _mask_arithmetic(line: str) -> str:
     """
     masked = list(line)
     n = len(line)
-    to_mask: list[int] = []      # 확정된 마스킹 인덱스
-    span: list[int] | None = None  # 진행 중인 산술 스팬의 마스킹 후보
-    stack: list[str] = []        # 산술 내 괄호 종류: "arith" | "cmdsub" | "plain"
-    in_single = in_double = in_backtick = False
+    to_mask: list[int] = []
+    stack: list[_Frame] = []
+    in_single = False
+    in_double = False
     escaped = False
-    brace_depth = 0
     i = 0
+
+    def nearest_kind() -> str | None:
+        for frame in reversed(stack):
+            if frame.kind != "plain":
+                return frame.kind
+        return None
+
+    def keep(idx: int) -> None:
+        # 최근접 비-plain 프레임이 arith인 문자만 마스킹 후보. 버퍼는
+        # 해당 arith 그룹의 하단 프레임이 보유하고, 그룹이 정상 종료될
+        # 때만 커밋된다.
+        if nearest_kind() != "arith":
+            return
+        for frame in reversed(stack):
+            if frame.kind == "arith" and frame.marks is not None:
+                frame.marks.append(idx)
+                return
+
+    def push(kind: str, marks: list[int] | None = None) -> None:
+        nonlocal in_single, in_double
+        stack.append(_Frame(kind, in_single, in_double, marks))
+        if kind != "plain":
+            in_single = False
+            in_double = False
+
+    def pop_restore() -> None:
+        nonlocal in_single, in_double
+        frame = stack.pop()
+        if frame.kind != "plain":
+            in_single = frame.saved_single
+            in_double = frame.saved_double
+        if frame.kind == "arith" and frame.marks is not None:
+            to_mask.extend(frame.marks)
+
     while i < n:
         c = line[i]
-        # 면제 판정은 문자를 감싸는 가장 안쪽 arith/cmdsub 프레임이 결정한다
-        # (plain 괄호는 투명). 안쪽 산술은 어떤 깊이에서든 산술이므로
-        # 마스킹되고, 명령 치환 직속 내용물만 면제된다. 닫는 괄호는 pop
-        # 이전 스택으로 판정되므로 cmdsub를 닫는 괄호도 면제 쪽이다.
-        exempt = next(
-            (kind == "cmdsub" for kind in reversed(stack) if kind != "plain"),
-            False,
-        )
-
-        def keep(idx: int) -> None:
-            if span is not None and not exempt:
-                span.append(idx)
 
         if escaped:
             escaped = False
             keep(i)
             i += 1
             continue
+
+        # 백틱 닫힘은 인용 상태보다 우선 — bash는 인용 내부라도 비이스케이프
+        # 백틱에서 치환을 닫는다(실측). 내부 미폐쇄 프레임은 폐기(arith
+        # 버퍼 미커밋 — 보수 방향).
+        if c == "`" and not in_single and any(f.kind == "backtick" for f in stack):
+            while stack:
+                if stack[-1].kind == "backtick":
+                    pop_restore()
+                    break
+                frame = stack.pop()
+                if frame.kind != "plain":
+                    in_single = frame.saved_single
+                    in_double = frame.saved_double
+            i += 1
+            continue
+
         if in_single:
             if c == "'":
                 in_single = False
             keep(i)
             i += 1
             continue
-        if in_double:
-            if c == "\\":
-                escaped = True
-            elif c == '"':
-                in_double = False
-            keep(i)
-            i += 1
-            continue
-        if in_backtick:
-            # 백틱 내용물은 명령 치환 — 마스킹 면제. bash의 백틱 내
-            # 이스케이프 집합은 달러·백틱·백슬래시이고 상태 관련 문자
-            # (백틱·백슬래시)가 전부 포함되므로 "다음 한 문자 소비"가
-            # 인용 상태 판정과 등가다 — 큰따옴표 단순화와 같은 논리.
-            if c == "\\":
-                i += 2
-                continue
-            if c == "`":
-                in_backtick = False
-            i += 1
-            continue
+
         if c == "\\":
             escaped = True
             keep(i)
             i += 1
             continue
-        if c == "'":
+
+        if in_double:
+            if c == '"':
+                in_double = False
+                keep(i)
+                i += 1
+                continue
+            if c not in ("$", "`"):
+                # 큰따옴표 안에서 $ 계열·백틱 외 전부 리터럴 (괄호 포함).
+                keep(i)
+                i += 1
+                continue
+            # $ / 백틱은 아래 확장 감지로 내려간다.
+        elif c == "'":
             in_single = True
             keep(i)
             i += 1
             continue
-        if c == '"':
+        elif c == '"':
             in_double = True
             keep(i)
             i += 1
             continue
-        if c == "`":
-            in_backtick = True
-            i += 1
-            continue
-        if brace_depth > 0:
+
+        top = stack[-1] if stack else None
+        if top is not None and top.kind == "brace":
             if c == "{":
-                brace_depth += 1
-            elif c == "}":
-                brace_depth -= 1
-            keep(i)
-            i += 1
-            continue
-        if c == "$" and i + 1 < n and line[i + 1] == "{":
-            brace_depth = 1
-            keep(i)
-            keep(i + 1)
-            i += 2
-            continue
-        if span is None:
-            if c == "(" and i + 1 < n and line[i + 1] == "(":
-                start = i - 1 if i > 0 and line[i - 1] == "$" else i
-                span = list(range(start, i + 2))
-                stack = ["arith", "arith"]
-            i += 1 if c != "(" or i + 1 >= n or line[i + 1] != "(" else 2
-            continue
-        # --- 산술 스팬 내부 ---
-        if c == "$" and i + 1 < n and line[i + 1] == "(":
-            if i + 2 < n and line[i + 2] == "(":
-                # 인접 $(( → 중첩 산술: 마스킹 계속
+                top.brace_depth += 1
+                keep(i)
+                i += 1
+                continue
+            if c == "}":
+                top.brace_depth -= 1
+                if top.brace_depth == 0:
+                    pop_restore()
+                else:
+                    keep(i)
+                i += 1
+                continue
+
+        if c == "$":
+            if i + 2 < n and line[i + 1] == "(" and line[i + 2] == "(":
                 keep(i)
                 keep(i + 1)
                 keep(i + 2)
-                stack.extend(["arith", "arith"])
+                push("arith", marks=[])
+                push("arith")
+                stack[-2].marks.extend([i, i + 1, i + 2])
                 i += 3
                 continue
-            # 단일 $( → 명령 치환: 내용물 면제
-            stack.append("cmdsub")
-            i += 2
+            if i + 1 < n and line[i + 1] == "(":
+                keep(i)
+                push("cmdsub")
+                i += 2
+                continue
+            if i + 1 < n and line[i + 1] == "{":
+                keep(i)
+                push("brace")
+                i += 2
+                continue
+            keep(i)
+            i += 1
             continue
+
+        if c == "`":
+            # 스택에 백틱 프레임 없음(위에서 확인) → 새로 연다.
+            push("backtick")
+            i += 1
+            continue
+
         if c == "(":
+            if i + 1 < n and line[i + 1] == "(":
+                kind = nearest_kind()
+                if kind is None or kind in ("cmdsub", "backtick"):
+                    # 명령 문맥의 bare (( → 산술 명령.
+                    keep(i)
+                    keep(i + 1)
+                    push("arith", marks=[])
+                    push("arith")
+                    stack[-2].marks.extend([i, i + 1])
+                    i += 2
+                    continue
+                if kind == "brace":
+                    keep(i)
+                    i += 1
+                    continue
+                # arith 내부의 (( → 내부 그룹핑.
+                keep(i)
+                keep(i + 1)
+                push("plain")
+                push("plain")
+                i += 2
+                continue
+            if nearest_kind() == "brace":
+                keep(i)
+                i += 1
+                continue
             keep(i)
-            stack.append("plain")
+            push("plain")
             i += 1
             continue
+
         if c == ")":
-            keep(i)
-            if stack:
-                stack.pop()
-            if not stack:
-                to_mask.extend(span)
-                span = None
+            if stack and stack[-1].kind in _PAREN_POPPABLE:
+                keep(i)  # pop 이전 스택 기준 판정
+                pop_restore()
+            else:
+                keep(i)  # brace/백틱 위 또는 빈 스택 → 리터럴
             i += 1
             continue
+
         keep(i)
         i += 1
-    # 미폐쇄 스팬(span이 남음)은 버린다 — 마스킹하지 않음.
+
+    # EOL: 스택에 남은 프레임의 arith 버퍼는 미폐쇄 → 폐기(마스킹 안 함).
     for idx in to_mask:
         masked[idx] = " "
     return "".join(masked)
@@ -259,9 +356,10 @@ def _strip_heredocs(command: str) -> str:
     단독 괄호는 스팬 추적을 오염시킨다 — 마커가 가려지거나 스팬이 조기
     확정돼 꼬리 시프트가 노출되며, 대부분 all-or-nothing abort로 눕지만
     우연한 종결자 줄과 겹치면 통과 방향까지 간다(case 문법 파싱 없이는
-    원리적으로 못 닫는 가족). 마스킹 면제 구역의 quoted `<<` 언급과 면제
-    구역(백틱 등) 내부의 중첩 산술은 여전히 마스킹되지 않는다(단일 괄호
-    명령 치환 직속의 중첩 산술만 최근접 프레임 판정으로 마스킹됨). 종결자
+    원리적으로 못 닫는 가족). 마스킹 면제 구역(cmdsub·백틱 내용물)의
+    quoted `<<` 언급과, 이스케이프된 백틱 중첩 내부는 여전히 감지·마스킹
+    대상이 아니다(비이스케이프 백틱·`$(` 내부의 중첩 산술은 전역 문맥
+    스택이 마스킹한다). 종결자
     없이 입력 끝으로 종결되는 heredoc(bash는 경고 후 실행)은 스트립 대상
     외라 본문이 여전히 파싱된다. 따옴표 문자열이나 `#` 주석 등 실행되지
     않는 텍스트 안의 heredoc 언급 뒤에 구분자와 일치하는 단독 줄이
