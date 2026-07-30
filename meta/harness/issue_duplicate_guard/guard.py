@@ -110,7 +110,10 @@ def _mask_arithmetic(line: str) -> str:
     - 큰따옴표: `$((`(산술)·`$(`(cmdsub)·백틱·`${`는 활성, bare `((`와
       작은따옴표는 리터럴 (bash의 큰따옴표 확장 규칙과 동일).
     - `${...}`: 내부 확장 활성, bare `((`·괄호는 리터럴, 닫힘은 리터럴
-      중괄호 깊이를 센 `}` (`${x:-{a}}` 계열).
+      중괄호 깊이를 센 `}` (`${x:-{a}}` 계열). 바깥 인용 상태를 보존하고
+      (작은따옴표는 `"${...}"` 안에서 리터럴 — `"${u:-'$((1<<2))'}"` →
+      `'4'` 실측), 마스킹 판정에는 투명하다(heredoc이 시작될 수 없는
+      텍스트라 `$(( ${x:-1<<2} ))`의 시프트도 마스킹돼야 한다 — 실측).
     - 백틱: `$(`형과 동일한 cmdsub 프레임 — 명령 문맥 리셋, 내부 확장
       감지, 닫힘은 비이스케이프 백틱(인용 내부라도 — bash 실측), `\\`는
       한 문자 소비(백틱 이스케이프 집합과 상태 등가).
@@ -118,19 +121,23 @@ def _mask_arithmetic(line: str) -> str:
       백틱)에서만 산술 시작. arith 내부에서는 그룹핑(plain), brace
       내부에서는 리터럴(`${var:-((}` 주입 방어).
 
-    상태 생명주기: 비-plain 프레임은 push 시 인용 상태를 저장·리셋하고
-    pop 시 복원한다(`"A $(echo "B") C $((1<<2))"` 실측). 닫는 괄호는
-    최상단이 arith/cmdsub/plain일 때만 pop하고(brace/백틱 위에서는
-    리터럴), 인용 문맥 내부의 여는·닫는 괄호는 모두 리터럴이다. 면제
-    판정(마스킹 여부)은 최근접 비-plain 프레임이 arith인 문자만 마스킹
-    후보로 삼고, 닫는 괄호는 pop 이전 스택 기준이다.
+    상태 생명주기: cmdsub·백틱·arith 프레임은 push 시 인용 상태를
+    저장·리셋하고 pop 시 복원하며(`"A $(echo "B") C $((1<<2))"` 실측),
+    brace 프레임은 저장·보존한다(위 `${...}` 규칙). 닫는 괄호는 최상단이
+    arith/cmdsub/plain일 때만 pop하고(brace/백틱 위에서는 리터럴), 인용
+    문맥 내부의 여는·닫는 괄호는 모두 리터럴이다. 마스킹 판정은
+    plain·brace를 투명하게 본 최근접 프레임이 arith인 문자만 후보로
+    삼고, 닫는 괄호는 pop 이전 스택 기준이다.
 
     알려진 근사(전부 실측 근거): cmdsub 안 인자 위치의 bare `((`를
     산술로 취급하지만 그런 입력은 bash가 문법 오류로 거부해 무해하다.
-    `$(((`는 greedy로 `$((` 우선 해석하며 bash 선호와 일치한다
-    (`echo $(((1<<2)))` → 4). 이스케이프된 백틱 중첩(`` \\` ``)의 내부는
-    감지하지 않는다. 미폐쇄 arith 스팬은 마스킹하지 않는다(여러 줄 —
-    문서화 한계). 잔여 한계는 _strip_heredocs docstring 참조.
+    `$(((`는 greedy로 `$((` 우선 해석한다 — 괄호가 정합하면 bash 선호와
+    일치하고(`echo $(((1<<2)))` → 4), 산술로 닫히지 않아 bash가 cmdsub로
+    재해석하는 형태의 과마스킹은 문서화 한계 가족으로 눕는다. `$'...'`
+    ANSI-C 인용은 모델링하지 않는다 — 해당 입력은 shlex 이중 실패 계열로
+    전면 fail-open에 흡수된다(실측). 이스케이프된 백틱 중첩(`` \\` ``)의
+    내부는 감지하지 않는다. 미폐쇄 arith 스팬은 마스킹하지 않는다(여러
+    줄 — 문서화 한계). 잔여 한계는 _strip_heredocs docstring 참조.
 
     Args:
         line: 명령의 한 줄.
@@ -153,11 +160,21 @@ def _mask_arithmetic(line: str) -> str:
                 return frame.kind
         return None
 
+    def mask_kind() -> str | None:
+        # 마스킹 판정 전용: plain에 더해 brace도 투명하다 — `${...}` 내부는
+        # bash에서 heredoc이 시작될 수 없는 텍스트라 산술 마스킹이 관통해야
+        # 한다(`$(( ${x:-1<<2} ))` 실측). 명령 문맥 판정(nearest_kind)은
+        # brace를 유지해 `${var:-((}` 주입 방어를 지킨다.
+        for frame in reversed(stack):
+            if frame.kind not in ("plain", "brace"):
+                return frame.kind
+        return None
+
     def keep(idx: int) -> None:
-        # 최근접 비-plain 프레임이 arith인 문자만 마스킹 후보. 버퍼는
-        # 해당 arith 그룹의 하단 프레임이 보유하고, 그룹이 정상 종료될
-        # 때만 커밋된다.
-        if nearest_kind() != "arith":
+        # 마스킹 판정상 최근접 프레임이 arith인 문자만 후보. 버퍼는 해당
+        # arith 그룹의 하단 프레임이 보유하고, 그룹이 정상 종료될 때만
+        # 커밋된다.
+        if mask_kind() != "arith":
             return
         for frame in reversed(stack):
             if frame.kind == "arith" and frame.marks is not None:
@@ -167,7 +184,11 @@ def _mask_arithmetic(line: str) -> str:
     def push(kind: str, marks: list[int] | None = None) -> None:
         nonlocal in_single, in_double
         stack.append(_Frame(kind, in_single, in_double, marks))
-        if kind != "plain":
+        # cmdsub·백틱·arith는 독립 문맥(인용 리셋). brace는 바깥 인용을
+        # 보존한다 — bash는 `"${u:-'...'}"`에서 작은따옴표를 리터럴로 두고
+        # 산술을 수행한다(실측 출력 4). 리셋했다면 가짜 작은따옴표 스팬이
+        # 열려 산술을 놓치고 뒤 heredoc 본문이 오차단된다.
+        if kind in ("cmdsub", "backtick", "arith"):
             in_single = False
             in_double = False
 
@@ -192,7 +213,7 @@ def _mask_arithmetic(line: str) -> str:
         # 백틱 닫힘은 인용 상태보다 우선 — bash는 인용 내부라도 비이스케이프
         # 백틱에서 치환을 닫는다(실측). 내부 미폐쇄 프레임은 폐기(arith
         # 버퍼 미커밋 — 보수 방향).
-        if c == "`" and not in_single and any(f.kind == "backtick" for f in stack):
+        if c == "`" and any(f.kind == "backtick" for f in stack):
             while stack:
                 if stack[-1].kind == "backtick":
                     pop_restore()

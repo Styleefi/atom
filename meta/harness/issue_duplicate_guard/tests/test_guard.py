@@ -324,6 +324,14 @@ _ORACLE_CORPUS = [
     ("SL2: brace 안 중첩 큰따옴표의 독립 인용+복원 — bash: create 실행됨",
      'echo "${x:-" ) "} $(( 1 << 2 ))"\ngh issue create --title "T"\n2',
      ("T",)),
+    # --- 이하 수정 라운드 5 (마지막) red 승격분 ---
+    ("R5-1: arith 안 brace 내부도 마스킹 관통 — bash: 출력 4, create 실행됨",
+     'echo $(( ${SHIFT:-1<<2 } ))\ngh issue create --title "T"\n2',
+     ("T",)),
+    ("R5-2: dq 안 brace 안 작은따옴표는 리터럴, 산술은 활성 — bash: 출력 '4', "
+     "다음 heredoc 본문은 미실행",
+     'echo "${u:-\'$((1<<2))\'}"\ncat > /dev/null <<EOF\ntrue && gh issue create --title "T"\nEOF',
+     ()),
 ]
 
 
