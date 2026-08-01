@@ -406,6 +406,23 @@ _SEGMENT_CORPUS = [
      'case x in x) gh issue create -t "T" ;; esac', ("T",)),
     ("오차단 방향: 인자 위치의 then은 예약어가 아니다 — bash: 미실행(echo 인자)",
      'echo then gh issue create --title "T"', ()),
+    # --- 결합 연산자 토큰 (shlex가 인접 문장부호를 한 토큰으로 묶는다) ---
+    ("산술 확장 뒤 ; 로 이어진 create — `));` 한 토큰 — bash: 실행됨",
+     'echo $((1<<2)); gh issue create -t "T"', ("T",)),
+    ("#68 재현 케이스 — `));` 경계와 then 스킵이 둘 다 있어야 감지 — bash: 실행됨",
+     'if ((x)); then gh issue create -t "T"; fi', ("T",)),
+    ("오차단 방향: `))` 단독은 경계가 아니다 — bash: 미실행(echo 인자, 출력 `4 gh ...`)",
+     'echo $((1<<2)) gh issue create -t "T"', ()),
+    ("오차단 방향: &> 는 리다이렉션이다 — bash: 미실행(gh라는 파일로 리다이렉션)",
+     'echo a &> gh issue create -t "T"', ()),
+    ("오차단 방향: >& 도 리다이렉션 — bash: 미실행",
+     'echo a >& gh issue create -t "T"', ()),
+    ("오차단 방향: >| 도 리다이렉션 — bash: 미실행",
+     'echo a >| gh issue create -t "T"', ()),
+    ("오차단 방향: &>> 도 리다이렉션 — bash: 미실행",
+     'echo a &>> gh issue create -t "T"', ()),
+    ("오차단 방향: 인용된 연산자 리터럴은 명령 구분자가 아니다 — bash: 미실행",
+     'echo "|&" gh issue create -t "T"', ()),
 ]
 
 

@@ -20,6 +20,12 @@ gh/glab 호출 바로 앞에 — 환경 변수의 셸 의미론과 동일) — �
 - 오탐 방지가 최우선: 전체 명령을 shlex로 먼저 토큰화해 따옴표 문자열을
   단일 토큰으로 만든 뒤 연산자 위치에서 세그먼트를 나누므로, 커밋 메시지
   등 문자열 내부의 "gh issue create" 언급은 명령 위치에 올 수 없다.
+  단서: 토큰화가 posix 모드라 따옴표가 벗겨지므로, 토큰 **전체**가 연산자
+  문자로만 이뤄진 인용 리터럴(`echo ";" gh issue create -t T`)은 여전히
+  경계로 오인된다 — 오차단 방향의 사전 존재 결함이다(`;`·`&&`·`|`·`;;`는
+  이 판정 도입 이전부터 그랬다). 근본 해결은 인용 인지 토큰화이며 별도
+  이슈로 추적한다. 결합 토큰 판정이 이 표면을 넓히지 않도록 아래
+  _OPERATOR_CHARS 주석의 세 조건을 둔다.
 - 검색 기준 디렉터리는 hook 페이로드의 `cwd`(Bash 도구의 작업 디렉터리는
   호출 간 유지되므로 프로세스 cwd만으로는 어긋날 수 있다). `--repo`/`-R`가
   없으면 gh/glab이 그 디렉터리로 대상 저장소를 해석하므로, 선행 세그먼트에
@@ -73,6 +79,22 @@ KEYWORDS = frozenset({
     "if", "then", "elif", "else", "fi", "while", "until", "for", "select",
     "do", "done", "case", "esac", "function", "time", "coproc", "{", "}", "!",
 })
+
+# 결합 연산자 토큰 판정용 문자군. shlex는 인접 문장부호를 한 토큰으로 묶으므로
+# `((x));`가 `));`라는 토큰을 낳고, OPERATORS 정확 일치로는 경계가 되지 않는다.
+# 세 조건이 모두 필요하며 각각 다른 오차단을 막는다(전부 bash 실측 근거).
+# - 문자군에 꺾쇠(<>)를 넣지 않는다: 넣으면 `&>`·`>&`·`>|`·`&>>`가 경계가 되어
+#   `echo a &> gh issue create -t T`를 오차단한다(bash는 gh라는 파일로 리다이렉션할
+#   뿐 create를 실행하지 않는다). 셸의 명령 구분자에는 꺾쇠가 없다.
+# - 구분자(;&|)를 요구한다: `))` 단독까지 경계면 `echo $((1<<2)) gh issue create`가
+#   오차단된다(bash 출력은 `4 gh issue create ...`, create 미실행).
+# - 괄호를 요구한다: 이 판정은 인용 정보를 잃은 뒤에 돈다(_tokenize는 posix라
+#   `echo "|&" gh ...`의 토큰이 `|&`가 된다). 결합 토큰이 필요한 유일한 실사용
+#   동기는 `((x));`가 만드는 `));` 계열이고 전부 괄호를 포함하므로, 괄호를 요구해
+#   인용 리터럴의 오차단 표면을 그 계열로 한정한다. 대가로 `echo hi |& gh issue
+#   create`(bash 실행됨)는 미감지지만 통과 방향이다.
+_OPERATOR_CHARS = frozenset("();&|")
+_SEPARATOR_CHARS = frozenset(";&|")
 
 FORGE_CLIS = {"gh", "glab"}
 
@@ -540,11 +562,29 @@ def _tokenize(text: str) -> list[str]:
     return list(lex)
 
 
+def _is_operator(token: str) -> bool:
+    """토큰이 세그먼트 경계(명령 구분자)인지 판정한다.
+
+    Args:
+        token: shlex가 돌려준 토큰 하나.
+
+    Returns:
+        경계면 True. 정확 일치하는 OPERATORS이거나, 전부 연산자 문자이면서
+        구분자와 괄호를 각각 하나 이상 포함하는 결합 토큰(`));` 등)이면 True.
+    """
+    if token in OPERATORS:
+        return True
+    if not token or not all(c in _OPERATOR_CHARS for c in token):
+        return False
+    return (any(c in _SEPARATOR_CHARS for c in token)
+            and any(c in "()" for c in token))
+
+
 def _split_segments(tokens: list[str]) -> list[list[str]]:
     segments: list[list[str]] = []
     current: list[str] = []
     for token in tokens:
-        if token in OPERATORS:
+        if _is_operator(token):
             if current:
                 segments.append(current)
                 current = []
