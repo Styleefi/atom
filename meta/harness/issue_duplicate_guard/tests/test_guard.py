@@ -111,6 +111,30 @@ def test_real_heredoc_inside_command_substitution_in_arith() -> None:
     assert guard.detect_invocations(cmd) == []
 
 
+def test_protected_flags_marks_escaped_operator() -> None:
+    # 이스케이프된 연산자는 진짜 구분자가 아니다 — 표식이 붙어야 경계 판정에서 빠진다
+    text = 'echo \\; gh issue create'
+    flags = guard._protected_flags(text, len(guard._tokenize(text)))
+    assert flags is not None
+    assert flags[1] is True          # `;` 자리
+    assert flags[0] is False         # `echo`
+
+
+def test_protected_flags_gives_up_when_input_holds_sentinel() -> None:
+    # 센티널이 입력에 있으면 정규화 결과를 신뢰할 수 없다 — 판별 포기
+    text = f"echo {guard._ESCAPE_SENTINEL} gh issue create"
+    assert guard._protected_flags(text, len(guard._tokenize(text))) is None
+
+
+def test_protected_flags_ignores_apostrophe_inside_double_quotes() -> None:
+    # bash는 큰따옴표 안 작은따옴표를 리터럴로 둔다 — 인용 상태가 뒤집히면
+    # 뒤따르는 이스케이프가 접히지 않아 정렬이 깨지고 오차단이 되살아난다
+    text = 'echo "it\'s" a\\ b && gh issue create'
+    flags = guard._protected_flags(text, len(guard._tokenize(text)))
+    assert flags is not None         # 상태가 뒤집혔다면 정렬 실패로 None이 된다
+    assert flags[-1] is False        # 진짜 && 는 보호 대상이 아니다
+
+
 def test_strip_heredocs_reports_completion() -> None:
     # 완결 플래그는 줄 연속 결합을 켜는 스위치다 — 코퍼스는 최종 감지 결과만
     # 보므로 플래그 의미가 뒤집혀도 우연히 같은 결과가 나오면 안 잡힌다
@@ -461,12 +485,25 @@ _SEGMENT_CORPUS = [
     ("오차단 방향: 따옴표가 낱말에 붙어 정렬이 깨져도 오차단이 되면 안 됨 — "
      "bash: 미실행(`();;)` 를 명령으로 취급)",
      'echo x && "();;"\')\' gh issue create -t "T"', ()),
-    ("정렬 실패 폴백: 이스케이프가 섞여도 정확 일치 연산자는 경계로 남는다 "
-     "— bash: 실행됨(진짜 && 뒤 create)",
+    ("이스케이프가 섞여도 정확 일치 연산자는 경계로 남는다 — bash: 실행됨",
      'echo a\\ b && gh issue create -t "T"', ("T",)),
-    ("정렬 실패 폴백의 대가: 새 판정 두 가지가 꺼져 미감지 — bash: 실행됨. "
-     "오차단을 막는 쪽을 택한 결과이며 통과 방향이다",
-     'echo a\\ b; if ((x)); then gh issue create -t "T"; fi', ()),
+    ("이스케이프 정규화로 정렬이 복원돼 새 판정이 살아난다 — bash: 실행됨",
+     'echo a\\ b; if ((x)); then gh issue create -t "T"; fi', ("T",)),
+    # --- 이스케이프된 연산자 리터럴 (#72) ---
+    ("오차단 방향: 이스케이프된 구분자는 명령 구분자가 아니다 — bash: 미실행",
+     'echo \\; gh issue create -t "T"', ()),
+    ("오차단 방향: 같은 줄의 이스케이프가 있어도 인용된 구분자를 지킨다 — bash: 미실행",
+     'echo a\\ b ";" gh issue create -t "T"', ()),
+    ("오차단 방향: 작은따옴표 안 백슬래시는 리터럴이라 인용을 닫는다 — bash: 미실행",
+     "echo 'a\\' ';' gh issue create -t \"T\"", ()),
+    ("오차단 방향: 큰따옴표 안 작은따옴표는 인용을 열지 않는다 — bash: 미실행",
+     'echo "\'" \\; gh issue create -t "T"', ()),
+    ("오차단 방향: 위 둘의 결합(작은따옴표만 추적하던 중간안의 회귀) — bash: 미실행",
+     'echo "\'" \'a\\\' \';\' gh issue create -t "T"', ()),
+    ("감지 유지: 큰따옴표 안 아포스트로피가 진짜 && 경계를 삼키면 안 된다 — bash: 실행됨",
+     'echo "it\'s fine" && gh issue create -t "T"', ("T",)),
+    ("감지 유지: 작은따옴표 안 큰따옴표도 마찬가지 — bash: 실행됨",
+     "echo 'say \"hi\"' ; gh issue create -t \"T\"", ("T",)),
     # --- 백슬래시 줄 연속 ---
     ("줄 연속 뒤 create — bash: 실행됨",
      'echo a && \\\ngh issue create --title "T"', ("T",)),
@@ -498,25 +535,28 @@ def test_segment_corpus() -> None:
 # 여기 두는 이유는 green 스위트가 "오차단이 없다"로 읽히지 않게 하기 위해서다.
 #
 # **이 테스트가 깨졌다면 버그가 고쳐진 것이다.** 기대값을 되돌리지 말고 해당
-# 항목을 지운 뒤 추적 이슈를 닫아라.
+# 항목을 지워라.
 #
-# 형식: (설명, 명령, 현재 감지되는 제목 튜플, 추적 이슈).
+# 남은 항목은 owner가 수용한 한계다(#72 종결 시 결정). 세 조건이 동시에 성립해야
+# 터진다 — 이스케이프된 큰따옴표가 낱말 경계를 가로지르는 배치, 인용·이스케이프된
+# 연산자 리터럴이 인자 위치, 그 뒤에 `gh issue create`가 낱말로. 실사용에서 한 번이라도
+# 관측되면 수용을 철회하고 수리 대상으로 올린다.
+#
+# 형식: (설명, 명령, 현재 감지되는 제목 튜플, 출처).
 
 _KNOWN_FALSE_BLOCKS = [
-    ("이스케이프된 구분자 — bash: 미실행(`;`는 echo 인자)",
-     'echo \\; gh issue create -t "T"', ("T",), "#72"),
-    ("같은 줄의 이스케이프가 인용 표식 정렬을 깨 인용된 구분자가 경계로 "
-     "오인됨 — bash: 미실행(전부 echo 인자)",
-     'echo a\\ b ";" gh issue create -t "T"', ("T",), "#72"),
+    ("이스케이프된 큰따옴표가 낱말 경계를 가로질러 인용 표식 정렬이 깨지고, "
+     "폴백의 정확 일치 경로가 인용된 구분자를 경계로 읽는다 — bash: 미실행",
+     'echo "a\\" "a\\" ";" gh issue create -t "T"', ("T",), "PR #72 수용 한계"),
 ]
 
 
 def test_known_false_blocks() -> None:
-    for description, cmd, expected_titles, issue in _KNOWN_FALSE_BLOCKS:
+    for description, cmd, expected_titles, origin in _KNOWN_FALSE_BLOCKS:
         titles = tuple(inv.title for inv in guard.detect_invocations(cmd))
         assert titles == expected_titles, (
-            f"{description} ({issue}): got {titles!r} — 오차단이 사라졌다면 "
-            "이 항목을 지우고 이슈를 닫아라. 기대값을 되돌리지 마라"
+            f"{description} ({origin}): got {titles!r} — 오차단이 사라졌다면 "
+            "이 항목을 지워라. 기대값을 되돌리지 마라"
         )
 
 
