@@ -437,8 +437,25 @@ _SEGMENT_CORPUS = [
      'echo a >| gh issue create -t "T"', ()),
     ("오차단 방향: &>> 도 리다이렉션 — bash: 미실행",
      'echo a &>> gh issue create -t "T"', ()),
+    ("서브셸 닫기 뒤 create — `);` 한 토큰 — bash: 실행됨",
+     '(cd x; ls); gh issue create -t "T"', ("T",)),
+    # 인용된 연산자 리터럴 — posix 토큰화가 따옴표를 벗기므로 non-posix 재토큰화로
+    # 표식을 만들어 걸러낸다. 아래 `;`·`&&`는 이 판정 도입 이전에도 오차단이었다.
     ("오차단 방향: 인용된 연산자 리터럴은 명령 구분자가 아니다 — bash: 미실행",
      'echo "|&" gh issue create -t "T"', ()),
+    ("오차단 방향: 괄호+구분자 인용 리터럴 — bash: 미실행(echo 인자)",
+     'echo "(;" gh issue create -t "T"', ()),
+    ("오차단 방향: `));` 인용 리터럴 — bash: 미실행",
+     'echo "));" gh issue create -t "T"', ()),
+    ("오차단 방향: 작은따옴표 리터럴도 동일 — bash: 미실행",
+     "echo '));' gh issue create -t \"T\"", ()),
+    ("오차단 방향: 단독 구분자 인용 리터럴(도입 이전부터의 오차단) — bash: 미실행",
+     'echo ";" gh issue create -t "T"', ()),
+    ("오차단 방향: `&&` 인용 리터럴(도입 이전부터의 오차단) — bash: 미실행",
+     'echo "&&" gh issue create -t "T"', ()),
+    ("정렬 실패 폴백: 이스케이프가 섞이면 인용 표식을 포기하고 종전대로 판정한다 "
+     "— bash: 실행됨(진짜 && 뒤 create)",
+     'echo a\\ b && gh issue create -t "T"', ("T",)),
     # --- 백슬래시 줄 연속 ---
     ("줄 연속 뒤 create — bash: 실행됨",
      'echo a && \\\ngh issue create --title "T"', ("T",)),

@@ -20,12 +20,13 @@ gh/glab 호출 바로 앞에 — 환경 변수의 셸 의미론과 동일) — �
 - 오탐 방지가 최우선: 전체 명령을 shlex로 먼저 토큰화해 따옴표 문자열을
   단일 토큰으로 만든 뒤 연산자 위치에서 세그먼트를 나누므로, 커밋 메시지
   등 문자열 내부의 "gh issue create" 언급은 명령 위치에 올 수 없다.
-  단서: 토큰화가 posix 모드라 따옴표가 벗겨지므로, 토큰 **전체**가 연산자
-  문자로만 이뤄진 인용 리터럴(`echo ";" gh issue create -t T`)은 여전히
-  경계로 오인된다 — 오차단 방향의 사전 존재 결함이다(`;`·`&&`·`|`·`;;`는
-  이 판정 도입 이전부터 그랬다). 근본 해결은 인용 인지 토큰화이며 별도
-  이슈로 추적한다. 결합 토큰 판정이 이 표면을 넓히지 않도록 아래
-  _OPERATOR_CHARS 주석의 세 조건을 둔다.
+  posix 토큰화는 따옴표를 벗기므로 토큰 **전체**가 연산자 문자로만 이뤄진
+  인용 리터럴(`echo ";" gh issue create -t T`)이 진짜 구분자와 구분되지
+  않는다. 그래서 같은 텍스트를 non-posix로 한 번 더 토큰화해 인용 여부를
+  표시하고(_quoted_flags), 인용된 토큰은 경계로 보지 않는다. 두 토큰 수가
+  어긋나면 표식을 포기하고 종전대로 판정하므로, 백슬래시로 이스케이프한
+  연산자(`echo \\; gh issue create`)의 오차단은 남는다 — 이 판정 도입
+  이전부터 있던 잔여물이다.
 - 검색 기준 디렉터리는 hook 페이로드의 `cwd`(Bash 도구의 작업 디렉터리는
   호출 간 유지되므로 프로세스 cwd만으로는 어긋날 수 있다). `--repo`/`-R`가
   없으면 gh/glab이 그 디렉터리로 대상 저장소를 해석하므로, 선행 세그먼트에
@@ -73,7 +74,7 @@ OPERATORS = {"&&", "||", "|", ";", ";;", "&", "(", ")"}
 
 # bash 예약어. bash와 동일하게 **명령 위치에서만** 예약어로 취급한다(세그먼트
 # 선두에서만 건너뛰고, 인자 위치의 같은 단어는 평범한 토큰이다 — `echo then gh
-# issue create`가 걸리면 안 된다). `[[`는 넣지 않는다: 뒤에 오는 것은 명령이
+# issue create`가 걸리면 안 된다). `[[`는 넣지 않는다. 뒤에 오는 것은 명령이
 # 아니라 조건식이다.
 KEYWORDS = frozenset({
     "if", "then", "elif", "else", "fi", "while", "until", "for", "select",
@@ -82,17 +83,16 @@ KEYWORDS = frozenset({
 
 # 결합 연산자 토큰 판정용 문자군. shlex는 인접 문장부호를 한 토큰으로 묶으므로
 # `((x));`가 `));`라는 토큰을 낳고, OPERATORS 정확 일치로는 경계가 되지 않는다.
-# 세 조건이 모두 필요하며 각각 다른 오차단을 막는다(전부 bash 실측 근거).
-# - 문자군에 꺾쇠(<>)를 넣지 않는다: 넣으면 `&>`·`>&`·`>|`·`&>>`가 경계가 되어
+# 세 조건이 모두 필요하다(전부 bash 실측 근거).
+# - 문자군에 꺾쇠(<>)를 넣지 않는다. 넣으면 `&>`·`>&`·`>|`·`&>>`가 경계가 되어
 #   `echo a &> gh issue create -t T`를 오차단한다(bash는 gh라는 파일로 리다이렉션할
 #   뿐 create를 실행하지 않는다). 셸의 명령 구분자에는 꺾쇠가 없다.
-# - 구분자(;&|)를 요구한다: `))` 단독까지 경계면 `echo $((1<<2)) gh issue create`가
+# - 구분자(;&|)를 요구한다. `))` 단독까지 경계면 `echo $((1<<2)) gh issue create`가
 #   오차단된다(bash 출력은 `4 gh issue create ...`, create 미실행).
-# - 괄호를 요구한다: 이 판정은 인용 정보를 잃은 뒤에 돈다(_tokenize는 posix라
-#   `echo "|&" gh ...`의 토큰이 `|&`가 된다). 결합 토큰이 필요한 유일한 실사용
-#   동기는 `((x));`가 만드는 `));` 계열이고 전부 괄호를 포함하므로, 괄호를 요구해
-#   인용 리터럴의 오차단 표면을 그 계열로 한정한다. 대가로 `echo hi |& gh issue
-#   create`(bash 실행됨)는 미감지지만 통과 방향이다.
+# - 괄호를 요구한다. 이건 오차단 방어가 아니라 **적용 범위 제한**이다. 인용
+#   리터럴의 오차단은 _quoted_flags가 막고, 여기서는 결합 토큰이 필요한 실사용
+#   동기(`((x));`·`(cmd);` 같은 괄호 닫기 계열)로 판정을 한정한다. 대가로
+#   `echo hi |& gh issue create`(bash 실행됨)는 미감지지만 통과 방향이다.
 _OPERATOR_CHARS = frozenset("();&|")
 _SEPARATOR_CHARS = frozenset(";&|")
 
@@ -609,6 +609,39 @@ def _tokenize(text: str) -> list[str]:
     return list(lex)
 
 
+def _quoted_flags(text: str, count: int) -> list[bool]:
+    """토큰별로 "따옴표 안에서 왔는지"를 표시한다.
+
+    _tokenize는 posix 모드라 따옴표를 벗기므로, `echo "(;" gh issue create`의
+    토큰 `(;`가 진짜 연산자와 구분되지 않는다. 같은 텍스트를 non-posix로 한 번
+    더 토큰화하면 따옴표가 토큰에 남아 그 구분이 생긴다. 인용된 토큰은 명령
+    구분자가 될 수 없으므로 세그먼트 경계 판정에서 제외한다.
+
+    두 토큰 수가 어긋나면(이스케이프가 섞인 입력 등 — non-posix는 `\\`를
+    보통 문자로 다룬다) 표식을 포기하고 전부 False를 돌려준다. 인용 판정이
+    없던 때와 같은 동작이라 감지 손실이 없다(잃는 것은 그 입력에서의 오차단
+    방어뿐이다). 백슬래시로 이스케이프한 연산자(`echo \\; gh issue create`)가
+    이 폴백에 해당하며, 그 오차단은 이 판정 도입 이전부터 남아 있던 것이다.
+
+    Args:
+        text: 토큰화한 원본 텍스트(줄 단위 또는 명령 전체).
+        count: 같은 텍스트에 대한 posix 토큰 수.
+
+    Returns:
+        토큰마다 인용 여부를 담은 리스트. 정렬 실패 시 전부 False.
+    """
+    try:
+        lex = shlex.shlex(text, posix=False, punctuation_chars=True)
+        lex.whitespace_split = True
+        lex.commenters = ""
+        raw_tokens = list(lex)
+    except ValueError:
+        return [False] * count
+    if len(raw_tokens) != count:
+        return [False] * count
+    return [bool(token) and token[0] in "\"'" for token in raw_tokens]
+
+
 def _is_operator(token: str) -> bool:
     """토큰이 세그먼트 경계(명령 구분자)인지 판정한다.
 
@@ -627,11 +660,11 @@ def _is_operator(token: str) -> bool:
             and any(c in "()" for c in token))
 
 
-def _split_segments(tokens: list[str]) -> list[list[str]]:
+def _split_segments(tokens: list[str], quoted: list[bool]) -> list[list[str]]:
     segments: list[list[str]] = []
     current: list[str] = []
-    for token in tokens:
-        if _is_operator(token):
+    for token, is_quoted in zip(tokens, quoted):
+        if not is_quoted and _is_operator(token):
             if current:
                 segments.append(current)
                 current = []
@@ -738,19 +771,20 @@ def detect_invocations(command: str) -> list[CreateInvocation]:
     # 결합은 heredoc 구조가 완전히 해소된 텍스트에만 적용한다 — 롤백 구역에서
     # 결합하면 본문의 쪼개진 토큰이 조립돼 오차단이 된다.
     command = _join_continuations(stripped) if complete else stripped
-    token_groups: list[list[str]] | None = None
+    # 인용 표식을 만들려면 토큰과 그 원본 텍스트가 함께 필요하다.
+    token_groups: list[tuple[str, list[str]]] | None = None
     try:
-        token_groups = [_tokenize(line) for line in command.split("\n")]
+        token_groups = [(line, _tokenize(line)) for line in command.split("\n")]
     except ValueError:
         try:
-            token_groups = [_tokenize(command)]
+            token_groups = [(command, _tokenize(command))]
         except ValueError:
             return []
 
     invocations: list[CreateInvocation] = []
     directory_changed = False
-    for tokens in token_groups:
-        for segment in _split_segments(tokens):
+    for text, tokens in token_groups:
+        for segment in _split_segments(tokens, _quoted_flags(text, len(tokens))):
             invocation = _parse_segment(segment)
             if invocation is not None:
                 invocation.cwd_unsafe = directory_changed
