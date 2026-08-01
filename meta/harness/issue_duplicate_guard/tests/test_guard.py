@@ -111,6 +111,22 @@ def test_real_heredoc_inside_command_substitution_in_arith() -> None:
     assert guard.detect_invocations(cmd) == []
 
 
+def test_strip_heredocs_reports_completion() -> None:
+    # 완결 플래그는 줄 연속 결합을 켜는 스위치다 — 코퍼스는 최종 감지 결과만
+    # 보므로 플래그 의미가 뒤집혀도 우연히 같은 결과가 나오면 안 잡힌다
+    text, complete = guard._strip_heredocs('cat <<EOF\nbody\nEOF')
+    assert complete is True
+    assert "body" not in text
+
+
+def test_strip_heredocs_reports_rollback_on_unterminated() -> None:
+    # 미종결 heredoc은 all-or-nothing 롤백 — 원문 그대로, 완결 아님
+    cmd = 'cat <<EOF\nbody'
+    text, complete = guard._strip_heredocs(cmd)
+    assert complete is False
+    assert text == cmd
+
+
 # ---------- 감지: 잡아야 하는 형태 ----------
 
 def test_heredoc_fed_create_is_still_detected() -> None:
@@ -423,6 +439,22 @@ _SEGMENT_CORPUS = [
      'echo a &>> gh issue create -t "T"', ()),
     ("오차단 방향: 인용된 연산자 리터럴은 명령 구분자가 아니다 — bash: 미실행",
      'echo "|&" gh issue create -t "T"', ()),
+    # --- 백슬래시 줄 연속 ---
+    ("줄 연속 뒤 create — bash: 실행됨",
+     'echo a && \\\ngh issue create --title "T"', ("T",)),
+    ("오차단 방향: 작은따옴표 안 줄 연속은 문자열 내용일 뿐 — bash: 미실행",
+     "echo 'text \\\ngh issue create -t T'", ()),
+    ("오차단 방향: 결합돼야 마커가 되는 heredoc(`E\\`+`OF`) — bash: 본문, 미실행",
+     'cat << E\\\nOF\ngh issue create -t "T"\nEOF', ()),
+    ("오차단 방향: 미종결 heredoc 본문의 쪼개진 토큰(`g\\`+`h`)을 결합해 "
+     "gh를 조립하면 안 됨 — bash: 경고 후 본문 출력, 미실행",
+     'cat << "EOF"\ng\\\nh issue create -t "T"', ()),
+    # 교환 관계 잠금: bash는 본문 안 `E\`+`OF`도 결합해 heredoc을 조기 종결하므로
+    # 이 create를 **실제로 실행한다**(실측: 뒤 명령 실행됨, 마지막 EOF는 command
+    # not found). 그럼에도 기대값은 미감지다 — 롤백 구역에서 결합을 포기하는 대가로
+    # 정탐 하나를 잃고 위 오차단을 막는 교환이다.
+    ("교환 관계: 롤백 구역이라 결합하지 않아 미감지 — bash: 실행됨",
+     'cat << E\\\nOF\necho "body"\nE\\\nOF\ngh issue create -t "T"\nEOF', ()),
 ]
 
 

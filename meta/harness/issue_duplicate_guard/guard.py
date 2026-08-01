@@ -457,7 +457,52 @@ def _mask_arithmetic(line: str) -> str:
     return "".join(masked)
 
 
-def _strip_heredocs(command: str) -> str:
+def _join_continuations(command: str) -> str:
+    """백슬래시 줄 연속(`\\` + 개행)을 bash처럼 이어 붙인다.
+
+    줄 단위 토큰화는 후행 백슬래시에서 실패하고, 전체 문자열 폴백은 `\\ngh`
+    같은 토큰을 만들어 gh가 세그먼트 선두에 오지 못한다. 그래서 결합 없이는
+    `echo a && \\` + 개행 + `gh issue create`가 통째로 미감지였다.
+
+    `\\` + 임의 문자는 쌍으로 소비하고 `\\` + 개행만 제거한다. 쌍 소비 덕에
+    이스케이프된 백슬래시(`echo a\\\\` + 개행)의 개행은 진짜 개행으로 남아
+    bash와 일치한다.
+
+    호출 순서가 계약이다 — 반드시 _strip_heredocs **이후**, 그리고 그 함수가
+    완결을 보고했을 때만 부른다. 미종결 heredoc으로 롤백한 텍스트에 결합을
+    적용하면 본문의 쪼개진 토큰이 조립돼(`g\\`+`h` → `gh`) 실행되지도 않을
+    본문이 차단된다(실측). heredoc 구조가 완전히 해소된 텍스트에만 적용한다.
+
+    수용할 비충실성: bash는 작은따옴표 안의 `\\`+개행을 리터럴로 두지만 이
+    스캐너는 인용을 모델링하지 않고 제거한다. 영향은 이미 단일 토큰인 문자열의
+    내용뿐이고 토큰 경계는 바뀌지 않는다(실측). 인용 모델링은 동결된
+    _mask_arithmetic과 같은 끝없는 수리 게임이라 문서화된 한계로 남긴다.
+
+    Args:
+        command: heredoc 본문이 제거된 명령 문자열.
+
+    Returns:
+        줄 연속이 결합된 명령 문자열.
+    """
+    out: list[str] = []
+    index = 0
+    length = len(command)
+    while index < length:
+        char = command[index]
+        if char == "\\" and index + 1 < length:
+            if command[index + 1] == "\n":
+                index += 2
+                continue
+            out.append(char)
+            out.append(command[index + 1])
+            index += 2
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def _strip_heredocs(command: str) -> tuple[str, bool]:
     """토큰화 전에 heredoc 본문 라인을 제거한다.
 
     heredoc은 shlex를 실패시키지 않아 폴백으로 빠지지 않고, 본문이 줄 단위로
@@ -491,7 +536,9 @@ def _strip_heredocs(command: str) -> str:
         command: Bash 명령 문자열 전체.
 
     Returns:
-        본문·종결자 라인이 제거된 명령. 미종결 시 원문 그대로.
+        (본문·종결자 라인이 제거된 명령, 완결 여부). 미종결 구분자가 남으면
+        원문 그대로와 False를 돌려준다 — 호출자는 이 표시로 줄 연속 결합을
+        건너뛴다(_join_continuations docstring 참조).
     """
     lines = command.split("\n")
     kept: list[str] = []
@@ -514,8 +561,8 @@ def _strip_heredocs(command: str) -> str:
             pending.append((delimiter, match.group(1) == "-"))
         kept.append(line)
     if pending:
-        return command
-    return "\n".join(kept)
+        return command, False
+    return "\n".join(kept), True
 
 
 @dataclass
@@ -671,6 +718,7 @@ def _changes_directory(segment: list[str]) -> bool:
 def detect_invocations(command: str) -> list[CreateInvocation]:
     """Bash 명령 문자열에서 모든 이슈 생성 명령을 감지한다.
 
+    전처리는 heredoc 본문 제거 → (완결일 때만) 줄 연속 결합 순이다.
     개행으로 나뉜 다중 명령을 잡기 위해 줄 단위 토큰화를 먼저 시도하고
     (따옴표가 줄을 넘는 경우엔 실패하므로) 전체 문자열 토큰화 순서로
     내려간다. 둘 다 실패하면 전면 fail-open이다 — 정규식 폴백은 따옴표
@@ -686,7 +734,10 @@ def detect_invocations(command: str) -> list[CreateInvocation]:
     Returns:
         감지된 생성 명령 목록. 대상이 없으면 빈 목록.
     """
-    command = _strip_heredocs(command)
+    stripped, complete = _strip_heredocs(command)
+    # 결합은 heredoc 구조가 완전히 해소된 텍스트에만 적용한다 — 롤백 구역에서
+    # 결합하면 본문의 쪼개진 토큰이 조립돼 오차단이 된다.
+    command = _join_continuations(stripped) if complete else stripped
     token_groups: list[list[str]] | None = None
     try:
         token_groups = [_tokenize(line) for line in command.split("\n")]
