@@ -453,9 +453,20 @@ _SEGMENT_CORPUS = [
      'echo ";" gh issue create -t "T"', ()),
     ("오차단 방향: `&&` 인용 리터럴(도입 이전부터의 오차단) — bash: 미실행",
      'echo "&&" gh issue create -t "T"', ()),
-    ("정렬 실패 폴백: 이스케이프가 섞이면 인용 표식을 포기하고 종전대로 판정한다 "
+    ("오차단 방향: 인용된 예약어는 예약어가 아니다 — bash: 미실행"
+     "(`then: command not found`)",
+     '"then" gh issue create -t "T"', ()),
+    ("오차단 방향: 작은따옴표 예약어도 동일 — bash: 미실행",
+     "'time' gh issue create -t \"T\"", ()),
+    ("오차단 방향: 따옴표가 낱말에 붙어 정렬이 깨져도 오차단이 되면 안 됨 — "
+     "bash: 미실행(`();;)` 를 명령으로 취급)",
+     'echo x && "();;"\')\' gh issue create -t "T"', ()),
+    ("정렬 실패 폴백: 이스케이프가 섞여도 정확 일치 연산자는 경계로 남는다 "
      "— bash: 실행됨(진짜 && 뒤 create)",
      'echo a\\ b && gh issue create -t "T"', ("T",)),
+    ("정렬 실패 폴백의 대가: 새 판정 두 가지가 꺼져 미감지 — bash: 실행됨. "
+     "오차단을 막는 쪽을 택한 결과이며 통과 방향이다",
+     'echo a\\ b; if ((x)); then gh issue create -t "T"; fi', ()),
     # --- 백슬래시 줄 연속 ---
     ("줄 연속 뒤 create — bash: 실행됨",
      'echo a && \\\ngh issue create --title "T"', ("T",)),

@@ -20,13 +20,14 @@ gh/glab 호출 바로 앞에 — 환경 변수의 셸 의미론과 동일) — �
 - 오탐 방지가 최우선: 전체 명령을 shlex로 먼저 토큰화해 따옴표 문자열을
   단일 토큰으로 만든 뒤 연산자 위치에서 세그먼트를 나누므로, 커밋 메시지
   등 문자열 내부의 "gh issue create" 언급은 명령 위치에 올 수 없다.
-  posix 토큰화는 따옴표를 벗기므로 토큰 **전체**가 연산자 문자로만 이뤄진
-  인용 리터럴(`echo ";" gh issue create -t T`)이 진짜 구분자와 구분되지
-  않는다. 그래서 같은 텍스트를 non-posix로 한 번 더 토큰화해 인용 여부를
-  표시하고(_quoted_flags), 인용된 토큰은 경계로 보지 않는다. 두 토큰 수가
-  어긋나면 표식을 포기하고 종전대로 판정하므로, 백슬래시로 이스케이프한
-  연산자(`echo \\; gh issue create`)의 오차단은 남는다 — 이 판정 도입
-  이전부터 있던 잔여물이다.
+  posix 토큰화는 따옴표를 벗기므로 인용 리터럴(`echo ";" gh issue create`)이
+  진짜 구분자와 구분되지 않는다. 그래서 같은 텍스트를 non-posix로 한 번 더
+  토큰화해 인용 여부를 표시하고(_quoted_flags), 인용된 토큰은 연산자로도
+  예약어로도 보지 않는다. 표식을 못 만들면(정렬 실패) 토큰 내용을 셸 구조의
+  근거로 삼는 판정 두 가지(결합 연산자 토큰·명령 위치 예약어)를 끄고 정확
+  일치 연산자만 본다 — 오차단 대신 미감지로 눕히는 방향이다. 백슬래시로
+  이스케이프한 연산자(`echo \\; gh issue create`)의 오차단은 그 정확 일치
+  경로에 남으며, 이 판정 도입 이전부터 있던 잔여물이다(#72).
 - 검색 기준 디렉터리는 hook 페이로드의 `cwd`(Bash 도구의 작업 디렉터리는
   호출 간 유지되므로 프로세스 cwd만으로는 어긋날 수 있다). `--repo`/`-R`가
   없으면 gh/glab이 그 디렉터리로 대상 저장소를 해석하므로, 선행 세그먼트에
@@ -36,7 +37,8 @@ gh/glab 호출 바로 앞에 — 환경 변수의 셸 의미론과 동일) — �
   실행 의미론 판정은 범위 밖.
 - 세그먼트 선두(= 명령 위치)의 셸 예약어는 건너뛴다. bash에서 예약어는 명령
   위치에서만 예약어이므로 `if ...; then gh issue create`는 감지하고, 인자
-  위치의 같은 단어(`echo then gh issue create`)는 건드리지 않는다.
+  위치의 같은 단어(`echo then gh issue create`)나 인용된 낱말(`"then" gh
+  issue create` — bash는 `then`을 명령으로 찾다 실패한다)은 건드리지 않는다.
 - 감지 못하는 형태(`bash -c` 내부, backtick 치환, `env` 프리픽스, 명령을
   인자로 받는 래퍼(`sudo`/`nohup`/`timeout`/`command`/`exec`), 옵션을 동반한
   예약어(`time -p`)와 경로 붙은 형태(`/usr/bin/time`), 함수 정의 계열, 그리고
@@ -609,7 +611,7 @@ def _tokenize(text: str) -> list[str]:
     return list(lex)
 
 
-def _quoted_flags(text: str, count: int) -> list[bool]:
+def _quoted_flags(text: str, count: int) -> list[bool] | None:
     """토큰별로 "따옴표 안에서 왔는지"를 표시한다.
 
     _tokenize는 posix 모드라 따옴표를 벗기므로, `echo "(;" gh issue create`의
@@ -617,18 +619,17 @@ def _quoted_flags(text: str, count: int) -> list[bool]:
     더 토큰화하면 따옴표가 토큰에 남아 그 구분이 생긴다. 인용된 토큰은 명령
     구분자가 될 수 없으므로 세그먼트 경계 판정에서 제외한다.
 
-    두 토큰 수가 어긋나면(이스케이프가 섞인 입력 등 — non-posix는 `\\`를
-    보통 문자로 다룬다) 표식을 포기하고 전부 False를 돌려준다. 인용 판정이
-    없던 때와 같은 동작이라 감지 손실이 없다(잃는 것은 그 입력에서의 오차단
-    방어뿐이다). 백슬래시로 이스케이프한 연산자(`echo \\; gh issue create`)가
-    이 폴백에 해당하며, 그 오차단은 이 판정 도입 이전부터 남아 있던 것이다.
+    두 토큰 수가 어긋나면(non-posix는 `\\`를 보통 문자로 다루고, 따옴표가
+    다른 낱말에 붙어 있으면 낱말 경계도 달라진다) **모른다(None)**를 돌려준다.
+    호출자는 그때 이 모듈이 새로 도입한 판정 두 가지를 끈다 — 인용 리터럴을
+    명령 구조로 오인하는 오차단이 거기서만 나오기 때문이다(_split_segments).
 
     Args:
         text: 토큰화한 원본 텍스트(줄 단위 또는 명령 전체).
         count: 같은 텍스트에 대한 posix 토큰 수.
 
     Returns:
-        토큰마다 인용 여부를 담은 리스트. 정렬 실패 시 전부 False.
+        토큰마다 인용 여부를 담은 리스트. 정렬에 실패하면 None.
     """
     try:
         lex = shlex.shlex(text, posix=False, punctuation_chars=True)
@@ -636,9 +637,9 @@ def _quoted_flags(text: str, count: int) -> list[bool]:
         lex.commenters = ""
         raw_tokens = list(lex)
     except ValueError:
-        return [False] * count
+        return None
     if len(raw_tokens) != count:
-        return [False] * count
+        return None
     return [bool(token) and token[0] in "\"'" for token in raw_tokens]
 
 
@@ -660,15 +661,46 @@ def _is_operator(token: str) -> bool:
             and any(c in "()" for c in token))
 
 
-def _split_segments(tokens: list[str], quoted: list[bool]) -> list[list[str]]:
+def _split_segments(
+    tokens: list[str], quoted: list[bool] | None
+) -> list[list[str]]:
+    """토큰을 명령 세그먼트로 나눈다.
+
+    인용된 토큰은 연산자도 예약어도 아니다 — bash에서 따옴표 안의 `;`나
+    `then`은 그냥 낱말이다. posix 토큰화가 그 구분을 지우므로 _quoted_flags가
+    복원한 표식을 받아 쓴다.
+
+    표식이 없으면(None = 인용 여부 불명) 이 모듈이 새로 도입한 판정 두
+    가지 — 결합 연산자 토큰과 명령 위치 예약어 — 를 끄고 정확 일치
+    연산자만 경계로 본다. 두 판정은 토큰의 **내용**을 셸 구조의 근거로
+    삼기 때문에, 인용 여부를 모르는 상태에서 적용하면 인용 리터럴을
+    구분자·예약어로 오인해 차단한다(오차단). 판정을 끄면 그 입력에서
+    감지가 줄어들 뿐이라 통과 방향으로 눕는다. 정확 일치 연산자는 계속
+    경계로 두어 이 판정 도입 이전의 동작을 보존한다 — 끄면 백슬래시가
+    섞인 흔한 명령에서 진짜 `&&` 경계까지 잃는다.
+
+    Args:
+        tokens: 한 줄(또는 명령 전체)의 posix 토큰.
+        quoted: 토큰별 인용 여부. 판별 불가면 None.
+
+    Returns:
+        연산자로 분리된 토큰 세그먼트 목록.
+    """
     segments: list[list[str]] = []
     current: list[str] = []
-    for token, is_quoted in zip(tokens, quoted):
-        if not is_quoted and _is_operator(token):
+    for index, token in enumerate(tokens):
+        if quoted is None:
+            is_boundary = token in OPERATORS
+            is_keyword = False
+        else:
+            unquoted = not quoted[index]
+            is_boundary = unquoted and _is_operator(token)
+            is_keyword = unquoted and token in KEYWORDS
+        if is_boundary:
             if current:
                 segments.append(current)
                 current = []
-        elif not current and token in KEYWORDS:
+        elif is_keyword and not current:
             # 세그먼트 선두 = 명령 위치. 예약어는 여기서만 예약어이므로 버리고
             # 다음 토큰이 명령 위치를 이어받는다(`then gh issue create` → gh).
             continue
