@@ -27,10 +27,18 @@ gh/glab 호출 바로 앞에 — 환경 변수의 셸 의미론과 동일) — �
   켜지면 유지된다. 서브셸에 갇힌 cd(`(cd x) && ...`)도 래치를 켜는 오판과
   `pushd`/`cd -` 미커버는 sibling commit_guard와 동일한 수용 한계다 —
   실행 의미론 판정은 범위 밖.
-- 감지 못하는 형태(`bash -c` 내부, backtick 치환, `env` 프리픽스, 그리고
+- 세그먼트 선두(= 명령 위치)의 셸 예약어는 건너뛴다. bash에서 예약어는 명령
+  위치에서만 예약어이므로 `if ...; then gh issue create`는 감지하고, 인자
+  위치의 같은 단어(`echo then gh issue create`)는 건드리지 않는다.
+- 감지 못하는 형태(`bash -c` 내부, backtick 치환, `env` 프리픽스, 명령을
+  인자로 받는 래퍼(`sudo`/`nohup`/`timeout`/`command`/`exec`), 옵션을 동반한
+  예약어(`time -p`)와 경로 붙은 형태(`/usr/bin/time`), 함수 정의 계열, 그리고
   유효 bash지만 shlex가 두 단계 모두 실패하는 계열 — 주석 뒤 불균형 따옴표,
   ANSI-C 인용 `$'...\''` 등)는 전부 통과 방향의 한계이며, claude-md 쪽
-  issue-workflow 규칙의 관례가 커버한다.
+  issue-workflow 규칙의 관례가 커버한다. 함수 정의는 본문이 단일 명령이면
+  (`f() { gh issue create -t T; }`) 선두 토큰이 `f`라 미감지고, 두 개 이상이면
+  `;`가 세그먼트를 끊어 **정의 시점에** 감지된다 — 일관성 없는 경계지만
+  예약어 도입 이전과 같은 동작이다.
 
 종료 코드: 0 통과, 1 내부 오류(비차단 경고), 42 차단(sentinel — settings.json
 래퍼가 2로 되매핑).
@@ -56,6 +64,15 @@ EXIT_BLOCK = 42
 
 # shlex(punctuation_chars=True)가 별도 토큰으로 분리하는 셸 연산자.
 OPERATORS = {"&&", "||", "|", ";", ";;", "&", "(", ")"}
+
+# bash 예약어. bash와 동일하게 **명령 위치에서만** 예약어로 취급한다(세그먼트
+# 선두에서만 건너뛰고, 인자 위치의 같은 단어는 평범한 토큰이다 — `echo then gh
+# issue create`가 걸리면 안 된다). `[[`는 넣지 않는다: 뒤에 오는 것은 명령이
+# 아니라 조건식이다.
+KEYWORDS = frozenset({
+    "if", "then", "elif", "else", "fi", "while", "until", "for", "select",
+    "do", "done", "case", "esac", "function", "time", "coproc", "{", "}", "!",
+})
 
 FORGE_CLIS = {"gh", "glab"}
 
@@ -531,6 +548,10 @@ def _split_segments(tokens: list[str]) -> list[list[str]]:
             if current:
                 segments.append(current)
                 current = []
+        elif not current and token in KEYWORDS:
+            # 세그먼트 선두 = 명령 위치. 예약어는 여기서만 예약어이므로 버리고
+            # 다음 토큰이 명령 위치를 이어받는다(`then gh issue create` → gh).
+            continue
         else:
             current.append(token)
     if current:

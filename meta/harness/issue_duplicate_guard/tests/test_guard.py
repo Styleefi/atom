@@ -381,6 +381,40 @@ def test_oracle_corpus() -> None:
         assert titles == expected_titles, f"{description}: got {titles!r}"
 
 
+# ---------- 세그먼트 판정 코퍼스 ----------
+# _ORACLE_CORPUS가 동결된 마스킹 스캐너의 계약이라면, 이 테이블은 세그먼트 경계
+# 판정(명령 위치 예약어·연산자 런·줄 연속)의 계약이다. 섞지 않는 이유는 동결
+# 선언이 지목한 계약의 의미를 흐리지 않기 위해서다. 기대값은 전부 "bash가 그
+# create를 실행하는가"를 실측해 정했고, 감지 방향과 **오차단 방향 잠금**을 함께
+# 담는다 — 이 층의 진짜 위험은 실행되지 않는 텍스트를 차단하는 쪽이다.
+# 형식: (설명, 명령, 기대 감지 제목 튜플).
+
+_SEGMENT_CORPUS = [
+    ("then 뒤 create — bash: 실행됨",
+     'if [ -f x ]; then gh issue create -t "T"; fi', ("T",)),
+    ("do 뒤 create (for) — bash: 실행됨",
+     'for i in 1; do gh issue create -t "T"; done', ("T",)),
+    ("do 뒤 create (while) — bash: 실행됨",
+     'while true; do gh issue create -t "T"; done', ("T",)),
+    ("그룹 명령 중괄호 뒤 create — bash: 실행됨",
+     '{ gh issue create -t "T"; }', ("T",)),
+    ("time 뒤 create — bash: 실행됨",
+     'time gh issue create -t "T"', ("T",)),
+    ("부정 ! 뒤 create — bash: 실행됨",
+     '! gh issue create -t "T"', ("T",)),
+    ("case 분기 뒤 create — bash: 실행됨",
+     'case x in x) gh issue create -t "T" ;; esac', ("T",)),
+    ("오차단 방향: 인자 위치의 then은 예약어가 아니다 — bash: 미실행(echo 인자)",
+     'echo then gh issue create --title "T"', ()),
+]
+
+
+def test_segment_corpus() -> None:
+    for description, cmd, expected_titles in _SEGMENT_CORPUS:
+        titles = tuple(inv.title for inv in guard.detect_invocations(cmd))
+        assert titles == expected_titles, f"{description}: got {titles!r}"
+
+
 # ---------- 판정 흐름 (main) ----------
 
 def test_non_bash_tool_passes(monkeypatch) -> None:
