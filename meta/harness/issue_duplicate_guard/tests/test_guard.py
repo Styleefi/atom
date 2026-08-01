@@ -111,6 +111,22 @@ def test_real_heredoc_inside_command_substitution_in_arith() -> None:
     assert guard.detect_invocations(cmd) == []
 
 
+def test_strip_heredocs_reports_completion() -> None:
+    # 완결 플래그는 줄 연속 결합을 켜는 스위치다 — 코퍼스는 최종 감지 결과만
+    # 보므로 플래그 의미가 뒤집혀도 우연히 같은 결과가 나오면 안 잡힌다
+    text, complete = guard._strip_heredocs('cat <<EOF\nbody\nEOF')
+    assert complete is True
+    assert "body" not in text
+
+
+def test_strip_heredocs_reports_rollback_on_unterminated() -> None:
+    # 미종결 heredoc은 all-or-nothing 롤백 — 원문 그대로, 완결 아님
+    cmd = 'cat <<EOF\nbody'
+    text, complete = guard._strip_heredocs(cmd)
+    assert complete is False
+    assert text == cmd
+
+
 # ---------- 감지: 잡아야 하는 형태 ----------
 
 def test_heredoc_fed_create_is_still_detected() -> None:
@@ -208,6 +224,19 @@ def test_title_flag_forms() -> None:
     ):
         invs = guard.detect_invocations(cmd)
         assert len(invs) == 1 and invs[0].title == "X", cmd
+
+
+def test_attached_title_flag_with_equals_is_parsed() -> None:
+    # pflag는 -t=X에서 =를 벗긴다 — 그대로 두면 검색이 --search "=X"로 돌아
+    # 항상 무결과가 되어 중복 검사가 조용히 통과한다 (#67)
+    invs = guard.detect_invocations("gh issue create -t=X")
+    assert len(invs) == 1 and invs[0].title == "X"
+
+
+def test_attached_title_flag_with_empty_value_has_no_title() -> None:
+    # -t= 는 제목이 비어 검색할 것이 없다 — 제목 없는 create로 눕혀 차단시킨다
+    invs = guard.detect_invocations("gh issue create -t=")
+    assert len(invs) == 1 and invs[0].title is None
 
 
 def test_glab_and_path_prefixed_cli_are_detected() -> None:
@@ -366,6 +395,129 @@ def test_oracle_corpus() -> None:
     for description, cmd, expected_titles in _ORACLE_CORPUS:
         titles = tuple(inv.title for inv in guard.detect_invocations(cmd))
         assert titles == expected_titles, f"{description}: got {titles!r}"
+
+
+# ---------- 세그먼트 판정 코퍼스 ----------
+# _ORACLE_CORPUS가 동결된 마스킹 스캐너의 계약이라면, 이 테이블은 세그먼트 경계
+# 판정(명령 위치 예약어·연산자 런·줄 연속)의 계약이다. 섞지 않는 이유는 동결
+# 선언이 지목한 계약의 의미를 흐리지 않기 위해서다. 기대값은 전부 "bash가 그
+# create를 실행하는가"를 실측해 정했고, 감지 방향과 **오차단 방향 잠금**을 함께
+# 담는다 — 이 층의 진짜 위험은 실행되지 않는 텍스트를 차단하는 쪽이다.
+# 형식: (설명, 명령, 기대 감지 제목 튜플).
+
+_SEGMENT_CORPUS = [
+    ("then 뒤 create — bash: 실행됨",
+     'if [ -f x ]; then gh issue create -t "T"; fi', ("T",)),
+    ("do 뒤 create (for) — bash: 실행됨",
+     'for i in 1; do gh issue create -t "T"; done', ("T",)),
+    ("do 뒤 create (while) — bash: 실행됨",
+     'while true; do gh issue create -t "T"; done', ("T",)),
+    ("그룹 명령 중괄호 뒤 create — bash: 실행됨",
+     '{ gh issue create -t "T"; }', ("T",)),
+    ("time 뒤 create — bash: 실행됨",
+     'time gh issue create -t "T"', ("T",)),
+    ("부정 ! 뒤 create — bash: 실행됨",
+     '! gh issue create -t "T"', ("T",)),
+    ("case 분기 뒤 create — bash: 실행됨",
+     'case x in x) gh issue create -t "T" ;; esac', ("T",)),
+    ("오차단 방향: 인자 위치의 then은 예약어가 아니다 — bash: 미실행(echo 인자)",
+     'echo then gh issue create --title "T"', ()),
+    # --- 결합 연산자 토큰 (shlex가 인접 문장부호를 한 토큰으로 묶는다) ---
+    ("산술 확장 뒤 ; 로 이어진 create — `));` 한 토큰 — bash: 실행됨",
+     'echo $((1<<2)); gh issue create -t "T"', ("T",)),
+    ("#68 재현 케이스 — `));` 경계와 then 스킵이 둘 다 있어야 감지 — bash: 실행됨",
+     'if ((x)); then gh issue create -t "T"; fi', ("T",)),
+    ("오차단 방향: `))` 단독은 경계가 아니다 — bash: 미실행(echo 인자, 출력 `4 gh ...`)",
+     'echo $((1<<2)) gh issue create -t "T"', ()),
+    ("오차단 방향: &> 는 리다이렉션이다 — bash: 미실행(gh라는 파일로 리다이렉션)",
+     'echo a &> gh issue create -t "T"', ()),
+    ("오차단 방향: >& 도 리다이렉션 — bash: 미실행",
+     'echo a >& gh issue create -t "T"', ()),
+    ("오차단 방향: >| 도 리다이렉션 — bash: 미실행",
+     'echo a >| gh issue create -t "T"', ()),
+    ("오차단 방향: &>> 도 리다이렉션 — bash: 미실행",
+     'echo a &>> gh issue create -t "T"', ()),
+    ("서브셸 닫기 뒤 create — `);` 한 토큰 — bash: 실행됨",
+     '(cd x; ls); gh issue create -t "T"', ("T",)),
+    # 인용된 연산자 리터럴 — posix 토큰화가 따옴표를 벗기므로 non-posix 재토큰화로
+    # 표식을 만들어 걸러낸다. 아래 `;`·`&&`는 이 판정 도입 이전에도 오차단이었다.
+    ("오차단 방향: 인용된 연산자 리터럴은 명령 구분자가 아니다 — bash: 미실행",
+     'echo "|&" gh issue create -t "T"', ()),
+    ("오차단 방향: 괄호+구분자 인용 리터럴 — bash: 미실행(echo 인자)",
+     'echo "(;" gh issue create -t "T"', ()),
+    ("오차단 방향: `));` 인용 리터럴 — bash: 미실행",
+     'echo "));" gh issue create -t "T"', ()),
+    ("오차단 방향: 작은따옴표 리터럴도 동일 — bash: 미실행",
+     "echo '));' gh issue create -t \"T\"", ()),
+    ("오차단 방향: 단독 구분자 인용 리터럴(도입 이전부터의 오차단) — bash: 미실행",
+     'echo ";" gh issue create -t "T"', ()),
+    ("오차단 방향: `&&` 인용 리터럴(도입 이전부터의 오차단) — bash: 미실행",
+     'echo "&&" gh issue create -t "T"', ()),
+    ("오차단 방향: 인용된 예약어는 예약어가 아니다 — bash: 미실행"
+     "(`then: command not found`)",
+     '"then" gh issue create -t "T"', ()),
+    ("오차단 방향: 작은따옴표 예약어도 동일 — bash: 미실행",
+     "'time' gh issue create -t \"T\"", ()),
+    ("오차단 방향: 따옴표가 낱말에 붙어 정렬이 깨져도 오차단이 되면 안 됨 — "
+     "bash: 미실행(`();;)` 를 명령으로 취급)",
+     'echo x && "();;"\')\' gh issue create -t "T"', ()),
+    ("정렬 실패 폴백: 이스케이프가 섞여도 정확 일치 연산자는 경계로 남는다 "
+     "— bash: 실행됨(진짜 && 뒤 create)",
+     'echo a\\ b && gh issue create -t "T"', ("T",)),
+    ("정렬 실패 폴백의 대가: 새 판정 두 가지가 꺼져 미감지 — bash: 실행됨. "
+     "오차단을 막는 쪽을 택한 결과이며 통과 방향이다",
+     'echo a\\ b; if ((x)); then gh issue create -t "T"; fi', ()),
+    # --- 백슬래시 줄 연속 ---
+    ("줄 연속 뒤 create — bash: 실행됨",
+     'echo a && \\\ngh issue create --title "T"', ("T",)),
+    ("오차단 방향: 작은따옴표 안 줄 연속은 문자열 내용일 뿐 — bash: 미실행",
+     "echo 'text \\\ngh issue create -t T'", ()),
+    ("오차단 방향: 결합돼야 마커가 되는 heredoc(`E\\`+`OF`) — bash: 본문, 미실행",
+     'cat << E\\\nOF\ngh issue create -t "T"\nEOF', ()),
+    ("오차단 방향: 미종결 heredoc 본문의 쪼개진 토큰(`g\\`+`h`)을 결합해 "
+     "gh를 조립하면 안 됨 — bash: 경고 후 본문 출력, 미실행",
+     'cat << "EOF"\ng\\\nh issue create -t "T"', ()),
+    # 교환 관계 잠금: bash는 본문 안 `E\`+`OF`도 결합해 heredoc을 조기 종결하므로
+    # 이 create를 **실제로 실행한다**(실측: 뒤 명령 실행됨, 마지막 EOF는 command
+    # not found). 그럼에도 기대값은 미감지다 — 롤백 구역에서 결합을 포기하는 대가로
+    # 정탐 하나를 잃고 위 오차단을 막는 교환이다.
+    ("교환 관계: 롤백 구역이라 결합하지 않아 미감지 — bash: 실행됨",
+     'cat << E\\\nOF\necho "body"\nE\\\nOF\ngh issue create -t "T"\nEOF', ()),
+]
+
+
+def test_segment_corpus() -> None:
+    for description, cmd, expected_titles in _SEGMENT_CORPUS:
+        titles = tuple(inv.title for inv in guard.detect_invocations(cmd))
+        assert titles == expected_titles, f"{description}: got {titles!r}"
+
+
+# ---------- 알려진 오차단 (사전 존재) ----------
+# 이 표의 항목은 **버그를 잠근 것**이다. bash가 create를 실행하지 않는데도
+# 가드가 감지해 차단하는 입력이며, 전부 main에도 있는 사전 존재 결함이다.
+# 여기 두는 이유는 green 스위트가 "오차단이 없다"로 읽히지 않게 하기 위해서다.
+#
+# **이 테스트가 깨졌다면 버그가 고쳐진 것이다.** 기대값을 되돌리지 말고 해당
+# 항목을 지운 뒤 추적 이슈를 닫아라.
+#
+# 형식: (설명, 명령, 현재 감지되는 제목 튜플, 추적 이슈).
+
+_KNOWN_FALSE_BLOCKS = [
+    ("이스케이프된 구분자 — bash: 미실행(`;`는 echo 인자)",
+     'echo \\; gh issue create -t "T"', ("T",), "#72"),
+    ("같은 줄의 이스케이프가 인용 표식 정렬을 깨 인용된 구분자가 경계로 "
+     "오인됨 — bash: 미실행(전부 echo 인자)",
+     'echo a\\ b ";" gh issue create -t "T"', ("T",), "#72"),
+]
+
+
+def test_known_false_blocks() -> None:
+    for description, cmd, expected_titles, issue in _KNOWN_FALSE_BLOCKS:
+        titles = tuple(inv.title for inv in guard.detect_invocations(cmd))
+        assert titles == expected_titles, (
+            f"{description} ({issue}): got {titles!r} — 오차단이 사라졌다면 "
+            "이 항목을 지우고 이슈를 닫아라. 기대값을 되돌리지 마라"
+        )
 
 
 # ---------- 판정 흐름 (main) ----------
