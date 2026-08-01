@@ -431,11 +431,14 @@ def test_oracle_corpus() -> None:
 # 위치에 있다). 이 가드는 정적 판정기라 명령 위치를 본다. 설명에 "실행됨"이라고
 # 적을 때는 무조건 실행되는 경우이고, 조건부면 조건을 함께 적는다.
 #
-# 두 표의 실행 주장 49건 전부를 gh 스텁으로 bash에 돌려 대조했다(PR #75 라운드 2).
+# 두 표의 실행 주장을 전부 gh 스텁으로 bash에 돌려 대조했다(PR #75 라운드 2·3).
+# 몇 건이었는지는 여기 적지 않는다 — 항목이 늘면 그 숫자가 곧 거짓이 되고, 실제로
+# 라운드 2에 적은 개수가 라운드 3에서 표와 어긋났다. 세려면 표 길이를 직접 재라.
 # 재현법: 각 항목의 명령을 `bash -c 'gh() { echo __GH__; }; <명령>'` 로 임시
 # 디렉터리에서 실행해 `__GH__` 출력 여부를 본다. 주의 두 가지 — `while true; do
 # ... done` 항목은 무한 루프라 타임아웃이 필요하고(gh는 즉시 호출된다), 조건문·
 # 단축 평가 항목은 조건이 참일 때만 호출되므로 "미호출"을 오차단으로 읽으면 안 된다.
+# 규약이 모든 항목에 적용됐는지는 test_every_corpus_entry_states_execution이 지킨다.
 # 감지 방향과 **오차단 방향 잠금**을 함께 담는다 — 이 층의 진짜 위험은
 # 실행되지 않는 텍스트를 차단하는 쪽이다.
 # 형식: (설명, 명령, 기대 감지 제목 튜플).
@@ -571,6 +574,26 @@ _KNOWN_FALSE_BLOCKS = [
      "bash: 미실행(`&: command not found`). 사전 존재 계열이며 main도 동일",
      'echo ;"&"\'\' gh issue create -t "T"', ("T",), "PR #75 라운드 1 발견"),
 ]
+
+
+# 설명이 bash 실행 상태를 밝히는 세 가지 형식. 무조건 실행이면 "실행됨",
+# 무조건 미실행이면 "미실행", 조건부면 "실행은 …할 때"로 조건을 병기한다.
+_EXECUTION_CLAIM_FORMS = ("실행됨", "미실행", "실행은")
+
+
+def test_every_corpus_entry_states_execution() -> None:
+    # 라운드 2·3의 실패 모드가 "한 항목이 규약에서 빠짐"과 "산문 속 개수가 표와
+    # 어긋남"이었다. 규약 적용 여부는 사람의 성실함이 아니라 이 테스트가 지킨다.
+    tables = (("_ORACLE_CORPUS", _ORACLE_CORPUS),
+              ("_SEGMENT_CORPUS", _SEGMENT_CORPUS),
+              ("_KNOWN_FALSE_BLOCKS", _KNOWN_FALSE_BLOCKS))
+    for table_name, table in tables:
+        for entry in table:
+            description = entry[0]
+            assert any(form in description for form in _EXECUTION_CLAIM_FORMS), (
+                f"{table_name}: 설명이 bash 실행 상태를 밝히지 않는다 — "
+                f"{description!r}"
+            )
 
 
 def test_known_false_blocks() -> None:
