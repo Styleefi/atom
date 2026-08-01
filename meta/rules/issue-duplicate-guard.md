@@ -12,4 +12,4 @@ Creating an issue without searching first is mechanically blocked. A PreToolUse 
 
 Limits: only the Bash path is guarded — MCP tools, `gh api`, and the web UI are not (covered by the `issue-workflow` conventions instead). Every failure mode (offline, unauthenticated, missing CLI, unparseable command, working-directory ambiguity from an inline `cd` before the create) fails open — when the guard cannot judge, the command goes through.
 
-Not blocking unrelated commands is a design goal, not a guarantee: detection reads the command text, so a quoted or escaped operator literal can still be misread as a command separator. The remaining cases are locked in the harness test corpus with their trigger conditions, and `ATOM_DUP_REVIEWED=1` recovers any block.
+Not blocking unrelated commands is a design goal, not a guarantee: detection reads the command text, so a quoted or escaped operator literal can still be misread as a command separator. Known cases are locked in the harness test corpus with their trigger conditions — that list is not proven exhaustive — and `ATOM_DUP_REVIEWED=1` recovers any block.
