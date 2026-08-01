@@ -20,17 +20,18 @@ gh/glab 호출 바로 앞에 — 환경 변수의 셸 의미론과 동일) — �
 - 오탐 방지가 최우선: 전체 명령을 shlex로 먼저 토큰화해 따옴표 문자열을
   단일 토큰으로 만든 뒤 연산자 위치에서 세그먼트를 나누므로, 커밋 메시지
   등 문자열 내부의 "gh issue create" 언급은 명령 위치에 올 수 없다.
-  posix 토큰화는 따옴표를 벗기므로 인용 리터럴(`echo ";" gh issue create`)이
-  진짜 구분자와 구분되지 않는다. 그래서 같은 텍스트를 non-posix로 한 번 더
-  토큰화해 인용 여부를 표시하고(_quoted_flags), 인용된 토큰은 연산자로도
-  예약어로도 보지 않는다. 표식을 못 만들면(정렬 실패) 토큰 내용을 셸 구조의
-  근거로 삼는 판정 두 가지(결합 연산자 토큰·명령 위치 예약어)를 끄고 정확
-  일치 연산자만 본다. **그 두 판정에 한해** 오차단 대신 미감지로 눕는다는
-  뜻이고, 정확 일치 경로는 폴백에서 인용을 보지 못한다 — 같은 줄에
-  이스케이프가 있으면(`echo \\; gh issue create`, `echo a\\ b ";" gh issue
-  create`) 인용된 구분자가 여전히 경계로 오인돼 차단된다. 이 판정 도입
-  이전부터의 잔여물이며 #72로 추적하고, 현재 동작은 테스트의
-  _KNOWN_FALSE_BLOCKS 표가 잠근다.
+  posix 토큰화는 따옴표와 백슬래시를 벗기므로 인용·이스케이프된 리터럴
+  (`echo ";" gh issue create`, `echo \\; gh issue create`)이 진짜 구분자와
+  구분되지 않는다. 그래서 같은 텍스트를 non-posix로 한 번 더 토큰화해 보호
+  여부를 표시하고(_protected_flags), 보호된 토큰은 연산자로도 예약어로도
+  보지 않는다. 표식을 못 만들면(정렬 실패) 토큰 내용을 셸 구조의 근거로 삼는
+  판정 두 가지(결합 연산자 토큰·명령 위치 예약어)를 끄고 정확 일치 연산자만
+  본다 — **그 두 판정에 한해** 오차단 대신 미감지로 눕는다는 뜻이다.
+  정확 일치 경로는 폴백에서도, 정렬에 성공했을 때도 토큰 내용만 보므로 오차단이
+  완전히 사라지지는 않는다(인용된 연산자가 명령 이름 자리에 오는 형태, `;;`처럼
+  case 밖에서 문법 오류인 토큰 등). 알려진 것은 테스트의 _KNOWN_FALSE_BLOCKS
+  표에 잠겨 있으나 망라적이라는 증명은 없다. 조건과 수용 근거는
+  _protected_flags docstring 참조.
 - 검색 기준 디렉터리는 hook 페이로드의 `cwd`(Bash 도구의 작업 디렉터리는
   호출 간 유지되므로 프로세스 cwd만으로는 어긋날 수 있다). `--repo`/`-R`가
   없으면 gh/glab이 그 디렉터리로 대상 저장소를 해석하므로, 선행 세그먼트에
@@ -95,7 +96,7 @@ KEYWORDS = frozenset({
 # - 구분자(;&|)를 요구한다. `))` 단독까지 경계면 `echo $((1<<2)) gh issue create`가
 #   오차단된다(bash 출력은 `4 gh issue create ...`, create 미실행).
 # - 괄호를 요구한다. 이건 오차단 방어가 아니라 **적용 범위 제한**이다. 인용
-#   리터럴의 오차단은 _quoted_flags가 막고, 여기서는 결합 토큰이 필요한 실사용
+#   리터럴의 오차단은 _protected_flags가 막고, 여기서는 결합 토큰이 필요한 실사용
 #   동기(`((x));`·`(cmd);` 같은 괄호 닫기 계열)로 판정을 한정한다. 대가로
 #   `echo hi |& gh issue create`(bash 실행됨)는 미감지지만 통과 방향이다.
 _OPERATOR_CHARS = frozenset("();&|")
@@ -107,6 +108,10 @@ SEARCH_TIMEOUT_SECONDS = 15
 MAX_CANDIDATES = 10
 
 _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+# 인용 표식 복원용 센티널. bash 명령 문자열은 NUL을 담을 수 없으므로(execve 인자가
+# NUL 종료) 실제 입력과 충돌하지 않는다. 그래도 입력에 있으면 판별을 포기한다.
+_ESCAPE_SENTINEL = "\x00"
 
 # glab 텍스트 출력에서 이슈로 확신할 수 있는 라인(#번호로 시작)만 채택.
 _GLAB_ISSUE_LINE_RE = re.compile(r"^#\d+\s+\S.*$")
@@ -614,29 +619,74 @@ def _tokenize(text: str) -> list[str]:
     return list(lex)
 
 
-def _quoted_flags(text: str, count: int) -> list[bool] | None:
-    """토큰별로 "따옴표 안에서 왔는지"를 표시한다.
+def _protected_flags(text: str, count: int) -> list[bool] | None:
+    """토큰별로 "인용되었거나 이스케이프를 포함하는지"를 표시한다.
 
-    _tokenize는 posix 모드라 따옴표를 벗기므로, `echo "(;" gh issue create`의
-    토큰 `(;`가 진짜 연산자와 구분되지 않는다. 같은 텍스트를 non-posix로 한 번
-    더 토큰화하면 따옴표가 토큰에 남아 그 구분이 생긴다. 인용된 토큰은 명령
-    구분자가 될 수 없으므로 세그먼트 경계 판정에서 제외한다.
+    _tokenize는 posix 모드라 따옴표와 백슬래시를 벗기므로, `echo "(;" gh issue
+    create`의 토큰 `(;`나 `echo \\; gh ...`의 토큰 `;`가 진짜 연산자와 구분되지
+    않는다. 같은 텍스트를 non-posix로 한 번 더 토큰화하면 따옴표가 토큰에 남아
+    그 구분이 생긴다. 보호된 토큰은 명령 구분자도 예약어도 될 수 없으므로
+    세그먼트 판정에서 제외한다.
 
-    두 토큰 수가 어긋나면(non-posix는 `\\`를 보통 문자로 다루고, 따옴표가
-    다른 낱말에 붙어 있으면 낱말 경계도 달라진다) **모른다(None)**를 돌려준다.
-    호출자는 그때 이 모듈이 새로 도입한 판정 두 가지를 끈다(_split_segments).
-    그 둘은 인용 여부를 모르면 적용 자체가 불건전하기 때문이다. 정확 일치
-    연산자 경로는 폴백에서도 인용을 보지 못해 오차단이 남는다 — #72.
+    non-posix는 `\\`를 보통 문자로 다뤄 낱말 경계가 posix와 달라진다(`a\\ b`는
+    posix 1토큰, non-posix 2토큰). 그래서 재토큰화 **입력만** 손봐서, `\\<문자>`
+    두 글자를 센티널 한 글자로 접는다. 경계가 맞춰지는 동시에, 센티널이 토큰에
+    남아 있다는 사실이 곧 "이 토큰은 이스케이프를 포함한다"는 표식이 된다.
+
+    접기는 인용 상태를 세 규칙으로만 추적한다 — 작은따옴표 안은 전부 리터럴(접지
+    않는다), 큰따옴표는 작은따옴표를 무효화한다, 백슬래시는 작은따옴표 밖에서만
+    이스케이프다. 마지막 규칙은 bash보다 **넓다**: bash는 큰따옴표 안에서 `$`·
+    백틱·`"`·`\\`·개행 앞의 백슬래시만 이스케이프로 보고 나머지는 두 글자를 그대로
+    둔다(`echo "a\\;b"` → `a\\;b`). 여기서 더 접어도 무해한 이유는 그 자리가 이미
+    인용 구간 안이라 어느 토큰화도 낱말 경계로 보지 않기 때문이다 — 이 함수의
+    목적은 구조 해석이 아니라 **토큰 개수 맞추기**뿐이다. 확장·산술·백틱·heredoc은
+    모델링하지 않는다(동결된 _mask_arithmetic과 다른 점).
+
+    토큰 수가 그래도 어긋나면 **모른다(None)**를 돌려준다. 호출자는 그때 이
+    모듈이 도입한 판정 두 가지를 끄고 정확 일치 연산자만 본다(_split_segments).
+
+    **이 함수가 다루는 계열**의 잔여 오차단은 세 조건이 동시에 성립할 때다 —
+    (1) 이스케이프된 큰따옴표가 낱말 경계를 가로지르는 배치(`"a\\" "a\\"`.
+    균형 잡힌 `"say \\"hi\\""`는 안전하다), (2) 인용·이스케이프된 연산자 리터럴이
+    인자 위치, (3) 그 뒤에 `gh issue create`가 낱말로.
+
+    **이것이 이 하네스의 오차단 전부라는 뜻은 아니다.** 인용과 무관한 사전 존재
+    계열이 따로 있다 — `;;`처럼 case 밖에서는 문법 오류인 토큰, 인용·이스케이프된
+    연산자가 명령 이름 자리에 오는 형태 등. 전부 정확 일치 OPERATORS 경로에서
+    나오며 이 판정 도입 이전부터 있었다. 알려진 것은 테스트의 _KNOWN_FALSE_BLOCKS
+    표에 잠겨 있으나 **그 목록이 망라적이라고 증명된 바 없다.** 전부 owner가
+    수용한 한계이며, 실사용에서 관측되면 수용을 철회한다.
 
     Args:
         text: 토큰화한 원본 텍스트(줄 단위 또는 명령 전체).
         count: 같은 텍스트에 대한 posix 토큰 수.
 
     Returns:
-        토큰마다 인용 여부를 담은 리스트. 정렬에 실패하면 None.
+        토큰마다 보호 여부를 담은 리스트. 정렬에 실패하면 None.
     """
+    if _ESCAPE_SENTINEL in text:
+        return None
+    normalized: list[str] = []
+    index, length = 0, len(text)
+    in_single = in_double = False
+    while index < length:
+        char = text[index]
+        if char == "'" and not in_double:
+            in_single = not in_single
+            normalized.append(char)
+            index += 1
+        elif char == '"' and not in_single:
+            in_double = not in_double
+            normalized.append(char)
+            index += 1
+        elif char == "\\" and index + 1 < length and not in_single:
+            normalized.append(_ESCAPE_SENTINEL)
+            index += 2
+        else:
+            normalized.append(char)
+            index += 1
     try:
-        lex = shlex.shlex(text, posix=False, punctuation_chars=True)
+        lex = shlex.shlex("".join(normalized), posix=False, punctuation_chars=True)
         lex.whitespace_split = True
         lex.commenters = ""
         raw_tokens = list(lex)
@@ -644,7 +694,8 @@ def _quoted_flags(text: str, count: int) -> list[bool] | None:
         return None
     if len(raw_tokens) != count:
         return None
-    return [bool(token) and token[0] in "\"'" for token in raw_tokens]
+    return [bool(token) and (token[0] in "\"'" or _ESCAPE_SENTINEL in token)
+            for token in raw_tokens]
 
 
 def _is_operator(token: str) -> bool:
@@ -666,30 +717,29 @@ def _is_operator(token: str) -> bool:
 
 
 def _split_segments(
-    tokens: list[str], quoted: list[bool] | None
+    tokens: list[str], protected: list[bool] | None
 ) -> list[list[str]]:
     """토큰을 명령 세그먼트로 나눈다.
 
-    인용된 토큰은 연산자도 예약어도 아니다 — bash에서 따옴표 안의 `;`나
-    `then`은 그냥 낱말이다. posix 토큰화가 그 구분을 지우므로 _quoted_flags가
-    복원한 표식을 받아 쓴다.
+    보호된 토큰은 연산자도 예약어도 아니다 — bash에서 따옴표 안이나 백슬래시
+    뒤의 `;`·`then`은 그냥 낱말이다. posix 토큰화가 그 구분을 지우므로
+    _protected_flags가 복원한 표식을 받아 쓴다.
 
-    표식이 없으면(None = 인용 여부 불명) 이 모듈이 새로 도입한 판정 두
+    표식이 없으면(None = 보호 여부 불명) 이 모듈이 새로 도입한 판정 두
     가지 — 결합 연산자 토큰과 명령 위치 예약어 — 를 끄고 정확 일치
     연산자만 경계로 본다. 두 판정은 토큰의 **내용**을 셸 구조의 근거로
-    삼기 때문에, 인용 여부를 모르는 상태에서 적용하면 인용 리터럴을
+    삼기 때문에, 보호 여부를 모르는 상태에서 적용하면 인용 리터럴을
     구분자·예약어로 오인해 차단한다(오차단). 판정을 끄면 그 입력에서
     감지가 줄어들 뿐이라 통과 방향으로 눕는다.
 
     정확 일치 연산자는 폴백에서도 경계로 둔다. 끄면 백슬래시가 섞인 흔한
-    명령에서 진짜 `&&` 경계까지 잃기 때문인데, 대가로 인용된 구분자를
-    오인하는 오차단이 그 경로에 남는다(`echo a\\ b ";" gh issue create`).
-    이 판정 도입 이전의 동작이며 #72로 추적한다 — 폴백이 오차단을 완전히
-    없앤다는 뜻이 아니다.
+    명령에서 진짜 `&&` 경계까지 잃기 때문인데, 대가로 그 경로에 오차단이
+    남는다 — 폴백이 오차단을 완전히 없앤다는 뜻이 아니다. 남는 조건과
+    수용 근거는 _protected_flags docstring 참조.
 
     Args:
         tokens: 한 줄(또는 명령 전체)의 posix 토큰.
-        quoted: 토큰별 인용 여부. 판별 불가면 None.
+        protected: 토큰별 보호 여부. 판별 불가면 None.
 
     Returns:
         연산자로 분리된 토큰 세그먼트 목록.
@@ -697,13 +747,13 @@ def _split_segments(
     segments: list[list[str]] = []
     current: list[str] = []
     for index, token in enumerate(tokens):
-        if quoted is None:
+        if protected is None:
             is_boundary = token in OPERATORS
             is_keyword = False
         else:
-            unquoted = not quoted[index]
-            is_boundary = unquoted and _is_operator(token)
-            is_keyword = unquoted and token in KEYWORDS
+            bare = not protected[index]
+            is_boundary = bare and _is_operator(token)
+            is_keyword = bare and token in KEYWORDS
         if is_boundary:
             if current:
                 segments.append(current)
@@ -824,7 +874,7 @@ def detect_invocations(command: str) -> list[CreateInvocation]:
     invocations: list[CreateInvocation] = []
     directory_changed = False
     for text, tokens in token_groups:
-        for segment in _split_segments(tokens, _quoted_flags(text, len(tokens))):
+        for segment in _split_segments(tokens, _protected_flags(text, len(tokens))):
             invocation = _parse_segment(segment)
             if invocation is not None:
                 invocation.cwd_unsafe = directory_changed
