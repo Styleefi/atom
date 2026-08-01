@@ -210,6 +210,19 @@ def test_title_flag_forms() -> None:
         assert len(invs) == 1 and invs[0].title == "X", cmd
 
 
+def test_attached_title_flag_with_equals_is_parsed() -> None:
+    # pflag는 -t=X에서 =를 벗긴다 — 그대로 두면 검색이 --search "=X"로 돌아
+    # 항상 무결과가 되어 중복 검사가 조용히 통과한다 (#67)
+    invs = guard.detect_invocations("gh issue create -t=X")
+    assert len(invs) == 1 and invs[0].title == "X"
+
+
+def test_attached_title_flag_with_empty_value_has_no_title() -> None:
+    # -t= 는 제목이 비어 검색할 것이 없다 — 제목 없는 create로 눕혀 차단시킨다
+    invs = guard.detect_invocations("gh issue create -t=")
+    assert len(invs) == 1 and invs[0].title is None
+
+
 def test_glab_and_path_prefixed_cli_are_detected() -> None:
     assert guard.detect_invocations("glab issue create -t x")[0].cli == "glab"
     assert guard.detect_invocations("/usr/bin/gh issue create -t x")[0].cli == "gh"

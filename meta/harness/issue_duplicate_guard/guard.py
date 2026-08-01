@@ -574,7 +574,10 @@ def _parse_segment(segment: list[str]) -> CreateInvocation | None:
         elif token.startswith("--title="):
             title = token[len("--title="):]
         elif token.startswith("-t") and not token.startswith("--") and len(token) > 2:
-            title = token[2:]
+            # pflag는 -t=값에서 =를 벗기고 값을 취한다 (아래 -R 분기와 같은 규약).
+            # -t= 만 오면 제목이 비어 실제로 검색할 것이 없으므로 None으로 눕혀
+            # "제목 없는 create" 차단 경로에 흡수시킨다.
+            title = token[2:].removeprefix("=") or None
         elif token in ("--repo", "-R"):
             if j + 1 < len(rest):
                 repo = rest[j + 1]
