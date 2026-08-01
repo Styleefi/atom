@@ -492,6 +492,34 @@ def test_segment_corpus() -> None:
         assert titles == expected_titles, f"{description}: got {titles!r}"
 
 
+# ---------- 알려진 오차단 (사전 존재) ----------
+# 이 표의 항목은 **버그를 잠근 것**이다. bash가 create를 실행하지 않는데도
+# 가드가 감지해 차단하는 입력이며, 전부 main에도 있는 사전 존재 결함이다.
+# 여기 두는 이유는 green 스위트가 "오차단이 없다"로 읽히지 않게 하기 위해서다.
+#
+# **이 테스트가 깨졌다면 버그가 고쳐진 것이다.** 기대값을 되돌리지 말고 해당
+# 항목을 지운 뒤 추적 이슈를 닫아라.
+#
+# 형식: (설명, 명령, 현재 감지되는 제목 튜플, 추적 이슈).
+
+_KNOWN_FALSE_BLOCKS = [
+    ("이스케이프된 구분자 — bash: 미실행(`;`는 echo 인자)",
+     'echo \\; gh issue create -t "T"', ("T",), "#72"),
+    ("같은 줄의 이스케이프가 인용 표식 정렬을 깨 인용된 구분자가 경계로 "
+     "오인됨 — bash: 미실행(전부 echo 인자)",
+     'echo a\\ b ";" gh issue create -t "T"', ("T",), "#72"),
+]
+
+
+def test_known_false_blocks() -> None:
+    for description, cmd, expected_titles, issue in _KNOWN_FALSE_BLOCKS:
+        titles = tuple(inv.title for inv in guard.detect_invocations(cmd))
+        assert titles == expected_titles, (
+            f"{description} ({issue}): got {titles!r} — 오차단이 사라졌다면 "
+            "이 항목을 지우고 이슈를 닫아라. 기대값을 되돌리지 마라"
+        )
+
+
 # ---------- 판정 흐름 (main) ----------
 
 def test_non_bash_tool_passes(monkeypatch) -> None:
