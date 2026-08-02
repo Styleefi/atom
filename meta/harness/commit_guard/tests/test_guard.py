@@ -377,22 +377,25 @@ def test_validate_rejects_bad_headers() -> None:
 # sibling issue_duplicate_guard의 _KNOWN_FALSE_BLOCKS와 같은 규약. 각 항목은
 # bash가 차단 사유대로 실행하지 않는데 가드가 감지하는, owner가 수용한
 # 한계다(#52 동결 — 수리는 텍스트 추론 정련의 재개라 금지, #74 carve-out —
-# 실사용 발생은 차단 이력 로그(#76)가 남기고 수리는 owner 결정). 설명은 bash
-# 실행 상태를 밝힌다: 무조건 실행 "실행됨", 무조건 미실행 "미실행", 조건부
-# "실행은 …때"(규약 준수는 아래 테스트가 검사한다).
+# 실사용 발생의 자동 기록은 차단 이력 로그(#76, 구현 전에는 세션 트랜스크립트가
+# 기록 경로)가 맡고, 수리는 owner 결정).
+# 설명은 bash 실행 상태를 밝힌다. 무조건 실행이면 "실행됨", 무조건 미실행이면
+# "미실행", 조건부면 "실행은 …때"로 조건을 병기한다(규약 준수는 아래 테스트가
+# 검사한다).
 #
 # **이 테스트가 깨졌다면 버그가 고쳐진 것이다.** 기대값을 되돌리지 말고 해당
 # 항목을 지워라.
 #
-# 형식: (설명, 명령, 현재 감지되는 제목 튜플).
+# **이 표가 망라적이라는 증명은 없다.** 여기 있는 것은 실측으로 확인된 것들뿐이다.
+#
+# 형식: (설명, 명령, 현재 감지되는 제목 튜플, 출처).
 
 _KNOWN_FALSE_BLOCKS = [
     ("주석 해석이 꺼져 있어(리터럴 `#` 보존) 주석 뒤 텍스트가 명령으로 읽힌다 "
      "— bash: 첫 커밋만 실행됨(`#` 뒤는 주석). 규격인 첫 제목만 실행되는데 "
-     "규격 위반인 두 번째 제목까지 감지돼 차단된다 — #74 시금석(구성 발견), "
-     "기록만",
+     "규격 위반인 두 번째 제목까지 감지돼 차단된다 — 기록만",
      'git commit -m "feat(x): a" # ; git commit -m "Bad."',
-     ("feat(x): a", "Bad.")),
+     ("feat(x): a", "Bad."), "#74 시금석(구성 발견)"),
 ]
 
 # 설명이 bash 실행 상태를 밝히는 세 가지 형식 (sibling 규약과 동일).
@@ -402,7 +405,7 @@ _EXECUTION_CLAIM_FORMS = ("실행됨", "미실행", "실행은")
 def test_known_false_blocks_state_execution() -> None:
     # 규약을 통째로 빠뜨린 항목과 조건부 형식 누락만 잡는다. 설명이 사실인지는
     # 검사하지 못한다 — 그건 bash 실측 대조가 담당한다(sibling 코퍼스 헤더 참조).
-    for description, _cmd, _subjects in _KNOWN_FALSE_BLOCKS:
+    for description, _cmd, _subjects, _origin in _KNOWN_FALSE_BLOCKS:
         assert any(form in description for form in _EXECUTION_CLAIM_FORMS), (
             f"설명이 bash 실행 상태를 밝히지 않는다 — {description!r}"
         )
@@ -411,11 +414,11 @@ def test_known_false_blocks_state_execution() -> None:
 
 
 def test_known_false_blocks() -> None:
-    for description, cmd, expected_subjects in _KNOWN_FALSE_BLOCKS:
+    for description, cmd, expected_subjects, origin in _KNOWN_FALSE_BLOCKS:
         subjects = tuple(inv.subject for inv in guard.detect_invocations(cmd))
         assert subjects == expected_subjects, (
-            f"{description}: got {subjects!r} — 오차단이 사라졌다면 이 항목을 "
-            "지워라. 기대값을 되돌리지 마라"
+            f"{description} ({origin}): got {subjects!r} — 오차단이 사라졌다면 "
+            "이 항목을 지워라. 기대값을 되돌리지 마라"
         )
 
 
