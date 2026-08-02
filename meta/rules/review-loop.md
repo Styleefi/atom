@@ -33,6 +33,12 @@ loop, never the owner.
   or an equally harmful malfunction."
 - Floor: the declared classes MUST include failure of the PR's purpose (the
   issue it closes, or the PR body's stated goal).
+- Scale the bar to the diff's behavior surface, not its line count.
+  (Measured: a +1128-line PR, #54, converged in one round while a +210-line
+  one, #75, took five — rounds are driven by the inference surface touched
+  and by prose-precision findings, not by size.) For a diff that changes no
+  runtime behavior, prose-precision findings are above-bar only when they
+  would mislead a later session about behavior.
 - Triage = matching: a verified finding is above-bar iff its failure
   scenario matches a declared class. The bar applies at triage only — never
   narrow the reviewers' search with it.
@@ -104,7 +110,11 @@ The escalation report follows the checkpoint format plus: a classification
 of what grew (defects introduced by the fix / previously masked defects now
 exposed / a bar raise changing the counting basis) and a fix-altitude
 diagnosis (repeat instance fixes / class-level defense / structural
-redesign). The trigger mandates the diagnosis, never a particular remedy.
+redesign). In that diagnosis, "write the prose more precisely" counts as a
+repeat instance fix, not a class defense (PR #75 rewrote prose four rounds
+in a row, each recurrence one layer down; the class closed only when the
+convention moved into a test). The trigger mandates the diagnosis, never a
+particular remedy.
 
 ## Checkpoint
 
