@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import stat
 from pathlib import Path
 
@@ -245,6 +246,35 @@ def test_unserializable_payload_is_swallowed(tmp_path: Path) -> None:
     _record(command=object())  # type: ignore[arg-type]
 
     assert not _ledger(tmp_path).exists()
+
+
+class _Timeout(BaseException):
+    """record_block의 `except Exception`을 통과하도록 BaseException을 쓴다."""
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "mkfifo") or not hasattr(signal, "SIGALRM"),
+    reason="mkfifo/SIGALRM이 없는 플랫폼",
+)
+def test_fifo_ledger_path_does_not_hang(tmp_path: Path) -> None:
+    # 원장 경로가 FIFO면 O_WRONLY 열기가 리더를 기다리며 무한 대기한다. 그 대기는
+    # 커널 안이라 record_block의 except도 run()의 전역 방어도 잡지 못하고, 훅이
+    # 멈추면 종료 코드가 42가 아니게 되어 래퍼가 비차단으로 수렴시킨다 — 차단이
+    # 통과로 뒤집힌다. 회귀하면 이 테스트는 매달리는 대신 _Timeout으로 실패한다.
+    ledger = _ledger(tmp_path)
+    ledger.parent.mkdir(parents=True)
+    os.mkfifo(ledger)
+
+    def _fire(signum, frame):
+        raise _Timeout("record_block did not return")
+
+    previous = signal.signal(signal.SIGALRM, _fire)
+    signal.setitimer(signal.ITIMER_REAL, 5.0)
+    try:
+        _record()
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
 
 
 def test_makedirs_failure_is_swallowed(
