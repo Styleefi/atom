@@ -73,6 +73,10 @@ ATOM_COMMIT_OVERRIDE=1.
   - 비보호 브랜치에서 출발하는 `git checkout main && git commit`은 통과한다 —
     hook이 실행 전에 조회한 브랜치가 아직 비보호라 막을 근거가 없다(#44).
 
+차단과 오버라이드 통과는 harness.blocklog 원장에 한 줄씩 남는다(#76) — 이 가드의
+마찰 비용을 트랜스크립트 재구성 없이 세기 위한 것이다. 기록은 best-effort이며
+실패는 침묵으로 삼킨다. 로깅은 어떤 경우에도 판정에 영향을 주지 않는다(_log 참조).
+
 종료 코드: 0 통과, 1 내부 오류(비차단 경고), 42 차단(sentinel — settings.json
 래퍼가 2로 되매핑).
 """
@@ -501,6 +505,26 @@ def _block_message(reason: str) -> str:
     )
 
 
+def _log(**kwargs) -> None:
+    """차단 이력 원장에 한 줄을 남긴다 — 절대 제어 흐름에 영향을 주지 않는다.
+
+    맨몸 호출을 금지하는 이유가 둘이다. (1) 인자 불일치 TypeError는 record_block
+    본문 진입 **전에** 나므로 그 안의 방어가 못 잡고, 예외가 main() 밖으로 나가면
+    run()이 1을 반환해 **차단이 통과로 강등된다**(래퍼는 42만 2로 되매핑한다).
+    (2) 모듈 최상단 import면 blocklog가 import 불가능해질 때(자식 프로젝트가 이
+    모듈을 제거·수정한 경우) 가드 자체가 죽어 차단 기능 전체가 사라진다.
+
+    대가: 예외를 삼키므로 호출부 키워드 오타가 조용한 무기록이 된다. 그래서
+    호출부 3곳을 각각 확인하는 테스트는 선택이 아니라 이 설계의 필수 조건이다.
+    """
+    try:
+        from harness.blocklog.blocklog import record_block
+
+        record_block(**kwargs)
+    except Exception:  # noqa: BLE001 — fail-open이 설계 요구사항
+        pass
+
+
 def main() -> int:
     """stdin의 PreToolUse JSON을 판정한다.
 
@@ -521,9 +545,20 @@ def main() -> int:
     cwd = payload.get("cwd")
     if not isinstance(cwd, str) or not cwd:
         cwd = None
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        session_id = None
 
     for invocation in detect_invocations(command):
         if invocation.override:
+            _log(
+                event="override",
+                harness="commit-guard",
+                reason=None,
+                command=command,
+                cwd=cwd,
+                session_id=session_id,
+            )
             continue
         if not invocation.branch_check_unsafe:
             branch = _current_branch(cwd, invocation.c_path)
@@ -535,6 +570,14 @@ def main() -> int:
                     ),
                     file=sys.stderr,
                 )
+                _log(
+                    event="block",
+                    harness="commit-guard",
+                    reason="protected-branch",
+                    command=command,
+                    cwd=cwd,
+                    session_id=session_id,
+                )
                 return EXIT_BLOCK
         if invocation.subject is not None:
             problem = validate_subject(invocation.subject)
@@ -544,6 +587,14 @@ def main() -> int:
                         f"commit message {invocation.subject!r} rejected: {problem}"
                     ),
                     file=sys.stderr,
+                )
+                _log(
+                    event="block",
+                    harness="commit-guard",
+                    reason="subject-rejected",
+                    command=command,
+                    cwd=cwd,
+                    session_id=session_id,
                 )
                 return EXIT_BLOCK
     return 0

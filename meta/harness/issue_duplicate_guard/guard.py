@@ -22,8 +22,7 @@ _protected_flags · _is_operator · _split_segments · _join_continuations — �
   한계 목록에 남긴다. 이슈로 승격하지 않는다.
 - 오차단은 **언제나 기록한다** — 구성(리뷰·퍼즈·조사) 발견은 발견한 세션이
   그 자리에서 _KNOWN_FALSE_BLOCKS에 기록하고, 실사용 발생의 자동 기록은
-  차단 이력 로그(#76)가 맡는다(#76 구현 전에는 세션 트랜스크립트 조사가
-  유일한 기록 경로다). 게이트되는 것은 수리뿐이다. 이슈 신설·수리·동결
+  차단 이력 원장(#76, harness.blocklog)이 맡는다. 게이트되는 것은 수리뿐이다. 이슈 신설·수리·동결
   해제는 반복 발생 등 실증된 비용을 근거로 한 owner 결정 사안이며, 동결을
   인용한 보고 묵살은 허용되지 않는다. 오차단 복구는 언제나
   ATOM_DUP_REVIEWED=1(관측된 전 사례가 재시도 1회로 복구 — #74 결정
@@ -79,6 +78,12 @@ _strip_heredocs는 이 동결의 대상이 아니며, 자신의 docstring에 문
   (`f() { gh issue create -t T; }`) 선두 토큰이 `f`라 미감지고, 두 개 이상이면
   `;`가 세그먼트를 끊어 **정의 시점에** 감지된다 — 일관성 없는 경계지만
   예약어 도입 이전과 같은 동작이다.
+
+차단과 오버라이드 통과는 harness.blocklog 원장에 한 줄씩 남는다(#76) — 위 동결
+선언이 요구하는 "실증된 반복 비용"을 관측 가능하게 만드는 장치다. 유사 이슈 차단은
+후보의 **번호만** 싣는다(제목은 제3자 텍스트라 원장의 인젝션 표면을 넓힌다).
+기록은 best-effort이며 실패는 침묵으로 삼킨다. 로깅은 어떤 경우에도 판정에 영향을
+주지 않는다(_log 참조).
 
 종료 코드: 0 통과, 1 내부 오류(비차단 경고), 42 차단(sentinel — settings.json
 래퍼가 2로 되매핑).
@@ -682,9 +687,9 @@ def _protected_flags(text: str, count: int) -> list[bool] | None:
     연산자가 명령 이름 자리에 오는 형태 등. 전부 정확 일치 OPERATORS 경로에서
     나오며 이 판정 도입 이전부터 있었다. 알려진 것은 테스트의 _KNOWN_FALSE_BLOCKS
     표에 잠겨 있으나 **그 목록이 망라적이라고 증명된 바 없다.** 전부 owner가
-    수용한 한계다. 실사용 발생의 자동 기록은 차단 이력 로그(#76)가 맡고(구현
-    전에는 세션 트랜스크립트가 유일한 기록 경로), 수리 여부는 그 기록을
-    근거로 한 owner 결정이다(모듈 docstring의 동결 선언 참조).
+    수용한 한계다. 실사용 발생의 자동 기록은 차단 이력 원장(#76,
+    harness.blocklog)이 맡고, 수리 여부는 그 기록을 근거로 한 owner
+    결정이다(모듈 docstring의 동결 선언 참조).
 
     Args:
         text: 토큰화한 원본 텍스트(줄 단위 또는 명령 전체).
@@ -1007,6 +1012,26 @@ def _block_message(invocation: CreateInvocation, candidates: list[str]) -> str:
     return "\n".join(lines)
 
 
+def _log(**kwargs) -> None:
+    """차단 이력 원장에 한 줄을 남긴다 — 절대 제어 흐름에 영향을 주지 않는다.
+
+    맨몸 호출을 금지하는 이유가 둘이다. (1) 인자 불일치 TypeError는 record_block
+    본문 진입 **전에** 나므로 그 안의 방어가 못 잡고, 예외가 main() 밖으로 나가면
+    run()이 1을 반환해 **차단이 통과로 강등된다**(래퍼는 42만 2로 되매핑한다).
+    (2) 모듈 최상단 import면 blocklog가 import 불가능해질 때(자식 프로젝트가 이
+    모듈을 제거·수정한 경우) 가드 자체가 죽어 차단 기능 전체가 사라진다.
+
+    대가: 예외를 삼키므로 호출부 키워드 오타가 조용한 무기록이 된다. 그래서
+    호출부 3곳을 각각 확인하는 테스트는 선택이 아니라 이 설계의 필수 조건이다.
+    """
+    try:
+        from harness.blocklog.blocklog import record_block
+
+        record_block(**kwargs)
+    except Exception:  # noqa: BLE001 — fail-open이 설계 요구사항
+        pass
+
+
 def main() -> int:
     """stdin의 PreToolUse JSON을 판정한다.
 
@@ -1027,9 +1052,20 @@ def main() -> int:
     cwd = payload.get("cwd")
     if not isinstance(cwd, str) or not cwd:
         cwd = None
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        session_id = None
 
     for invocation in detect_invocations(command):
         if invocation.override:
+            _log(
+                event="override",
+                harness="issue-duplicate-guard",
+                reason=None,
+                command=command,
+                cwd=cwd,
+                session_id=session_id,
+            )
             continue
         if not invocation.title:
             print(
@@ -1041,6 +1077,14 @@ def main() -> int:
                 f"prefixed to the {invocation.cli} segment: "
                 f"{OVERRIDE_TOKEN} {invocation.cli} issue create ...",
                 file=sys.stderr,
+            )
+            _log(
+                event="block",
+                harness="issue-duplicate-guard",
+                reason="no-title",
+                command=command,
+                cwd=cwd,
+                session_id=session_id,
             )
             return EXIT_BLOCK
         # 제목 검사보다 뒤: 제목 없는 create는 검색이 필요 없어 cd와 무관하게
@@ -1062,6 +1106,15 @@ def main() -> int:
             continue
         if candidates:
             print(_block_message(invocation, candidates), file=sys.stderr)
+            _log(
+                event="block",
+                harness="issue-duplicate-guard",
+                reason="similar-titles",
+                command=command,
+                cwd=cwd,
+                session_id=session_id,
+                candidates=candidates,
+            )
             return EXIT_BLOCK
     return 0
 
