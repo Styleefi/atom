@@ -377,8 +377,8 @@ def test_validate_rejects_bad_headers() -> None:
 # sibling issue_duplicate_guard의 _KNOWN_FALSE_BLOCKS와 같은 규약. 각 항목은
 # bash가 차단 사유대로 실행하지 않는데 가드가 감지하는, owner가 수용한
 # 한계다(#52 동결 — 수리는 텍스트 추론 정련의 재개라 금지, #74 carve-out —
-# 실사용 발생의 자동 기록은 차단 이력 로그(#76, 구현 전에는 세션 트랜스크립트가
-# 기록 경로)가 맡고, 수리는 owner 결정).
+# 실사용 발생의 자동 기록은 차단 이력 원장(#76, harness.blocklog)이 맡고,
+# 수리는 owner 결정).
 # 설명은 bash 실행 상태를 밝힌다. 무조건 실행이면 "실행됨", 무조건 미실행이면
 # "미실행", 조건부면 "실행은 …때"로 조건을 병기한다(규약 준수는 아래 테스트가
 # 검사한다).
@@ -649,3 +649,100 @@ def test_current_branch_oserror_returns_none(monkeypatch) -> None:
 
     monkeypatch.setattr(guard.subprocess, "run", raise_oserror)
     assert guard._current_branch(None, None) is None
+
+
+# ---------- 차단 이력 원장 (#76) ----------
+# 경로는 tests/conftest.py의 autouse fixture가 tmp_path로 격리한다.
+
+
+def _ledger_entries(tmp_path) -> list[dict]:
+    """격리된 원장을 줄 단위로 읽는다 (파일이 없으면 빈 목록)."""
+    path = tmp_path / "state" / "atom" / "guard-blocklog.jsonl"
+    if not path.is_file():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_ledger_records_protected_branch_block(monkeypatch, tmp_path) -> None:
+    _set_branch(monkeypatch, "main")
+
+    _run_main(monkeypatch, _bash_payload('git commit -m "feat: x"'))
+
+    entries = _ledger_entries(tmp_path)
+    assert len(entries) == 1
+    assert entries[0]["event"] == "block"
+    assert entries[0]["reason"] == "protected-branch"
+    assert entries[0]["harness"] == "commit-guard"
+
+
+def test_ledger_records_subject_rejected_block(monkeypatch, tmp_path) -> None:
+    _set_branch(monkeypatch, "feat/thing")
+
+    _run_main(monkeypatch, _bash_payload('git commit -m "Update stuff"'))
+
+    entry = _ledger_entries(tmp_path)[0]
+    assert entry["event"] == "block"
+    assert entry["reason"] == "subject-rejected"
+
+
+def test_ledger_records_override(monkeypatch, tmp_path) -> None:
+    _set_branch(monkeypatch, "main")
+
+    _run_main(monkeypatch, _bash_payload('ATOM_COMMIT_OVERRIDE=1 git commit -m "hotfix"'))
+
+    entry = _ledger_entries(tmp_path)[0]
+    assert entry["event"] == "override"
+    assert entry["reason"] is None
+
+
+def test_ledger_carries_session_id_and_cwd(monkeypatch, tmp_path) -> None:
+    _set_branch(monkeypatch, "main")
+    payload = _bash_payload('git commit -m "feat: x"', cwd="/repo")
+    payload["session_id"] = "sess-42"
+
+    _run_main(monkeypatch, payload)
+
+    entry = _ledger_entries(tmp_path)[0]
+    assert entry["session_id"] == "sess-42"
+    assert entry["cwd"] == "/repo"
+
+
+def test_ledger_session_id_is_null_when_absent(monkeypatch, tmp_path) -> None:
+    _set_branch(monkeypatch, "main")
+
+    _run_main(monkeypatch, _bash_payload('git commit -m "feat: x"'))
+
+    assert _ledger_entries(tmp_path)[0]["session_id"] is None
+
+
+def test_ledger_stays_empty_on_pass(monkeypatch, tmp_path) -> None:
+    _set_branch(monkeypatch, "feat/thing")
+
+    assert _run_main(monkeypatch, _bash_payload('git commit -m "feat: x"')) == 0
+    assert _ledger_entries(tmp_path) == []
+
+
+def test_ledger_stays_empty_on_fail_open_paths(monkeypatch, tmp_path) -> None:
+    # 브랜치를 알 수 없음
+    _set_branch(monkeypatch, None)
+    assert _run_main(monkeypatch, _bash_payload('git commit -m "feat: x"')) == 0
+    # 비대상 명령
+    assert _run_main(monkeypatch, _bash_payload("echo hi")) == 0
+
+    assert _ledger_entries(tmp_path) == []
+
+
+def test_ledger_failure_never_downgrades_a_block(monkeypatch, tmp_path) -> None:
+    # _log의 존재 이유. record_block이 던지면(시그니처 드리프트 등) 예외가
+    # main() 밖으로 나가 run()이 1을 반환하고, 래퍼는 42만 2로 되매핑하므로
+    # 차단이 조용히 통과로 강등된다.
+    from harness.blocklog import blocklog as blocklog_module
+
+    def boom(**kwargs):
+        raise TypeError("signature drift")
+
+    monkeypatch.setattr(blocklog_module, "record_block", boom)
+    _set_branch(monkeypatch, "main")
+
+    assert _run_main(monkeypatch, _bash_payload('git commit -m "feat: x"')) == 42
+    assert _ledger_entries(tmp_path) == []

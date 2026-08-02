@@ -554,8 +554,8 @@ def test_segment_corpus() -> None:
 # 항목을 지워라.
 #
 # 남은 항목은 owner가 수용한 한계다(#72 종결 시 결정, #74에서 개정). 실사용
-# 발생의 자동 기록은 차단 이력 로그(#76)가 맡고(구현 전에는 세션 트랜스크립트가
-# 유일한 기록 경로), 이슈 신설·수리는 반복 발생 등 실증된 비용을 근거로 한
+# 발생의 자동 기록은 차단 이력 원장(#76, harness.blocklog)이 맡고,
+# 이슈 신설·수리는 반복 발생 등 실증된 비용을 근거로 한
 # owner 결정으로만 연다(guard.py 동결 선언 참조). 새 항목의 추가 자체는 owner
 # 결정이 필요 없다 — 기록은 무조건이다.
 #
@@ -798,3 +798,111 @@ def test_run_wrapper_converts_crash_to_nonblocking(monkeypatch, capsys) -> None:
     monkeypatch.setattr(sys, "stdin", io.StringIO("{}"))
     assert guard.run() == 1
     assert "fail-open" in capsys.readouterr().err
+
+
+# ---------- 차단 이력 원장 (#76) ----------
+# 경로는 tests/conftest.py의 autouse fixture가 tmp_path로 격리한다.
+
+
+def _ledger_entries(tmp_path) -> list[dict]:
+    """격리된 원장을 줄 단위로 읽는다 (파일이 없으면 빈 목록)."""
+    path = tmp_path / "state" / "atom" / "guard-blocklog.jsonl"
+    if not path.is_file():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_ledger_records_no_title_block(monkeypatch, tmp_path) -> None:
+    _run_main(monkeypatch, _bash_payload("gh issue create --body x"))
+
+    entries = _ledger_entries(tmp_path)
+    assert len(entries) == 1
+    assert entries[0]["event"] == "block"
+    assert entries[0]["reason"] == "no-title"
+    assert entries[0]["harness"] == "issue-duplicate-guard"
+
+
+def test_ledger_records_similar_titles_block_with_numbers(monkeypatch, tmp_path) -> None:
+    issues = json.dumps(
+        [
+            {"number": 12, "state": "OPEN", "title": "같은 작업"},
+            {"number": 45, "state": "CLOSED", "title": "비슷한 작업"},
+        ]
+    )
+    monkeypatch.setattr(guard, "_run_search", lambda argv, cwd=None: issues)
+
+    _run_main(monkeypatch, _bash_payload('gh issue create -t "같은 작업"'))
+
+    entry = _ledger_entries(tmp_path)[0]
+    assert entry["reason"] == "similar-titles"
+    # 제목 원문은 남기지 않는다 — 제3자 텍스트라 인젝션 표면을 넓힌다.
+    assert entry["candidates"] == [12, 45]
+
+
+def test_ledger_records_glab_candidate_numbers(monkeypatch, tmp_path) -> None:
+    out = "#3\tcapture sample issue\t\tless than a minute ago\n"
+    monkeypatch.setattr(guard, "_run_search", lambda argv, cwd=None: out)
+
+    _run_main(monkeypatch, _bash_payload("glab issue create -t x"))
+
+    assert _ledger_entries(tmp_path)[0]["candidates"] == [3]
+
+
+def test_ledger_records_override(monkeypatch, tmp_path) -> None:
+    cmd = f"{guard.OVERRIDE_TOKEN} gh issue create -t anything"
+    _run_main(monkeypatch, _bash_payload(cmd))
+
+    entry = _ledger_entries(tmp_path)[0]
+    assert entry["event"] == "override"
+    assert entry["reason"] is None
+
+
+def test_ledger_carries_session_id_and_cwd(monkeypatch, tmp_path) -> None:
+    payload = _bash_payload("gh issue create --body x", cwd="/repo")
+    payload["session_id"] = "sess-42"
+
+    _run_main(monkeypatch, payload)
+
+    entry = _ledger_entries(tmp_path)[0]
+    assert entry["session_id"] == "sess-42"
+    assert entry["cwd"] == "/repo"
+
+
+def test_ledger_session_id_is_null_when_absent(monkeypatch, tmp_path) -> None:
+    _run_main(monkeypatch, _bash_payload("gh issue create --body x"))
+
+    assert _ledger_entries(tmp_path)[0]["session_id"] is None
+
+
+def test_ledger_stays_empty_on_pass(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(guard, "_run_search", lambda argv, cwd=None: "[]")
+
+    assert _run_main(monkeypatch, _bash_payload("gh issue create -t brand-new")) == 0
+    assert _ledger_entries(tmp_path) == []
+
+
+def test_ledger_stays_empty_on_fail_open_paths(monkeypatch, tmp_path) -> None:
+    # 검색 실패
+    monkeypatch.setattr(guard, "_run_search", lambda argv, cwd=None: None)
+    assert _run_main(monkeypatch, _bash_payload("gh issue create -t x")) == 0
+    # 작업 디렉터리 불명
+    assert _run_main(monkeypatch, _bash_payload('cd /elsewhere && gh issue create -t "T"')) == 0
+    # 비대상 명령
+    assert _run_main(monkeypatch, _bash_payload("echo hi")) == 0
+
+    assert _ledger_entries(tmp_path) == []
+
+
+def test_ledger_failure_never_downgrades_a_block(monkeypatch, tmp_path) -> None:
+    # _log의 존재 이유. record_block이 던지면(시그니처 드리프트 등) 예외가
+    # main() 밖으로 나가 run()이 1을 반환하고, 래퍼는 42만 2로 되매핑하므로
+    # 차단이 조용히 통과로 강등된다.
+    from harness.blocklog import blocklog as blocklog_module
+
+    def boom(**kwargs):
+        raise TypeError("signature drift")
+
+    monkeypatch.setattr(blocklog_module, "record_block", boom)
+
+    assert _run_main(monkeypatch, _bash_payload("gh issue create --body x")) == 42
+    assert _ledger_entries(tmp_path) == []
