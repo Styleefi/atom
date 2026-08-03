@@ -5,9 +5,13 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   harness:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Same job image as .gitlab-ci.yml — both forges verify one environment contract.
     container: ghcr.io/astral-sh/uv:python3.14-trixie
     steps:

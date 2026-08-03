@@ -7,6 +7,15 @@ workflow:
 
 harness:
   image: ghcr.io/astral-sh/uv:python3.14-trixie
+  interruptible: true
+  variables:
+    UV_CACHE_DIR: .uv-cache
+  cache:
+    key:
+      files:
+        - meta/uv.lock
+    paths:
+      - .uv-cache
   script:
     - uv sync --locked --directory meta
     - uv run --directory meta pytest
