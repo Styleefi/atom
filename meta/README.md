@@ -4,7 +4,7 @@
 
 This file is the **owner-facing inventory**: what the meta layer ships, how each piece engages, and how the owner invokes or overrides it. Its purpose is to keep that interface surface from being forgotten as it grows — so the tables below are verified mechanically by the rules checker, not maintained on trust.
 
-CI needs no attention when this surface grows. Both workflows (`.github/workflows/harness.yml` and `.gitlab-ci.yml`) run exactly two commands — `uv run --directory meta pytest` and `uv run --directory meta python -m harness.rules_checker` — and both auto-discover new rules and harnesses, so adding an artifact never requires a CI edit. The one exception is the `gitlab`-marked integration tests, which self-skip in CI and run only against the on-demand stack listed below.
+Cross-forge CI parity — the same `harness` job image on both forges, image Python matching `meta/.python-version`, identical command lists — is enforced mechanically by the `ci_contract` harness tests. Rules and harnesses are auto-discovered, so adding one usually needs no CI edit; but a harness that introduces a new external binary or network dependency changes the execution-environment contract — update the shared job image and re-verify with `cd meta/infra/gitlab && ./run.sh ./verify_ci.sh`. The `gitlab`-marked integration tests self-skip in CI and run only against that on-demand stack.
 
 ## Format contract (machine-checked)
 
@@ -62,6 +62,16 @@ Python packages under `meta/harness/`, run as modules from the meta uv project.
 | name | engagement | owner interface | behavior |
 |---|---|---|---|
 | `rules_checker` | on demand, and on every CI run | `uv run --directory meta python -m harness.rules_checker` | Verifies that every rule is deployed as declared (for hook rules: the command matches the canonical fail-open wrapper), that harness hook commands pass the reverse wiring sweep, that the child template's import list matches root `CLAUDE.md`, and that this inventory matches reality. |
+
+### Test-enforced harnesses
+
+Packages under `meta/harness/` whose enforcement point is the pytest suite itself — no `__main__.py`; running `uv run --directory meta pytest` (locally or in CI) is how they engage.
+
+| name | engagement | owner interface | behavior |
+|---|---|---|---|
+| `ci_contract` | automatic, on every pytest run | delete the root `.dual-forge-ci` marker to opt out (see below) | Asserts the cross-forge CI contract on the two real CI files: same `harness` job image on both forges, image Python matching `meta/.python-version`, identical normalized command lists, and pytest present in both. Fails closed on bypass routes (`before_script`, non-checkout `uses:`, `include`/`extends`) and on unreadable contracts. |
+
+**Opting out of the dual-forge contract:** the root `.dual-forge-ci` marker (0 bytes, inherited by cloning) declares that this repository maintains both CI files. A child project that drops one forge deletes the marker **and** the dropped forge's CI file in the same commit — with the marker gone, the live check skips entirely, whatever files remain. On later `git pull upstream main` conflicts, keep your deletions (modify/delete conflict → take your deletion side); the general "take upstream's" guidance does not apply to files you deliberately removed. Children cloned before this marker existed: delete the marker in the same pull that first brings it in, or the next CI run fails once with instructions.
 
 ### Shared modules
 
