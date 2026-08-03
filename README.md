@@ -60,6 +60,8 @@ CI travels with the clone on either forge: GitHub Actions reads `.github/workflo
 
 One pipeline-semantics gap is a project setting, not a CI-file concern: GitHub PR workflows check out the **merge result** of source into target, while GitLab MR pipelines default to the source branch tip only — a change that conflicts semantically with the target branch passes on GitLab and fails only after merge. Children on GitLab should enable **merged results pipelines** (project Settings → CI/CD) to match GitHub's verification semantics.
 
+One trigger is hardcoded: GitHub Actions has no trigger-level symbol for the default branch, so `.github/workflows/harness.yml` pins `push: branches: [main]`. A child whose default branch is not `main` must edit that line — `.gitlab-ci.yml` needs no edit, it follows `$CI_DEFAULT_BRANCH`.
+
 Merge conflicts on upstream pulls are expected for the files you replaced: keep **yours** for `CLAUDE.md`, `README.md`, and `docs/`; take **upstream's** for `meta/`, `.claude/`, `.github/`, `.gitlab-ci.yml`, and `.gitattributes`.
 
 ## License
