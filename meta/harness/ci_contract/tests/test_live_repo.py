@@ -24,4 +24,4 @@ def test_ci_contract_live():
         (root / contract.GITHUB_WORKFLOW).read_text(encoding="utf-8"),
         (root / contract.PYTHON_VERSION_FILE).read_text(encoding="utf-8"),
     )
-    assert not violations, "\n".join(violations) + "\n" + contract.OPT_OUT_HINT
+    assert not violations, "\n".join(violations)

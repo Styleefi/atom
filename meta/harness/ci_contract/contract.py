@@ -31,7 +31,17 @@ OPT_OUT_HINT = (
 _CHECKOUT_PREFIX = "actions/checkout@"
 # 범용 (\d+\.\d+)는 uv:0.11.26-python3.14-trixie에서 uv 버전을 먼저 잡는다.
 _PYTHON_IN_TAG = re.compile(r"python:?(\d+\.\d+)")
-_PYTEST_WORD = re.compile(r"\bpytest\b")
+
+
+def _runs_pytest(command: str) -> bool:
+    """명령이 pytest를 실행하는지 온전한 토큰 단위로 판정한다.
+
+    정규식 \\b 경계는 ``-``도 경계로 취급해 ``pytest-cov`` 설치 명령을
+    pytest 실행으로 오인한다(리뷰 라운드 1의 C1 구멍). 공백 분할 토큰이
+    정확히 ``pytest``일 때만 실행으로 인정한다 — ``uv run … pytest``와
+    ``python -m pytest``는 잡고, ``pytest-cov``·``pytest.ini``는 거른다.
+    """
+    return any(token == "pytest" for token in command.split())
 
 
 class UnknownTag:
@@ -360,10 +370,13 @@ def check_contract(
                 "entry / run step, using | or list form)"
             )
         for label, commands in ((GITLAB_CI, gl_commands), (GITHUB_WORKFLOW, gh_commands)):
-            if not any(_PYTEST_WORD.search(command) for command in commands):
+            if not any(_runs_pytest(command) for command in commands):
                 violations.append(
                     f"{label}: no pytest command in the command list — this "
                     "contract check is itself enforced by pytest, so a pytest "
                     "command must stay (indirect wrappers like make are unsupported)"
                 )
+    # O7 — 어떤 위반이든 사용자에게 닿는 출력에는 옵트아웃 탈출구가 항상 실린다.
+    if violations:
+        violations.append(OPT_OUT_HINT)
     return violations

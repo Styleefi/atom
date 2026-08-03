@@ -57,6 +57,12 @@ def test_current_repo_shape_passes():
     assert check() == []
 
 
+def test_any_violation_output_carries_opt_out_hint():
+    """위반이 하나라도 있으면 출력 마지막에 옵트아웃 탈출구가 실린다 (O7)."""
+    violations = check(py="3.13\n")
+    assert violations[-1] == contract.OPT_OUT_HINT
+
+
 def test_mapping_image_forms_pass():
     """GitLab {name:}·GitHub {image:} 매핑 형태도 문자열과 동등하게 읽힌다."""
     gitlab = GITLAB_OK.replace(
@@ -163,10 +169,21 @@ def test_pytest_removed_from_both_sides():
     assert sum("no pytest command" in v for v in violations) == 2
 
 
-def test_pytest_word_boundary():
-    """pytest_config 같은 파생 토큰은 pytest 실행으로 인정되지 않는다."""
-    assert contract._PYTEST_WORD.search("cat pytest_config.ini") is None
-    assert contract._PYTEST_WORD.search("uv run --directory meta pytest") is not None
+def test_pytest_token_detection():
+    """pytest 판정은 온전한 토큰만 인정한다 — 파생 토큰·플러그인명은 배제."""
+    assert contract._runs_pytest("uv run --directory meta pytest")
+    assert contract._runs_pytest("python -m pytest")
+    assert not contract._runs_pytest("cat pytest_config.ini")
+    assert not contract._runs_pytest("uv add pytest-cov")  # \b 경계의 C1 구멍 (라운드 1)
+    assert not contract._runs_pytest("cat pytest.ini")
+
+
+def test_pytest_plugin_install_does_not_satisfy_invariant_4():
+    """양쪽이 대칭으로 pytest 실행을 플러그인 설치로 바꿔도 불변식 (4)가 잡는다."""
+    gitlab = GITLAB_OK.replace("uv run --directory meta pytest", "uv add pytest-cov")
+    github = GITHUB_OK.replace("uv run --directory meta pytest", "uv add pytest-cov")
+    violations = check(gitlab, github)
+    assert sum("no pytest command" in v for v in violations) == 2
 
 
 # --- 우회로 차단 가드 ---
