@@ -12,6 +12,6 @@ jobs:
     container: ghcr.io/astral-sh/uv:python3.14-trixie
     steps:
       - uses: actions/checkout@v7
-      - run: uv sync --directory meta
+      - run: uv sync --locked --directory meta
       - run: uv run --directory meta pytest
       - run: uv run --directory meta python -m harness.rules_checker

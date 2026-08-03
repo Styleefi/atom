@@ -8,6 +8,6 @@ workflow:
 harness:
   image: ghcr.io/astral-sh/uv:python3.14-trixie
   script:
-    - uv sync --directory meta
+    - uv sync --locked --directory meta
     - uv run --directory meta pytest
     - uv run --directory meta python -m harness.rules_checker
