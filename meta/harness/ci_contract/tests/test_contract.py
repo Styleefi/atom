@@ -166,7 +166,7 @@ def test_pytest_removed_from_both_sides():
     gitlab = GITLAB_OK.replace("    - uv run --directory meta pytest\n", "")
     github = GITHUB_OK.replace("      - run: uv run --directory meta pytest\n", "")
     violations = check(gitlab, github)
-    assert sum("canonical pytest command missing" in v for v in violations) == 2
+    assert sum("deviates from the canonical harness commands" in v for v in violations) == 2
 
 
 @pytest.mark.parametrize(
@@ -181,16 +181,36 @@ def test_pytest_removed_from_both_sides():
     ],
 )
 def test_non_canonical_pytest_forms_do_not_satisfy_invariant_4(replacement):
-    """canonical 명령과 문자 그대로 일치하지 않으면 대칭 치환이어도 위반이다.
+    """canonical 목록과 문자 그대로 일치하지 않으면 대칭 치환이어도 위반이다.
 
-    불변식 (4)는 "pytest 토큰 존재"가 아니라 canonical 명령의 완전 일치다 —
-    해석형 판정은 설치·echo 클래스가 계속 새서(라운드 1·2) 폐기됐고, 변형·
-    래퍼는 의도적으로 fail-closed다.
+    불변식 (4)는 "pytest 토큰 존재"가 아니라 canonical 명령 목록의 완전
+    일치다 — 해석형 판정은 설치·echo 클래스가 계속 새서(라운드 1·2) 폐기됐고,
+    변형·래퍼는 의도적으로 fail-closed다.
     """
     gitlab = GITLAB_OK.replace("uv run --directory meta pytest", replacement)
     github = GITHUB_OK.replace("uv run --directory meta pytest", replacement)
     violations = check(gitlab, github)
-    assert sum("canonical pytest command missing" in v for v in violations) == 2
+    assert sum("deviates from the canonical harness commands" in v for v in violations) == 2
+
+
+@pytest.mark.parametrize(
+    "gitlab_line, github_line",
+    [
+        ("    - exit 0\n", "      - run: exit 0\n"),  # 라운드 3의 C1 인스턴스
+        ("    - echo done\n", "      - run: echo done\n"),
+    ],
+)
+def test_symmetric_injected_line_violates_canonical_list(gitlab_line, github_line):
+    """canonical 줄이 전부 존재해도 주입 행이 목록을 이탈시키면 위반이다.
+
+    줄의 존재가 줄의 실행을 보장하지 않는다 — 앞선 ``exit 0``은 GitLab 잡을
+    조용히 끝내 버린다. 어휘 검사는 셸 제어 흐름을 해석할 수 없으므로, 불변식
+    (4)는 목록 전체를 고정해 주입·삭제·재배열을 일괄 차단한다(라운드 3).
+    """
+    gitlab = GITLAB_OK.replace("    - uv sync", gitlab_line + "    - uv sync")
+    github = GITHUB_OK.replace("      - run: uv sync", github_line + "      - run: uv sync")
+    violations = check(gitlab, github)
+    assert sum("deviates from the canonical harness commands" in v for v in violations) == 2
 
 
 # --- 우회로 차단 가드 ---

@@ -3,8 +3,8 @@
 
 `.gitlab-ci.yml`의 ``harness`` 잡과 `.github/workflows/harness.yml`의
 ``jobs.harness``가 공유해야 하는 계약 — 같은 잡 이미지, `meta/.python-version`과
-일치하는 파이썬 major.minor, 동일한 명령 목록, canonical pytest 명령 포함 — 을
-순수 함수로 검사한다. 강제 지점은 ``tests/test_live_repo.py``의 pytest 테스트다.
+일치하는 파이썬 major.minor, canonical harness 명령 목록과 문자 그대로 일치하는
+명령 목록 — 을 순수 함수로 검사한다. 강제 지점은 ``tests/test_live_repo.py``의 pytest 테스트다.
 
 두 CI 파일은 포지 관용구(트리거·캐시·interruptible 등)가 달라야 정상이므로,
 전체 스키마 비교가 아니라 위 계약 키만 좁게 단언하고, 명령이 계약 밖 키로
@@ -32,12 +32,17 @@ _CHECKOUT_PREFIX = "actions/checkout@"
 # 범용 (\d+\.\d+)는 uv:0.11.26-python3.14-trixie에서 uv 버전을 먼저 잡는다.
 _PYTHON_IN_TAG = re.compile(r"python:?(\d+\.\d+)")
 
-# 불변식 (4)의 canonical pytest 명령 — 정규화된 명령 목록에 이 문자열이 그대로
-# 존재해야 한다. "pytest를 실행하는가"를 해석하는 판정(정규식·토큰)은 설치·echo
-# 류가 새는 클래스 구멍이 반복돼(리뷰 라운드 1·2) 완전 일치로 대체됐다.
-# harness 명령을 바꾸는 PR은 이 상수도 함께 갱신해야 한다 — 갱신을 잊으면
-# 라이브 테스트가 시끄럽게 실패하므로 드리프트는 숨지 않는다.
-PYTEST_COMMAND = "uv run --directory meta pytest"
+# 불변식 (4)의 canonical harness 명령 목록 — 양쪽의 정규화된 명령 목록이 이
+# 목록과 문자 그대로 일치해야 한다. "이 줄이 pytest를 실행하는가"류의 해석은
+# 리뷰 라운드 1~3에서 층층이 새는 게 증명됐다(파생 토큰 → 설치 명령 → exit 0
+# 같은 제어 흐름 주입 — 줄의 존재가 줄의 실행을 보장하지 않는다). 목록 전체
+# 고정은 추가·삭제·재배열·변형을 일괄 위반으로 만들어 해석 자체를 제거한다.
+# harness 명령을 바꾸는 PR은 이 목록도 같은 PR에서 갱신해야 한다.
+CANONICAL_COMMANDS = [
+    "uv sync --locked --directory meta",
+    "uv run --directory meta pytest",
+    "uv run --directory meta python -m harness.rules_checker",
+]
 
 
 class UnknownTag:
@@ -314,8 +319,9 @@ def check_contract(
 
     불변식: (1) harness 잡 이미지 일치, (2) 이미지 파이썬 ↔
     ``meta/.python-version`` major.minor 일치, (3) 정규화된 명령 목록의 순서
-    포함 일치, (4) 양쪽 모두 canonical pytest 명령(``PYTEST_COMMAND``)을
-    문자 그대로 포함.
+    포함 일치, (4) 양쪽 각각 canonical 명령 목록(``CANONICAL_COMMANDS``)과
+    문자 그대로 일치. (4)가 (3)을 함의하지만, (3)은 포지 간 비대칭 드리프트를
+    더 읽기 좋은 메시지로 보여 유지한다.
 
     Args:
         gitlab_text: ``.gitlab-ci.yml`` 본문.
@@ -368,13 +374,16 @@ def check_contract(
                 "entry / run step, using | or list form)"
             )
         for label, commands in ((GITLAB_CI, gl_commands), (GITHUB_WORKFLOW, gh_commands)):
-            if PYTEST_COMMAND not in commands:
+            if commands != CANONICAL_COMMANDS:
                 violations.append(
-                    f"{label}: canonical pytest command missing — this contract "
-                    "check is itself enforced by pytest, so the exact command "
-                    f"{PYTEST_COMMAND!r} must be present in the command list "
-                    "(variants and wrappers are unsupported; changing the "
-                    "harness command requires updating PYTEST_COMMAND too)"
+                    f"{label}: command list deviates from the canonical harness "
+                    "commands —\n"
+                    f"  expected: {CANONICAL_COMMANDS}\n"
+                    f"  actual  : {commands}\n"
+                    "  (the contract pins the inherited harness commands "
+                    "literally — no extra, missing, reordered, or modified "
+                    "lines; changing them requires updating CANONICAL_COMMANDS "
+                    "in the same PR)"
                 )
     # O7 — 위반이 있으면 반환 목록의 마지막 원소로 옵트아웃 탈출구를 싣는다.
     if violations:
