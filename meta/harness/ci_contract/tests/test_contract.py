@@ -166,24 +166,31 @@ def test_pytest_removed_from_both_sides():
     gitlab = GITLAB_OK.replace("    - uv run --directory meta pytest\n", "")
     github = GITHUB_OK.replace("      - run: uv run --directory meta pytest\n", "")
     violations = check(gitlab, github)
-    assert sum("no pytest command" in v for v in violations) == 2
+    assert sum("canonical pytest command missing" in v for v in violations) == 2
 
 
-def test_pytest_token_detection():
-    """pytest 판정은 온전한 토큰만 인정한다 — 파생 토큰·플러그인명은 배제."""
-    assert contract._runs_pytest("uv run --directory meta pytest")
-    assert contract._runs_pytest("python -m pytest")
-    assert not contract._runs_pytest("cat pytest_config.ini")
-    assert not contract._runs_pytest("uv add pytest-cov")  # \b 경계의 C1 구멍 (라운드 1)
-    assert not contract._runs_pytest("cat pytest.ini")
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        "uv add pytest-cov",  # 플러그인 설치 (라운드 1의 C1 인스턴스)
+        "uv add pytest",  # 무하이픈 설치 (라운드 2의 C1 재발 인스턴스)
+        "pip install pytest",
+        "echo pytest",
+        "uv run --directory meta pytest --collect-only",  # 실행하되 테스트는 안 돎
+        'sh -c "uv run --directory meta pytest"',  # 래퍼 — 명시적 미지원 경계
+    ],
+)
+def test_non_canonical_pytest_forms_do_not_satisfy_invariant_4(replacement):
+    """canonical 명령과 문자 그대로 일치하지 않으면 대칭 치환이어도 위반이다.
 
-
-def test_pytest_plugin_install_does_not_satisfy_invariant_4():
-    """양쪽이 대칭으로 pytest 실행을 플러그인 설치로 바꿔도 불변식 (4)가 잡는다."""
-    gitlab = GITLAB_OK.replace("uv run --directory meta pytest", "uv add pytest-cov")
-    github = GITHUB_OK.replace("uv run --directory meta pytest", "uv add pytest-cov")
+    불변식 (4)는 "pytest 토큰 존재"가 아니라 canonical 명령의 완전 일치다 —
+    해석형 판정은 설치·echo 클래스가 계속 새서(라운드 1·2) 폐기됐고, 변형·
+    래퍼는 의도적으로 fail-closed다.
+    """
+    gitlab = GITLAB_OK.replace("uv run --directory meta pytest", replacement)
+    github = GITHUB_OK.replace("uv run --directory meta pytest", replacement)
     violations = check(gitlab, github)
-    assert sum("no pytest command" in v for v in violations) == 2
+    assert sum("canonical pytest command missing" in v for v in violations) == 2
 
 
 # --- 우회로 차단 가드 ---

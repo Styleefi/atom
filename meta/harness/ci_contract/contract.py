@@ -3,8 +3,8 @@
 
 `.gitlab-ci.yml`의 ``harness`` 잡과 `.github/workflows/harness.yml`의
 ``jobs.harness``가 공유해야 하는 계약 — 같은 잡 이미지, `meta/.python-version`과
-일치하는 파이썬 major.minor, 동일한 명령 목록, pytest 실행 포함 — 을 순수
-함수로 검사한다. 강제 지점은 ``tests/test_live_repo.py``의 pytest 테스트다.
+일치하는 파이썬 major.minor, 동일한 명령 목록, canonical pytest 명령 포함 — 을
+순수 함수로 검사한다. 강제 지점은 ``tests/test_live_repo.py``의 pytest 테스트다.
 
 두 CI 파일은 포지 관용구(트리거·캐시·interruptible 등)가 달라야 정상이므로,
 전체 스키마 비교가 아니라 위 계약 키만 좁게 단언하고, 명령이 계약 밖 키로
@@ -32,16 +32,12 @@ _CHECKOUT_PREFIX = "actions/checkout@"
 # 범용 (\d+\.\d+)는 uv:0.11.26-python3.14-trixie에서 uv 버전을 먼저 잡는다.
 _PYTHON_IN_TAG = re.compile(r"python:?(\d+\.\d+)")
 
-
-def _runs_pytest(command: str) -> bool:
-    """명령이 pytest를 실행하는지 온전한 토큰 단위로 판정한다.
-
-    정규식 \\b 경계는 ``-``도 경계로 취급해 ``pytest-cov`` 설치 명령을
-    pytest 실행으로 오인한다(리뷰 라운드 1의 C1 구멍). 공백 분할 토큰이
-    정확히 ``pytest``일 때만 실행으로 인정한다 — ``uv run … pytest``와
-    ``python -m pytest``는 잡고, ``pytest-cov``·``pytest.ini``는 거른다.
-    """
-    return any(token == "pytest" for token in command.split())
+# 불변식 (4)의 canonical pytest 명령 — 정규화된 명령 목록에 이 문자열이 그대로
+# 존재해야 한다. "pytest를 실행하는가"를 해석하는 판정(정규식·토큰)은 설치·echo
+# 류가 새는 클래스 구멍이 반복돼(리뷰 라운드 1·2) 완전 일치로 대체됐다.
+# harness 명령을 바꾸는 PR은 이 상수도 함께 갱신해야 한다 — 갱신을 잊으면
+# 라이브 테스트가 시끄럽게 실패하므로 드리프트는 숨지 않는다.
+PYTEST_COMMAND = "uv run --directory meta pytest"
 
 
 class UnknownTag:
@@ -318,7 +314,8 @@ def check_contract(
 
     불변식: (1) harness 잡 이미지 일치, (2) 이미지 파이썬 ↔
     ``meta/.python-version`` major.minor 일치, (3) 정규화된 명령 목록의 순서
-    포함 일치, (4) 양쪽 모두 pytest 실행 포함.
+    포함 일치, (4) 양쪽 모두 canonical pytest 명령(``PYTEST_COMMAND``)을
+    문자 그대로 포함.
 
     Args:
         gitlab_text: ``.gitlab-ci.yml`` 본문.
@@ -326,7 +323,8 @@ def check_contract(
         python_version: ``meta/.python-version`` 본문.
 
     Returns:
-        위반 메시지 목록. 비어 있으면 계약 준수.
+        위반 메시지 목록. 비어 있으면 계약 준수. 위반이 하나라도 있으면
+        마지막 원소는 위반이 아니라 옵트아웃 힌트(``OPT_OUT_HINT``)다.
     """
     gl_image, gl_raw, violations = extract_gitlab(
         yaml.load(gitlab_text, Loader=_CiLoader)
@@ -370,13 +368,15 @@ def check_contract(
                 "entry / run step, using | or list form)"
             )
         for label, commands in ((GITLAB_CI, gl_commands), (GITHUB_WORKFLOW, gh_commands)):
-            if not any(_runs_pytest(command) for command in commands):
+            if PYTEST_COMMAND not in commands:
                 violations.append(
-                    f"{label}: no pytest command in the command list — this "
-                    "contract check is itself enforced by pytest, so a pytest "
-                    "command must stay (indirect wrappers like make are unsupported)"
+                    f"{label}: canonical pytest command missing — this contract "
+                    "check is itself enforced by pytest, so the exact command "
+                    f"{PYTEST_COMMAND!r} must be present in the command list "
+                    "(variants and wrappers are unsupported; changing the "
+                    "harness command requires updating PYTEST_COMMAND too)"
                 )
-    # O7 — 어떤 위반이든 사용자에게 닿는 출력에는 옵트아웃 탈출구가 항상 실린다.
+    # O7 — 위반이 있으면 반환 목록의 마지막 원소로 옵트아웃 탈출구를 싣는다.
     if violations:
         violations.append(OPT_OUT_HINT)
     return violations
