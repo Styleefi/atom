@@ -62,7 +62,9 @@ One pipeline-semantics gap is a project setting, not a CI-file concern: GitHub P
 
 One trigger is hardcoded: GitHub Actions has no trigger-level symbol for the default branch, so `.github/workflows/harness.yml` pins `push: branches: [main]`. A child whose default branch is not `main` must edit that line — `.gitlab-ci.yml` needs no edit, it follows `$CI_DEFAULT_BRANCH`.
 
-Merge conflicts on upstream pulls are expected for the files you replaced: keep **yours** for `CLAUDE.md`, `README.md`, and `docs/`; take **upstream's** for `meta/`, `.claude/`, `.github/`, `.gitlab-ci.yml`, and `.gitattributes`.
+The two CI files plus the root `.dual-forge-ci` marker form the dual-forge contract, enforced by the `ci_contract` harness tests on every pytest run. A child that keeps only one forge can opt out — see the opt-out procedure in `meta/README.md`.
+
+Merge conflicts on upstream pulls are expected for the files you replaced: keep **yours** for `CLAUDE.md`, `README.md`, and `docs/`; take **upstream's** for `meta/`, `.claude/`, `.github/`, `.gitlab-ci.yml`, and `.gitattributes`. Exception: if you opted out of one forge, keep your **deletion** of that forge's CI file and of `.dual-forge-ci` (modify/delete conflict → take your deletion side).
 
 ## License
 
