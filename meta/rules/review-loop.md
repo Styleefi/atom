@@ -40,8 +40,26 @@ loop, never the owner.
   runtime behavior, prose-precision findings are above-bar only when they
   would mislead a later session about behavior.
 - Triage = matching: a verified finding is above-bar iff its failure
-  scenario matches a declared class. The bar applies at triage only — never
-  narrow the reviewers' search with it.
+  scenario matches a declared class, subject to the accident test below.
+  The bar applies at triage only — never narrow the reviewers' search
+  with it.
+- When matching a finding whose failure scenario requires a hypothetical
+  repo state that a guard artifact (a checker, hook, test, or CI step) is
+  expected to defend against — as opposed to a defect that manifests in
+  the reviewed code as written — ask first whether that state can arise
+  by accident: typo, bad merge resolution, mirrored copy-paste, forgotten
+  partial edit. A state producible only by a deliberate, PR-visible act
+  is a candidate for a declared scope boundary (Divergence trigger
+  section): propose it to the owner instead of triaging it above-bar —
+  unless the declared bar explicitly includes deliberate acts, or the
+  guard's own documentation names that specific act as in scope to
+  detect. Until the owner decides, the finding is recorded in the ledger
+  as pending owner decision — counted in the above-bar total, not fixed
+  in-PR, and blocking the exit observation as an unresolved case; on
+  acceptance the recorded count is corrected downward and later
+  trigger-(a) comparisons use the corrected number. (Measured: PR #86
+  round 4 nearly added guard code against CI-disabling conditionals — a
+  state no accident produces.)
 - Raising the bar (adding a class) needs only a ledger entry; a serious
   finding matching no class is handled by adding its class. On every raise,
   re-match the ledger's past triage records — findings that now match return
@@ -69,6 +87,18 @@ loop, never the owner.
   Whether a fix commit actually removed its target finding is always in
   scope for the next pass. Defects unrelated to the new diff are filed as
   issues immediately, even above-bar-grade ones, and do not block this PR.
+- A fix that changes a documented behavior or semantic — or the wording
+  that describes one — must, in the same commit, align every live copy
+  of that description repo-wide. The sweep is a grep, not a full read:
+  search the repository for the description's key phrases and a few
+  likely variants, in every natural language the repo writes in (e.g.
+  English rules, Korean docstrings), including non-markdown vessels
+  (docstrings, comments, skills, templates), then align the hits that
+  are copies of that description — historical records (changelogs,
+  release notes) and vendored third-party code are exempt. A surviving
+  sibling copy is a recurrence waiting to happen. (Measured: PR #86
+  fixed one README line while a second copy in the same file returned as
+  the next round's finding.)
 
 ## Ledger
 
@@ -86,7 +116,15 @@ filed) unless it carries new evidence, which makes it a normal finding.
 
 ## Triage lanes
 
-Only above-bar findings re-enter the loop as in-PR fixes. Below-bar findings
+Only above-bar findings re-enter the loop as in-PR fixes, with one narrow
+exception: a below-bar prose finding may ride an above-bar fix commit
+when the fix independently requires touching the finding's subject —
+same function, same comment block, same table row or list item;
+everything else waits for round-end disposition. A ridden finding is
+recorded in the ledger under its fix, not filed as an issue. Bundled
+prose is part of the next round's review surface, and unrelated bundling
+slows convergence. (Measured: a comment bundled into a PR #86 fix commit
+became the next round's finding.) Below-bar findings
 with a verified failure scenario or a concrete improvement are filed as
 issues per the issue-workflow rule — bundled by defect class, at round end,
 with provenance (PR, round) and the verified scenario. Style preferences and
@@ -110,11 +148,24 @@ The escalation report follows the checkpoint format plus: a classification
 of what grew (defects introduced by the fix / previously masked defects now
 exposed / a bar raise changing the counting basis) and a fix-altitude
 diagnosis (repeat instance fixes / class-level defense / structural
-redesign). In that diagnosis, "write the prose more precisely" counts as a
-repeat instance fix, not a class defense (PR #75 rewrote prose four rounds
-in a row, each recurrence one layer down; the class closed only when the
-convention moved into a test). The trigger mandates the diagnosis, never a
-particular remedy.
+redesign / declared scope boundary). In that diagnosis, "write the prose
+more precisely" counts as a repeat instance fix, not a class defense (PR
+#75 rewrote prose four rounds in a row, each recurrence one layer down;
+the class closed only when the convention moved into a test). A declared
+scope boundary applies when the defect class lies outside what the
+artifact under review is meant to defend — because the artifact cannot
+detect or prevent the class by its own means, or because reaching it
+requires a deliberate, PR-visible act (Severity bar, accident test); the
+class may still be reachable in the world. Closing it means proposing a
+trade-off (the owner decides, per the Ledger section) and, once
+accepted, writing the boundary into that artifact's own documentation
+(docstring, README entry), citing the accepting decision (PR or issue
+link) — prose exactly as wide as the actual defense. Later findings of
+the class close at triage on the Ledger section's terms only when that
+citation is present; new evidence makes them normal findings again.
+(PR #86 chased one class down four layers — regex boundary → token →
+shell control flow → YAML conditionals — and closed it only this way.)
+The trigger mandates the diagnosis, never a particular remedy.
 
 ## Checkpoint
 
