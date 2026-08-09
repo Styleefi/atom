@@ -16,10 +16,9 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
    안에서 규칙 id에서 도출한 harness 모듈(`harness.<id의 -를 _로>`)을 `-m`으로
    참조하는 커맨드가 1개 이상이고, 참조하는 모든 커맨드가 `blocking`
    frontmatter가 고르는 정본 래퍼 템플릿과 정확히 일치하며, 그 harness
-   패키지가 실제 존재하고 `__init__.py`(인벤토리 분류가 기준 삼는 메타층
-   패키지 규약)·`__main__.py`(`python -m` 진입점 — 없으면 침묵 no-op)를
-   갖췄는지(#31 — uv 자체 오류의 exit 2가 차단으로 새지 않는 배선 강제,
-   #38). skill 그릇:
+   패키지가 실제 존재하고 `__init__.py`·`__main__.py`를 갖췄는지(#31 —
+   uv 자체 오류의 exit 2가 차단으로 새지 않는 배선 강제, #38. 두 파일
+   요구의 근거는 검사 지점 주석이 SSOT). skill 그릇:
    deployed-to가 `.claude/skills/` 아래의 SKILL.md이고 그 SKILL.md가
    `meta/rules/<파일명>`을 참조하는지 (규칙 본문의 SSOT는 meta/rules/,
    SKILL.md는 참조만 한다는 v1 규약).
@@ -524,20 +523,20 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
                 f"'meta/harness/{package_name}/' does not exist"
             )
         else:
-            # 두 파일의 요구 근거는 다르다(#38, R1 리뷰에서 진단 정정).
+            # 두 파일 요구의 근거 서술은 여기가 SSOT다(#38; PR #92 R2에서
+            # 표면 축소 — 인과 주장을 여러 문서에 복제하다 두 번 과장됐다).
             # __main__.py 부재는 `python -m` 진입점 부재 — 훅이 래퍼 아래에서
-            # 조용히 no-op이 된다. __init__.py는 실행 요건이 아니라(namespace
-            # 패키지도 -m으로 돌아간다 — meta/harness 자체가 그렇다) 인벤토리
-            # 분류가 기준 삼는 메타층 패키지 규약 — 없으면 vessel 검사는
-            # 초록인데 인벤토리에는 안 보이는 모순이 생긴다. 파일 실존만
+            # 조용히 no-op이 된다(셸 실험으로 검증). __init__.py는 실행
+            # 요건이 아니다 — namespace 패키지도 -m으로 돌아가고 meta/harness
+            # 자체가 __init__.py 없이 돈다 — 모든 meta/harness 패키지를
+            # regular package로 통일하는 메타층 규약일 뿐이다. 파일 실존만
             # 본다(빈 파일 통과는 문서화된 한계 — 임포트 오류는 pytest 몫).
             # 디렉토리 부재 시엔 위 위반 하나로 충분해 파일 검사를 걸지 않는다.
             if not (package_dir / "__init__.py").is_file():
                 violations.append(
                     f"{rel}: hook harness package "
                     f"'meta/harness/{package_name}/' is missing __init__.py "
-                    "— required by the meta-layer package convention; without "
-                    "it the inventory coverage check cannot see the package"
+                    "— required by the meta-layer package convention"
                 )
             if not (package_dir / "__main__.py").is_file():
                 violations.append(

@@ -497,7 +497,7 @@ def test_hook_rule_without_harness_package(tmp_path: Path) -> None:
 
 
 def test_hook_package_without_init_is_rejected(tmp_path: Path) -> None:
-    # #38: __init__.py 없는 패키지는 python -m이 못 돌리는 침묵 no-op이다.
+    # #38: __init__.py는 메타층 패키지 규약 — 근거 서술의 SSOT는 검사 지점 주석.
     root = make_repo(tmp_path)
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
     make_hook_deployment(root, "my-guard", hook_settings(canonical_command("harness.my_guard")))
@@ -508,7 +508,7 @@ def test_hook_package_without_init_is_rejected(tmp_path: Path) -> None:
 
 
 def test_hook_package_without_main_is_rejected(tmp_path: Path) -> None:
-    # __init__.py만으로는 python -m 진입점이 없다 — 같은 침묵 no-op 부류.
+    # __main__.py 없으면 python -m 진입점이 없어 훅이 조용히 no-op이 된다.
     root = make_repo(tmp_path)
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
     make_hook_deployment(root, "my-guard", hook_settings(canonical_command("harness.my_guard")))
