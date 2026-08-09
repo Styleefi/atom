@@ -16,9 +16,10 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
    안에서 규칙 id에서 도출한 harness 모듈(`harness.<id의 -를 _로>`)을 `-m`으로
    참조하는 커맨드가 1개 이상이고, 참조하는 모든 커맨드가 `blocking`
    frontmatter가 고르는 정본 래퍼 템플릿과 정확히 일치하며, 그 harness
-   패키지가 실제 존재하고 `__init__.py`·`__main__.py`를 갖춰 `python -m`
-   실행이 가능한지(#31 — uv 자체 오류의 exit 2가 차단으로 새지 않는 배선
-   강제, #38 — 실행 불가 패키지의 침묵 no-op 차단). skill 그릇:
+   패키지가 실제 존재하고 `__init__.py`(인벤토리 분류가 기준 삼는 메타층
+   패키지 규약)·`__main__.py`(`python -m` 진입점 — 없으면 침묵 no-op)를
+   갖췄는지(#31 — uv 자체 오류의 exit 2가 차단으로 새지 않는 배선 강제,
+   #38). skill 그릇:
    deployed-to가 `.claude/skills/` 아래의 SKILL.md이고 그 SKILL.md가
    `meta/rules/<파일명>`을 참조하는지 (규칙 본문의 SSOT는 meta/rules/,
    SKILL.md는 참조만 한다는 v1 규약).
@@ -523,18 +524,27 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
                 f"'meta/harness/{package_name}/' does not exist"
             )
         else:
-            # 디렉토리만으로는 실행 불가 — __init__.py 없는 패키지는 임포트
-            # 불가, __main__.py 없으면 `python -m` 진입점이 없어 훅이 래퍼
-            # 아래에서 조용히 no-op이 된다(#38). 파일 실존만 본다(빈 파일
-            # 통과는 문서화된 한계 — 임포트 오류는 pytest 몫). 디렉토리
-            # 부재 시엔 위 위반 하나로 충분해 파일 검사를 걸지 않는다.
-            for artifact in ("__init__.py", "__main__.py"):
-                if not (package_dir / artifact).is_file():
-                    violations.append(
-                        f"{rel}: hook harness package "
-                        f"'meta/harness/{package_name}/' is missing {artifact} "
-                        "— `python -m` cannot run it, so the hook silently no-ops"
-                    )
+            # 두 파일의 요구 근거는 다르다(#38, R1 리뷰에서 진단 정정).
+            # __main__.py 부재는 `python -m` 진입점 부재 — 훅이 래퍼 아래에서
+            # 조용히 no-op이 된다. __init__.py는 실행 요건이 아니라(namespace
+            # 패키지도 -m으로 돌아간다 — meta/harness 자체가 그렇다) 인벤토리
+            # 분류가 기준 삼는 메타층 패키지 규약 — 없으면 vessel 검사는
+            # 초록인데 인벤토리에는 안 보이는 모순이 생긴다. 파일 실존만
+            # 본다(빈 파일 통과는 문서화된 한계 — 임포트 오류는 pytest 몫).
+            # 디렉토리 부재 시엔 위 위반 하나로 충분해 파일 검사를 걸지 않는다.
+            if not (package_dir / "__init__.py").is_file():
+                violations.append(
+                    f"{rel}: hook harness package "
+                    f"'meta/harness/{package_name}/' is missing __init__.py "
+                    "— required by the meta-layer package convention; without "
+                    "it the inventory coverage check cannot see the package"
+                )
+            if not (package_dir / "__main__.py").is_file():
+                violations.append(
+                    f"{rel}: hook harness package "
+                    f"'meta/harness/{package_name}/' is missing __main__.py "
+                    "— `python -m` has no entry point, so the hook silently no-ops"
+                )
         return violations
 
     # claude-md 그릇의 대상 고정(#38)은 raw 문자열 검사라 파일 존재·경로
