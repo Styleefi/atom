@@ -1241,6 +1241,26 @@ def test_orphan_import_on_both_sides_is_reported(tmp_path: Path) -> None:
     assert all("orphan rule import '@meta/rules/ghost.md'" in v for v in violations)
 
 
+def test_traversal_import_is_orphan(tmp_path: Path) -> None:
+    # 리뷰 R1: ..로 meta/rules/ 밖 실존 파일을 가리키는 import는 파일 존재
+    # 검사를 통과했었다 — 레지스트리 대조는 통과시키지 않는다.
+    root = make_repo(tmp_path)
+    deploy_claude_md(root, "@meta/rules/../../CLAUDE.md")
+    violations = check_rules(root)
+    assert len(violations) == 2
+    assert all("orphan rule import" in v for v in violations)
+
+
+def test_non_rule_file_import_is_orphan(tmp_path: Path) -> None:
+    # 리뷰 R1: meta/rules/README.md는 실존하지만 규칙이 아니다.
+    root = make_repo(tmp_path)
+    write_rule(root, "README.md", "# not a rule\n")
+    deploy_claude_md(root, "@meta/rules/README.md")
+    violations = check_rules(root)
+    assert len(violations) == 2
+    assert all("orphan rule import" in v for v in violations)
+
+
 def test_missing_template_is_reported(tmp_path: Path) -> None:
     # #38: 템플릿 부재의 유일한 감시자가 이 검사다 — 초록 통과 금지.
     root = make_repo(tmp_path)

@@ -30,8 +30,10 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
   이 실존하고(부재는 위반 — 템플릿은 이 검사가 유일한 감시자다, #38) 두 파일의
   **활성** `@meta/rules/` import 집합이 동일한지 — 수동 동기화 지점의 침묵
   드리프트를 양방향으로 차단한다. skill 참조 검사도 같은 스캐너의 활성
-  텍스트에서만 substring을 본다. 활성 import가 가리키는 규칙 파일의 실존도
-  파일별로 확인한다(#91 — 지워진 규칙의 고아 import가 양쪽에 남는 침묵 채널).
+  텍스트에서만 substring을 본다. 활성 import가 규칙 레지스트리(meta/rules/)의
+  실제 규칙과 대응하는지도 파일별로 확인한다(#91 — 지워진 규칙의 고아
+  import가 양쪽에 남는 침묵 채널. 파일 실존이 아니라 레지스트리 대조라
+  `..` 관통·비규칙 파일 대상도 고아다).
 - hook 배선 역방향 스윕: 프로젝트 설정 파일(.claude/settings*.json — hook
   규칙이 없어도 무조건)과 hook 규칙들의 deployed-to에 있는 모든 훅 커맨드 중
   `-m harness.*`를 참조하는 것이 두 정본 래퍼 템플릿 중 하나와 정확히
@@ -650,16 +652,19 @@ def check_template_sync(root: Path) -> list[str]:
         )
 
     # 고아 import 역방향 스윕(#91): 규칙 파일이 지워졌는데 import가 양쪽에
-    # 남으면 규칙 순회도 sync 비교도 침묵한다 — import가 가리키는 규칙의
-    # 실존을 파일별로 확인한다(check_hook_wiring과 같은 역방향 패턴).
+    # 남으면 규칙 순회도 sync 비교도 침묵한다 — 각 import를 규칙 레지스트리
+    # (rule_files)와 대조한다(check_hook_wiring과 같은 역방향 패턴). 파일
+    # 실존 검사가 아니라 집합 대조인 이유(R1 리뷰): `..` 관통 경로나
+    # README.md처럼 "실존하지만 규칙이 아닌" 대상이 통과하면 #91의 구멍이
+    # 그대로 다시 열린다.
+    valid_imports = {f"@meta/rules/{path.name}" for path in rule_files(root)}
     for source, imports in ((claude_md, root_imports), (template, template_imports)):
         source_rel = source.relative_to(root)
-        for imported in sorted(imports):
-            if not (root / imported.lstrip("@")).is_file():
-                violations.append(
-                    f"{source_rel}: orphan rule import '{imported}' — the rule "
-                    "file does not exist; remove the import or restore the rule"
-                )
+        for imported in sorted(imports - valid_imports):
+            violations.append(
+                f"{source_rel}: orphan rule import '{imported}' — no such rule "
+                "in meta/rules/; remove the import or restore the rule"
+            )
     return violations
 
 
