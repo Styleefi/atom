@@ -147,6 +147,33 @@ def rule_files(root: Path) -> list[Path]:
     return [path for path in sorted(rules_dir.glob("*.md")) if path.name != "README.md"]
 
 
+class _StrictLoader(yaml.SafeLoader):
+    """중복 매핑 키를 오류로 거부하는 SafeLoader(#38).
+
+    yaml.safe_load의 last-win 시맨틱은 `enforce: hook` 뒤의
+    `enforce: claude-md`를 조용히 claude-md로 검증한다 — 파일을 읽는 사람이
+    보는 선언과 checker의 판정이 어긋나는 침묵 통과. 중복 검사는
+    construct_object 호출 없이 스칼라 key 노드의 raw 값 비교로(노드 이중
+    평가 배제 — frontmatter 키는 항상 평문 스칼라), flatten_mapping이
+    node.value를 변형하기 전인 super() 호출 앞에서 수행한다. merge key
+    (`<<`)로 병합돼 들어온 키와 명시 키의 충돌은 미감지 — 문서화된 한계.
+    """
+
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict:
+        seen: set[str] = set()
+        for key_node, _value_node in node.value:
+            if isinstance(key_node, yaml.ScalarNode):
+                if key_node.value in seen:
+                    raise yaml.constructor.ConstructorError(
+                        "while constructing a mapping",
+                        node.start_mark,
+                        f"found duplicate key {key_node.value!r}",
+                        key_node.start_mark,
+                    )
+                seen.add(key_node.value)
+        return super().construct_mapping(node, deep)
+
+
 def parse_frontmatter(text: str) -> tuple[dict | None, str | None]:
     """마크다운 본문에서 YAML frontmatter를 파싱한다.
 
@@ -163,7 +190,7 @@ def parse_frontmatter(text: str) -> tuple[dict | None, str | None]:
     if end == -1:
         return None, "unterminated frontmatter (closing '---' not found)"
     try:
-        data = yaml.safe_load(text[4:end])
+        data = yaml.load(text[4:end], Loader=_StrictLoader)
     except yaml.YAMLError as exc:
         return None, f"invalid YAML in frontmatter: {exc}"
     if not isinstance(data, dict):

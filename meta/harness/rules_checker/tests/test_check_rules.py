@@ -228,6 +228,35 @@ def test_broken_yaml_reported_not_raised(tmp_path: Path) -> None:
     assert "invalid YAML" in violations[0]
 
 
+def test_duplicate_frontmatter_key_is_rejected(tmp_path: Path) -> None:
+    # #38: safe_load의 last-win은 사람이 보는 선언과 checker 판정을 어긋나게
+    # 한다(enforce: hook 뒤 enforce: claude-md가 claude-md로 침묵 통과).
+    root = make_repo(tmp_path)
+    write_rule(
+        root,
+        "my-rule.md",
+        "---\nid: my-rule\ntier: convention\nenforce: hook\n"
+        "enforce: claude-md\ndeployed-to: CLAUDE.md\n---\n\nbody\n",
+    )
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "invalid YAML in frontmatter" in violations[0]
+    assert "enforce" in violations[0]
+
+
+def test_anchor_alias_frontmatter_still_parses(tmp_path: Path) -> None:
+    # 커스텀 로더가 표준 YAML 기능(앵커/별칭)을 깨지 않는지 방어 핀.
+    root = make_repo(tmp_path)
+    write_rule(
+        root,
+        "my-rule.md",
+        "---\nid: &a my-rule\ntier: convention\nenforce: claude-md\n"
+        "deployed-to: CLAUDE.md\nnote: *a\n---\n\nbody\n",
+    )
+    deploy_claude_md(root, "@meta/rules/my-rule.md")
+    assert check_rules(root) == []
+
+
 def test_id_filename_mismatch(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "actual-name.md", valid_rule("other-name"))
