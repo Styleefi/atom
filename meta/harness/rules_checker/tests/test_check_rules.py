@@ -1190,9 +1190,10 @@ def test_template_stale_import(tmp_path: Path) -> None:
     deploy_claude_md(root, "@meta/rules/my-rule.md")
     write_template(root, "@meta/rules/my-rule.md\n@meta/rules/removed-rule.md\n")
     violations = check_rules(root)
-    assert len(violations) == 1
-    assert "'@meta/rules/removed-rule.md'" in violations[0]
-    assert "stale" in violations[0]
+    # 지워진 규칙의 잔존 import는 드리프트(stale)이자 고아(#91)다.
+    assert len(violations) == 2
+    assert any("stale" in v and "'@meta/rules/removed-rule.md'" in v for v in violations)
+    assert any("orphan rule import" in v for v in violations)
 
 
 def test_template_fenced_import_counts_as_missing(tmp_path: Path) -> None:
@@ -1218,6 +1219,26 @@ def test_root_commented_import_counts_as_stale(tmp_path: Path) -> None:
     assert len(violations) == 2
     assert any("declared but not actually deployed" in v for v in violations)
     assert any("absent from root" in v for v in violations)
+
+
+def test_orphan_import_in_root_is_reported(tmp_path: Path) -> None:
+    # #91: 실존 규칙이 없는 import는 고아다 — 드리프트와 별개로 보고.
+    root = make_repo(tmp_path)
+    (root / "CLAUDE.md").write_text("@meta/rules/ghost.md\n", encoding="utf-8")
+    violations = check_rules(root)
+    assert len(violations) == 2
+    assert any("orphan rule import '@meta/rules/ghost.md'" in v for v in violations)
+    assert any("missing" in v for v in violations)
+
+
+def test_orphan_import_on_both_sides_is_reported(tmp_path: Path) -> None:
+    # #91의 침묵 케이스: 양쪽에 남은 고아는 sync가 통과시킨다 — 고아 검사만이
+    # 잡는다. 파일별 보고라 2건(복붙 수정 가능 메시지 관례).
+    root = make_repo(tmp_path)
+    deploy_claude_md(root, "@meta/rules/ghost.md")
+    violations = check_rules(root)
+    assert len(violations) == 2
+    assert all("orphan rule import '@meta/rules/ghost.md'" in v for v in violations)
 
 
 def test_missing_template_is_reported(tmp_path: Path) -> None:

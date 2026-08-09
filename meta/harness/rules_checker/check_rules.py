@@ -646,6 +646,18 @@ def check_template_sync(root: Path) -> list[str]:
             f"{TEMPLATE_PATH}: contains '{stale}' absent from root CLAUDE.md "
             "— remove the stale import from the INHERITED FROM ATOM block"
         )
+
+    # 고아 import 역방향 스윕(#91): 규칙 파일이 지워졌는데 import가 양쪽에
+    # 남으면 규칙 순회도 sync 비교도 침묵한다 — import가 가리키는 규칙의
+    # 실존을 파일별로 확인한다(check_hook_wiring과 같은 역방향 패턴).
+    for source, imports in ((claude_md, root_imports), (template, template_imports)):
+        source_rel = source.relative_to(root)
+        for imported in sorted(imports):
+            if not (root / imported.lstrip("@")).is_file():
+                violations.append(
+                    f"{source_rel}: orphan rule import '{imported}' — the rule "
+                    "file does not exist; remove the import or restore the rule"
+                )
     return violations
 
 
