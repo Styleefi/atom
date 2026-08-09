@@ -55,9 +55,10 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-# 허용되는 배포 그릇. 검증 로직이 구현된 그릇만 통과 대상이다.
+# 허용되는 배포 그릇. 검증 미구현 그릇이 여기 추가되면 check_rule_file의
+# else 분기가 통과 대신 거부한다 — 그 분기가 "검증 없는 vessel 금지"의
+# 실제 가드다(#38에서 동일 내용의 죽은 상수 VERIFIABLE_ENFORCE 제거).
 VALID_ENFORCE = {"claude-md", "skill", "hook"}
-VERIFIABLE_ENFORCE = {"claude-md", "skill", "hook"}
 
 # 규칙 등급: principle(원칙 — 충돌 시 우선, 개정 문턱 높음) | convention(세칙).
 VALID_TIER = {"principle", "convention"}
