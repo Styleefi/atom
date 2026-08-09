@@ -106,10 +106,11 @@ def write_rule(root: Path, name: str, body: str) -> Path:
 
 
 def make_harness_package(root: Path, name: str) -> None:
-    """import 가능한 하니스 패키지 디렉토리를 만든다."""
+    """import·`python -m` 실행이 가능한 하니스 패키지 디렉토리를 만든다."""
     package = root / "meta" / "harness" / name
     package.mkdir(parents=True, exist_ok=True)
     (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "__main__.py").write_text("", encoding="utf-8")
 
 
 def make_infra_stack(root: Path, name: str) -> None:
@@ -379,10 +380,10 @@ def canonical_command(module: str, blocking: bool = True) -> str:
 
 
 def make_hook_deployment(root: Path, rule_id: str, settings_text: str) -> None:
-    """hook 규칙의 배포 대상(settings + harness 패키지)을 만든다."""
+    """hook 규칙의 배포 대상(settings + 실행 가능한 harness 패키지)을 만든다."""
     (root / ".claude").mkdir()
     (root / ".claude" / "settings.json").write_text(settings_text, encoding="utf-8")
-    (root / "meta" / "harness" / rule_id.replace("-", "_")).mkdir(parents=True)
+    make_harness_package(root, rule_id.replace("-", "_"))
 
 
 def test_valid_hook_rule_passes(tmp_path: Path) -> None:
@@ -433,6 +434,28 @@ def test_hook_rule_without_harness_package(tmp_path: Path) -> None:
     assert len(violations) == 1
     assert "does not exist" in violations[0]
     assert "meta/harness/my_guard/" in violations[0]
+
+
+def test_hook_package_without_init_is_rejected(tmp_path: Path) -> None:
+    # #38: __init__.py 없는 패키지는 python -m이 못 돌리는 침묵 no-op이다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    make_hook_deployment(root, "my-guard", hook_settings(canonical_command("harness.my_guard")))
+    (root / "meta" / "harness" / "my_guard" / "__init__.py").unlink()
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "__init__.py" in violations[0]
+
+
+def test_hook_package_without_main_is_rejected(tmp_path: Path) -> None:
+    # __init__.py만으로는 python -m 진입점이 없다 — 같은 침묵 no-op 부류.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    make_hook_deployment(root, "my-guard", hook_settings(canonical_command("harness.my_guard")))
+    (root / "meta" / "harness" / "my_guard" / "__main__.py").unlink()
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "__main__.py" in violations[0]
 
 
 def test_hook_rule_with_legacy_exec_command_fails(tmp_path: Path) -> None:
