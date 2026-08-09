@@ -26,6 +26,8 @@ from harness.rules_checker.check_rules import (
     HOOK_COMMAND_BLOCKING,
     HOOK_COMMAND_NON_BLOCKING,
     INVENTORY_ROW_RE,
+    _active_lines,
+    _import_lines,
     check_rules,
     find_repo_root,
 )
@@ -268,6 +270,68 @@ def test_claude_md_absolute_variant_is_rejected(tmp_path: Path) -> None:
     assert len(violations) == 2
     assert any("exactly 'CLAUDE.md'" in v for v in violations)
     assert any("repo-root-relative" in v for v in violations)
+
+
+# 활성 줄 스캐너의 동결 문법 코퍼스(#38, PR #75의 _SEGMENT_CORPUS 패턴).
+# 각 항목: (텍스트, imp가 활성 독립 import로 인정되는가, 라벨). 라벨은 실패
+# 메시지용이자 케이스의 계약 설명이다 — 모델 밖 구문 확장 요구는 결함이
+# 아니라 문서화된 한계로 triage한다(스캐너 docstring 참조).
+_SCANNER_IMP = "@meta/rules/my-rule.md"
+_SCANNER_CORPUS = [
+    (f"{_SCANNER_IMP}\n", True, "독립 활성 줄은 인정"),
+    (f"# head\n\n{_SCANNER_IMP}\n", True, "다른 활성 줄과 공존해도 인정"),
+    (f"<!-- {_SCANNER_IMP} -->\n", False, "단일 줄 주석 속은 불인정"),
+    ("@meta/rules/my<!-- x -->-rule.md\n", False, "스팬 공백 치환이 토큰 융합 차단"),
+    (f"<!--\n{_SCANNER_IMP}\n-->\n", False, "여러 줄 주석 속은 불인정"),
+    (f"<!-- start\n{_SCANNER_IMP}\nend -->\n{_SCANNER_IMP}\n", True, "주석 종료 후 독립 줄은 활성"),
+    (f"<!--\nc\n-->{_SCANNER_IMP}\n", False, "닫는 줄 잔여는 활성이나 독립 줄은 아님"),
+    (f"```\n{_SCANNER_IMP}\n```\n", False, "``` 펜스 속은 불인정"),
+    (f"```python\n{_SCANNER_IMP}\n```\n", False, "info string 펜스도 동일"),
+    (f"~~~\n{_SCANNER_IMP}\n~~~\n", False, "~~~ 펜스 속은 불인정"),
+    (f"```\nx\n~~~\n{_SCANNER_IMP}\n```\n", False, "~~~는 ``` 펜스를 닫지 못함"),
+    (f"```\n{_SCANNER_IMP}\n", False, "미종결 펜스는 EOF까지 비활성(fail-safe)"),
+    (f"<!--\n```\n-->\n{_SCANNER_IMP}\n", True, "주석 안 펜스 마커는 펜스를 열지 않음"),
+    (f"```\n<!--\n```\n{_SCANNER_IMP}\n", True, "펜스 안 <!--는 주석으로 전이하지 않음"),
+    (f"    {_SCANNER_IMP}\n", False, "들여쓰기 줄(코드 블록)은 불인정"),
+    (f"see {_SCANNER_IMP} in\n", False, "인라인 언급은 불인정"),
+    (f"{_SCANNER_IMP}@meta/rules/other.md\n", False, "무공백 연접은 불일치로 수렴"),
+]
+
+
+def test_active_import_scanner_corpus() -> None:
+    for text, expected, label in _SCANNER_CORPUS:
+        assert (_SCANNER_IMP in _import_lines(text)) == expected, label
+
+
+def test_scanner_same_line_comment_keeps_remainder_active() -> None:
+    # 같은 줄 개폐 주석은 스팬만 죽고 앞뒤 텍스트는 활성으로 남는다.
+    joined = "\n".join(_active_lines("a <!-- x --> b"))
+    assert "a" in joined and "b" in joined
+    assert "x" not in joined
+
+
+def test_claude_md_fenced_import_is_not_deployed(tmp_path: Path) -> None:
+    # #38 지점 배선(probe p2b 승격): 펜스 속 import는 배포가 아니다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    (root / "CLAUDE.md").write_text(
+        "```\n@meta/rules/my-rule.md\n```\n", encoding="utf-8"
+    )
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "declared but not actually deployed" in violations[0]
+
+
+def test_claude_md_commented_import_is_not_deployed(tmp_path: Path) -> None:
+    # #38 지점 배선(probe p2a 승격): 주석 처리된 import는 배포가 아니다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    (root / "CLAUDE.md").write_text(
+        "<!-- @meta/rules/my-rule.md -->\n", encoding="utf-8"
+    )
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "declared but not actually deployed" in violations[0]
 
 
 def test_unverifiable_vessels_are_rejected(
@@ -967,6 +1031,16 @@ def test_skill_rule_without_reference(tmp_path: Path) -> None:
     assert "meta/rules/my-style.md" in violations[0]
 
 
+def test_skill_commented_reference_is_not_deployed(tmp_path: Path) -> None:
+    # #38 지점 배선(probe p2d 승격): 주석 속 참조는 배포가 아니다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-style.md", skill_rule("my-style"))
+    make_skill_deployment(root, "my-skill", "<!-- meta/rules/my-style.md -->\n")
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "does not reference" in violations[0]
+
+
 def write_template(root: Path, text: str) -> None:
     """child 템플릿 파일을 만든다."""
     template = root / "meta" / "templates" / "CLAUDE.template.md"
@@ -1001,6 +1075,31 @@ def test_template_stale_import(tmp_path: Path) -> None:
     assert len(violations) == 1
     assert "'@meta/rules/removed-rule.md'" in violations[0]
     assert "stale" in violations[0]
+
+
+def test_template_fenced_import_counts_as_missing(tmp_path: Path) -> None:
+    # #38 지점 배선(probe p2c 승격): 템플릿 쪽 펜스 속 import는 집합에 없다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    write_template(root, "```\n@meta/rules/my-rule.md\n```\n")
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "missing '@meta/rules/my-rule.md'" in violations[0]
+
+
+def test_root_commented_import_counts_as_stale(tmp_path: Path) -> None:
+    # #38 지점 배선(반대 방향): 루트 쪽이 주석이면 규칙 미배포 + 템플릿 stale.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    (root / "CLAUDE.md").write_text(
+        "<!-- @meta/rules/my-rule.md -->\n", encoding="utf-8"
+    )
+    write_template(root, "@meta/rules/my-rule.md\n")
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("declared but not actually deployed" in v for v in violations)
+    assert any("absent from root" in v for v in violations)
 
 
 @pytest.mark.parametrize(

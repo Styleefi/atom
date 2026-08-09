@@ -10,7 +10,9 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
 4. deployed-to가 저장소 내 상대 경로이고 대상 파일이 실제 존재하는지
 5. 실배포 확인 — claude-md 그릇: deployed-to가 정확히 `CLAUDE.md`(루트 —
    유일한 claude-md vessel, raw 문자열 비교라 './CLAUDE.md' 같은 동치 표기도
-   거부)이고, 그 파일이 `@meta/rules/<파일명>` import를 실제로 포함하는지. hook 그릇(v2): deployed-to(settings JSON)의 hooks 구조
+   거부)이고, 그 파일이 `@meta/rules/<파일명>` import를 **활성 독립 줄**로
+   포함하는지(#38 — 주석/펜스 속 import는 로드되지 않으므로 배포가 아니다,
+   _active_lines 동결 스캐너 참조). hook 그릇(v2): deployed-to(settings JSON)의 hooks 구조
    안에서 규칙 id에서 도출한 harness 모듈(`harness.<id의 -를 _로>`)을 `-m`으로
    참조하는 커맨드가 1개 이상이고, 참조하는 모든 커맨드가 `blocking`
    frontmatter가 고르는 정본 래퍼 템플릿과 정확히 일치하며, 그 harness
@@ -24,8 +26,9 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
 규칙 단위 검사와 별개로 repo-level 검사를 셋 수행한다.
 
 - 템플릿 동기화: root CLAUDE.md와 child 템플릿(meta/templates/CLAUDE.template.md)
-  의 `@meta/rules/` import 집합이 동일한지 — 수동 동기화 지점의 침묵 드리프트를
-  양방향으로 차단한다.
+  의 **활성** `@meta/rules/` import 집합이 동일한지 — 수동 동기화 지점의 침묵
+  드리프트를 양방향으로 차단한다. skill 참조 검사도 같은 스캐너의 활성
+  텍스트에서만 substring을 본다.
 - hook 배선 역방향 스윕: 프로젝트 설정 파일(.claude/settings*.json — hook
   규칙이 없어도 무조건)과 hook 규칙들의 deployed-to에 있는 모든 훅 커맨드 중
   `-m harness.*`를 참조하는 것이 두 정본 래퍼 템플릿 중 하나와 정확히
@@ -89,7 +92,9 @@ HOOK_COMMAND_NON_BLOCKING = (
 # 표면화되고, unruled는 bash -c 간접 실행과 같은 기존 잔여 클래스.
 _HOOK_MODULE_RE = re.compile(r"(?<!\S)-m\s*(harness\.\w+(?:\.\w+)*)")
 
-# CLAUDE.md/템플릿에서 규칙 import 줄을 뽑는 패턴.
+# 규칙 import 토큰의 형태. _import_lines가 활성 줄에 fullmatch로 적용한다 —
+# findall substring이 아니라 줄 전체 일치라, 인라인 언급·주석/펜스 속 토큰은
+# import로 인정되지 않는다(#38).
 IMPORT_RE = re.compile(r"@meta/rules/\S+\.md")
 
 TEMPLATE_PATH = Path("meta") / "templates" / "CLAUDE.template.md"
@@ -163,6 +168,102 @@ def parse_frontmatter(text: str) -> tuple[dict | None, str | None]:
     if not isinstance(data, dict):
         return None, "frontmatter is not a mapping (key: value)"
     return data, None
+
+
+def _strip_comment_spans(line: str) -> tuple[str, bool]:
+    """한 줄에서 같은 줄 개폐 HTML 주석 스팬을 공백 한 칸으로 치환한다.
+
+    빈 문자열 치환은 스팬 앞뒤 토큰을 융합시켜(`@meta/rules/a<!-- -->b.md`)
+    없던 import를 만들어내므로 금지 — 공백 치환은 위반 쪽으로 넘어지는
+    fail-safe다. 닫히지 않은 `<!--`는 그 위치부터 줄 끝을 잘라낸다.
+
+    Args:
+        line: 처리할 한 줄(활성 문맥).
+
+    Returns:
+        (치환된 줄, 미종결 주석이 열렸는지) 튜플.
+    """
+    out = line
+    while True:
+        start = out.find("<!--")
+        if start == -1:
+            return out, False
+        end = out.find("-->", start + 4)
+        if end == -1:
+            return out[:start], True
+        out = out[:start] + " " + out[end + 3 :]
+
+
+def _active_lines(text: str) -> list[str]:
+    """checker가 배포로 인정하는 '활성' 줄만 남기는 동결 스캐너.
+
+    정답 기준은 Claude Code 로더의 근사가 아니라 checker가 규정하는 유효
+    배포 형태다(#38). 모델링하는 문법: ```/~~~ 코드 펜스(선행 공백·info
+    string 허용, 같은 마커끼리만 닫힘)와 HTML 주석(여러 줄 가능). 상호작용
+    규칙은 하나 — 먼저 열린 쪽이 자기 닫힘까지 소유한다(펜스 안 `<!--`는
+    리터럴, 주석 안 펜스 마커는 비활성). 미종결 펜스·주석은 EOF까지
+    비활성(fail-safe). 여러 줄 주석의 닫는 줄 잔여 텍스트는 활성이지만
+    선행 공백을 붙여 독립 import 줄로는 인정되지 않게 한다.
+
+    모델 밖(문서화된 한계 — #66/#75式 문법 확장 경쟁을 막기 위해 동결):
+    인라인 코드 스팬, 인용구/리스트 속 펜스, 펜스 마커 길이 매칭. 들여쓰기
+    코드 블록은 import 검사에서는 _import_lines의 선행 공백 불허가 함께
+    닫지만, skill substring 검사에는 잔존한다.
+
+    Args:
+        text: 대상 파일 전체 내용.
+
+    Returns:
+        활성 줄 목록(주석 스팬은 공백 치환된 상태).
+    """
+    active: list[str] = []
+    state: str | None = None  # None | "```" | "~~~" | "comment"
+    for line in text.splitlines():
+        if state in ("```", "~~~"):
+            if line.lstrip().startswith(state):
+                state = None
+            continue
+        if state == "comment":
+            end = line.find("-->")
+            if end == -1:
+                continue
+            state = None
+            rest, opened = _strip_comment_spans(line[end + 3 :])
+            if opened:
+                state = "comment"
+            active.append(" " + rest)
+            continue
+        marker = line.lstrip()[:3]
+        if marker in ("```", "~~~"):
+            state = marker
+            continue
+        processed, opened = _strip_comment_spans(line)
+        if opened:
+            state = "comment"
+        active.append(processed)
+    return active
+
+
+def _import_lines(text: str) -> set[str]:
+    """활성 줄 중 독립 `@meta/rules/<file>.md` import 줄의 집합을 뽑는다.
+
+    선행 공백 불허(rstrip만 허용) — 들여쓰기 코드 블록 속 import가 인정되는
+    fail-open을 스캐너 확장 없이 닫는다. 무공백 연접(`...a.md@meta/...b.md`)
+    은 IMPORT_RE fullmatch를 통과하지만 융합 토큰이라 어떤 정확 import와도
+    불일치 — 검사가 위반 쪽으로 수렴한다.
+
+    Args:
+        text: 대상 파일 전체 내용.
+
+    Returns:
+        활성 독립 import 줄의 집합.
+    """
+    imports: set[str] = set()
+    for line in _active_lines(text):
+        candidate = line.rstrip()
+        if IMPORT_RE.fullmatch(candidate):
+            imports.add(candidate)
+    return imports
 
 
 def _hook_commands(settings: dict) -> list[str]:
@@ -419,10 +520,11 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         if not claude_md_pinned:
             return violations
         import_line = f"@meta/rules/{rule_path.name}"
-        if import_line not in target.read_text(encoding="utf-8"):
+        if import_line not in _import_lines(target.read_text(encoding="utf-8")):
             violations.append(
                 f"{rel}: '{data['deployed-to']}' does not contain the "
-                f"'{import_line}' import — declared but not actually deployed"
+                f"'{import_line}' import as an active standalone line "
+                "— declared but not actually deployed"
             )
     elif enforce == "skill":
         # skill 그릇 규약(v1): deployed-to는 .claude/skills/ 아래의 SKILL.md여야
@@ -433,10 +535,11 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         if skill_shape_violations:
             return violations
         reference = f"meta/rules/{rule_path.name}"
-        if reference not in target.read_text(encoding="utf-8"):
+        active_text = "\n".join(_active_lines(target.read_text(encoding="utf-8")))
+        if reference not in active_text:
             violations.append(
                 f"{rel}: '{data['deployed-to']}' does not reference "
-                f"'{reference}' — declared but not actually deployed"
+                f"'{reference}' in active text — declared but not actually deployed"
             )
     else:
         # 검증 미구현 그릇은 통과가 아니라 거부 — 검증 없는 배포 선언 금지.
@@ -467,8 +570,8 @@ def check_template_sync(root: Path) -> list[str]:
     if not claude_md.is_file() or not template.is_file():
         return []
 
-    root_imports = set(IMPORT_RE.findall(claude_md.read_text(encoding="utf-8")))
-    template_imports = set(IMPORT_RE.findall(template.read_text(encoding="utf-8")))
+    root_imports = _import_lines(claude_md.read_text(encoding="utf-8"))
+    template_imports = _import_lines(template.read_text(encoding="utf-8"))
 
     violations: list[str] = []
     for missing in sorted(root_imports - template_imports):
