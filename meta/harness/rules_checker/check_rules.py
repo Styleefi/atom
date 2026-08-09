@@ -577,23 +577,32 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
 
 
 def check_template_sync(root: Path) -> list[str]:
-    """root CLAUDE.md와 child 템플릿의 규칙 import 집합 동등성을 검증한다.
+    """root CLAUDE.md·child 템플릿의 실존과 규칙 import 집합 동등성을 검증한다.
 
     템플릿의 INHERITED 블록은 root CLAUDE.md Rules 섹션의 수동 복제본이라
     체커 없이는 드리프트가 조용히 누적된다. 추가 누락(root에만 있는 import)과
     제거 잔류(템플릿에만 남은 낡은 import)를 양방향으로 잡는다.
 
+    두 파일 중 하나라도 없으면 그 자체가 위반이다(#38) — 템플릿은 이 검사가
+    유일한 감시자고(어떤 규칙도 deployed-to로 선언하지 않는다), 루트
+    CLAUDE.md의 per-rule backstop은 claude-md 규칙이 1개 이상일 때만 성립하는
+    조건부 보장이라 여기서도 직접 보고한다(건강한 대상의 이중 보고 수용 패턴).
+
     Args:
         root: 저장소 루트.
 
     Returns:
-        위반 메시지 목록. 두 파일 중 하나라도 없으면 검사할 동기화 지점이
-        없는 것이므로 빈 목록(개별 규칙의 deployed-to 검사가 부재를 잡는다).
+        위반 메시지 목록. 파일 부재 시 부재 위반만 담는다(비교 불가).
     """
     claude_md = root / "CLAUDE.md"
     template = root / TEMPLATE_PATH
-    if not claude_md.is_file() or not template.is_file():
-        return []
+    missing_files = [path for path in (claude_md, template) if not path.is_file()]
+    if missing_files:
+        return [
+            f"{path.relative_to(root)}: template sync target is missing — "
+            "restore it; the rule import lists cannot be compared"
+            for path in missing_files
+        ]
 
     root_imports = _import_lines(claude_md.read_text(encoding="utf-8"))
     template_imports = _import_lines(template.read_text(encoding="utf-8"))
