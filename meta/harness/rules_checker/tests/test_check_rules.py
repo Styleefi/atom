@@ -1054,6 +1054,41 @@ def test_skill_rule_without_reference(tmp_path: Path) -> None:
     assert "meta/rules/my-style.md" in violations[0]
 
 
+def test_skill_nested_path_is_rejected(tmp_path: Path) -> None:
+    # #38: skill은 정확히 .claude/skills/<이름>/SKILL.md 깊이만 로드된다.
+    root = make_repo(tmp_path)
+    write_rule(
+        root,
+        "my-style.md",
+        "---\nid: my-style\ntier: convention\nenforce: skill\n"
+        "deployed-to: .claude/skills/nested/deep/SKILL.md\n---\n",
+    )
+    skill_dir = root / ".claude" / "skills" / "nested" / "deep"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("meta/rules/my-style.md\n", encoding="utf-8")
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "must be a SKILL.md under .claude/skills/" in violations[0]
+
+
+def test_skill_shallow_path_is_rejected(tmp_path: Path) -> None:
+    # 얕은 쪽 경계(.claude/skills/SKILL.md, 3파트)도 스킬 위치가 아니다 —
+    # parts[:2]+name 검사만으로는 지금 통과하는 실존 구멍(#38 4R 리뷰).
+    root = make_repo(tmp_path)
+    write_rule(
+        root,
+        "my-style.md",
+        "---\nid: my-style\ntier: convention\nenforce: skill\n"
+        "deployed-to: .claude/skills/SKILL.md\n---\n",
+    )
+    skills_dir = root / ".claude" / "skills"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "SKILL.md").write_text("meta/rules/my-style.md\n", encoding="utf-8")
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "must be a SKILL.md under .claude/skills/" in violations[0]
+
+
 def test_skill_commented_reference_is_not_deployed(tmp_path: Path) -> None:
     # #38 지점 배선(probe p2d 승격): 주석 속 참조는 배포가 아니다.
     root = make_repo(tmp_path)

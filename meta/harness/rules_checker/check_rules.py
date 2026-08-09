@@ -323,9 +323,19 @@ def _skill_path_shape_violations(rel: Path, deployed_to: str) -> list[str]:
     파일 존재·경로 유효성과 무관한 검사라 check_rule_file이 존재 검사 앞
     단일 지점에서 호출한다 — bad_path/missing-target 어느 조기 return도
     형태 위반을 가리지 못하게. 다른 곳에서 재호출하면 이중 보고가 된다.
+
+    깊이는 정확히 4파트(.claude/skills/<이름>/SKILL.md) — Claude Code가
+    skill로 인식하는 유일한 위치라 더 얕거나 깊은 SKILL.md는 죽은 배포다
+    (#38). Path parts 비교라 './' 접두 같은 동치 표기는 정규화되어 통과한다
+    — claude-md pin의 raw 문자열 비교와 의도적 비대칭(그쪽 표기는 여기서
+    기존 테스트가 정규화 수용을 핀하고 있다).
     """
     deployed = Path(deployed_to)
-    if deployed.parts[:2] != (".claude", "skills") or deployed.name != "SKILL.md":
+    if (
+        deployed.parts[:2] != (".claude", "skills")
+        or deployed.name != "SKILL.md"
+        or len(deployed.parts) != 4
+    ):
         return [
             f"{rel}: skill deployed-to '{deployed_to}' must be a "
             "SKILL.md under .claude/skills/"
