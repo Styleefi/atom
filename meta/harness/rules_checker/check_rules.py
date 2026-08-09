@@ -8,8 +8,9 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
    enforce 값이 허용된 그릇(claude-md | skill | hook)인지
 3. id가 파일명(stem)과 일치하는지
 4. deployed-to가 저장소 내 상대 경로이고 대상 파일이 실제 존재하는지
-5. 실배포 확인 — claude-md 그릇: 대상 파일이 `@meta/rules/<파일명>` import를
-   실제로 포함하는지. hook 그릇(v2): deployed-to(settings JSON)의 hooks 구조
+5. 실배포 확인 — claude-md 그릇: deployed-to가 정확히 `CLAUDE.md`(루트 —
+   유일한 claude-md vessel, raw 문자열 비교라 './CLAUDE.md' 같은 동치 표기도
+   거부)이고, 그 파일이 `@meta/rules/<파일명>` import를 실제로 포함하는지. hook 그릇(v2): deployed-to(settings JSON)의 hooks 구조
    안에서 규칙 id에서 도출한 harness 모듈(`harness.<id의 -를 _로>`)을 `-m`으로
    참조하는 커맨드가 1개 이상이고, 참조하는 모든 커맨드가 `blocking`
    frontmatter가 고르는 정본 래퍼 템플릿과 정확히 일치하며, 그 harness
@@ -378,6 +379,18 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
             )
         return violations
 
+    # claude-md 그릇의 대상 고정(#38)은 raw 문자열 검사라 파일 존재·경로
+    # 유효성과 무관하게 항상 여기서 수행한다 — 정규화 후 비교가 아니므로
+    # './CLAUDE.md' 같은 동치 표기도 거부한다(skill 깊이 검사의 parts 비교와
+    # 의도적 비대칭: 그쪽은 기존 테스트가 정규화 수용을 핀하고 있다).
+    claude_md_pinned = True
+    if enforce == "claude-md" and str(data["deployed-to"]) != "CLAUDE.md":
+        claude_md_pinned = False
+        violations.append(
+            f"{rel}: claude-md deployed-to '{data['deployed-to']}' must be "
+            "exactly 'CLAUDE.md' — the root CLAUDE.md is the only claude-md vessel"
+        )
+
     # skill 그릇의 SKILL.md 경로 형태는 문자열 검사라 파일 존재·경로 유효성과
     # 무관하게 항상 여기서 수행한다 — bad_path든 missing-target이든 조기
     # return이 형태 위반을 가리지 않게(탈출 관찰 라운드: bad_path만 고치고
@@ -401,6 +414,10 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
 
     if enforce == "claude-md":
         # claude-md 그릇: @import 줄의 존재가 곧 실배포다 (매 세션 자동 로드).
+        # pin 위반이면 대상이 vessel이 아니므로 import 검사는 무의미 — skill
+        # 형태 위반의 참조 검사 억제와 대칭(존재 검사는 위에서 이미 수행됨).
+        if not claude_md_pinned:
+            return violations
         import_line = f"@meta/rules/{rule_path.name}"
         if import_line not in target.read_text(encoding="utf-8"):
             violations.append(

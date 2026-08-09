@@ -221,6 +221,55 @@ def test_declared_but_not_deployed(tmp_path: Path) -> None:
     assert "declared but not actually deployed" in violations[0]
 
 
+def claude_md_rule(rule_id: str, deployed_to: str) -> str:
+    """deployed-to를 지정한 claude-md 규칙 본문을 만든다(#38 pin 테스트용)."""
+    return (
+        f"---\nid: {rule_id}\ntier: principle\nenforce: claude-md\n"
+        f"deployed-to: {deployed_to}\n---\n\nbody\n"
+    )
+
+
+def test_claude_md_arbitrary_file_is_rejected(tmp_path: Path) -> None:
+    # #38: import가 실재해도 루트 CLAUDE.md가 아니면 배포가 아니다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", claude_md_rule("my-rule", "docs/notes.md"))
+    (root / "docs").mkdir()
+    (root / "docs" / "notes.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "exactly 'CLAUDE.md'" in violations[0]
+
+
+def test_claude_md_pin_does_not_mask_missing_target(tmp_path: Path) -> None:
+    # pin 위반이 존재 검사를 가리지 않는다(skill 형태 검사와 대칭).
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", claude_md_rule("my-rule", "docs/missing.md"))
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("exactly 'CLAUDE.md'" in v for v in violations)
+    assert any("does not exist" in v for v in violations)
+
+
+def test_claude_md_dot_slash_variant_is_rejected(tmp_path: Path) -> None:
+    # raw 문자열 비교라 논리적 동치 표기도 거부한다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", claude_md_rule("my-rule", "./CLAUDE.md"))
+    (root / "CLAUDE.md").write_text("# base\n", encoding="utf-8")
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "exactly 'CLAUDE.md'" in violations[0]
+
+
+def test_claude_md_absolute_variant_is_rejected(tmp_path: Path) -> None:
+    # 절대경로 표기는 pin과 bad_path 둘 다 걸린다 — 누적 보고 확인.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", claude_md_rule("my-rule", "/CLAUDE.md"))
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("exactly 'CLAUDE.md'" in v for v in violations)
+    assert any("repo-root-relative" in v for v in violations)
+
+
 def test_unverifiable_vessels_are_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
