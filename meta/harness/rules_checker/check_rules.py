@@ -8,13 +8,17 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
    enforce 값이 허용된 그릇(claude-md | skill | hook)인지
 3. id가 파일명(stem)과 일치하는지
 4. deployed-to가 저장소 내 상대 경로이고 대상 파일이 실제 존재하는지
-5. 실배포 확인 — claude-md 그릇: 대상 파일이 `@meta/rules/<파일명>` import를
-   실제로 포함하는지. hook 그릇(v2): deployed-to(settings JSON)의 hooks 구조
+5. 실배포 확인 — claude-md 그릇: deployed-to가 정확히 `CLAUDE.md`(루트 —
+   유일한 claude-md vessel, raw 문자열 비교라 './CLAUDE.md' 같은 동치 표기도
+   거부)이고, 그 파일이 `@meta/rules/<파일명>` import를 **활성 독립 줄**로
+   포함하는지(#38 — 주석/펜스 속 import는 로드되지 않으므로 배포가 아니다,
+   _active_lines 동결 스캐너 참조). hook 그릇(v2): deployed-to(settings JSON)의 hooks 구조
    안에서 규칙 id에서 도출한 harness 모듈(`harness.<id의 -를 _로>`)을 `-m`으로
    참조하는 커맨드가 1개 이상이고, 참조하는 모든 커맨드가 `blocking`
    frontmatter가 고르는 정본 래퍼 템플릿과 정확히 일치하며, 그 harness
-   패키지가 실제 존재하는지(#31 — uv 자체 오류의 exit 2가 차단으로 새지
-   않는 배선 강제). skill 그릇:
+   패키지가 실제 존재하고 `__init__.py`·`__main__.py`를 갖췄는지(#31 —
+   uv 자체 오류의 exit 2가 차단으로 새지 않는 배선 강제, #38. 두 파일
+   요구의 근거는 검사 지점 주석이 SSOT). skill 그릇:
    deployed-to가 `.claude/skills/` 아래의 SKILL.md이고 그 SKILL.md가
    `meta/rules/<파일명>`을 참조하는지 (규칙 본문의 SSOT는 meta/rules/,
    SKILL.md는 참조만 한다는 v1 규약).
@@ -23,8 +27,13 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
 규칙 단위 검사와 별개로 repo-level 검사를 셋 수행한다.
 
 - 템플릿 동기화: root CLAUDE.md와 child 템플릿(meta/templates/CLAUDE.template.md)
-  의 `@meta/rules/` import 집합이 동일한지 — 수동 동기화 지점의 침묵 드리프트를
-  양방향으로 차단한다.
+  이 실존하고(부재는 위반 — 템플릿은 이 검사가 유일한 감시자다, #38) 두 파일의
+  **활성** `@meta/rules/` import 집합이 동일한지 — 수동 동기화 지점의 침묵
+  드리프트를 양방향으로 차단한다. skill 참조 검사도 같은 스캐너의 활성
+  텍스트에서만 substring을 본다. 활성 import가 규칙 레지스트리(meta/rules/)의
+  실제 규칙과 대응하는지도 파일별로 확인한다(#91 — 지워진 규칙의 고아
+  import가 양쪽에 남는 침묵 채널. 파일 실존이 아니라 레지스트리 대조라
+  `..` 관통·비규칙 파일 대상도 고아다).
 - hook 배선 역방향 스윕: 프로젝트 설정 파일(.claude/settings*.json — hook
   규칙이 없어도 무조건)과 hook 규칙들의 deployed-to에 있는 모든 훅 커맨드 중
   `-m harness.*`를 참조하는 것이 두 정본 래퍼 템플릿 중 하나와 정확히
@@ -50,9 +59,10 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-# 허용되는 배포 그릇. 검증 로직이 구현된 그릇만 통과 대상이다.
+# 허용되는 배포 그릇. 검증 미구현 그릇이 여기 추가되면 check_rule_file의
+# else 분기가 통과 대신 거부한다 — 그 분기가 "검증 없는 vessel 금지"의
+# 실제 가드다(#38에서 동일 내용의 죽은 상수 VERIFIABLE_ENFORCE 제거).
 VALID_ENFORCE = {"claude-md", "skill", "hook"}
-VERIFIABLE_ENFORCE = {"claude-md", "skill", "hook"}
 
 # 규칙 등급: principle(원칙 — 충돌 시 우선, 개정 문턱 높음) | convention(세칙).
 VALID_TIER = {"principle", "convention"}
@@ -88,7 +98,9 @@ HOOK_COMMAND_NON_BLOCKING = (
 # 표면화되고, unruled는 bash -c 간접 실행과 같은 기존 잔여 클래스.
 _HOOK_MODULE_RE = re.compile(r"(?<!\S)-m\s*(harness\.\w+(?:\.\w+)*)")
 
-# CLAUDE.md/템플릿에서 규칙 import 줄을 뽑는 패턴.
+# 규칙 import 토큰의 형태. _import_lines가 활성 줄에 fullmatch로 적용한다 —
+# findall substring이 아니라 줄 전체 일치라, 인라인 언급·주석/펜스 속 토큰은
+# import로 인정되지 않는다(#38).
 IMPORT_RE = re.compile(r"@meta/rules/\S+\.md")
 
 TEMPLATE_PATH = Path("meta") / "templates" / "CLAUDE.template.md"
@@ -140,6 +152,33 @@ def rule_files(root: Path) -> list[Path]:
     return [path for path in sorted(rules_dir.glob("*.md")) if path.name != "README.md"]
 
 
+class _StrictLoader(yaml.SafeLoader):
+    """중복 매핑 키를 오류로 거부하는 SafeLoader(#38).
+
+    yaml.safe_load의 last-win 시맨틱은 `enforce: hook` 뒤의
+    `enforce: claude-md`를 조용히 claude-md로 검증한다 — 파일을 읽는 사람이
+    보는 선언과 checker의 판정이 어긋나는 침묵 통과. 중복 검사는
+    construct_object 호출 없이 스칼라 key 노드의 raw 값 비교로(노드 이중
+    평가 배제 — frontmatter 키는 항상 평문 스칼라), flatten_mapping이
+    node.value를 변형하기 전인 super() 호출 앞에서 수행한다. merge key
+    (`<<`)로 병합돼 들어온 키와 명시 키의 충돌은 미감지 — 문서화된 한계.
+    """
+
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict:
+        seen: set[str] = set()
+        for key_node, _value_node in node.value:
+            if isinstance(key_node, yaml.ScalarNode):
+                if key_node.value in seen:
+                    raise yaml.constructor.ConstructorError(
+                        "while constructing a mapping",
+                        node.start_mark,
+                        f"found duplicate key {key_node.value!r}",
+                        key_node.start_mark,
+                    )
+                seen.add(key_node.value)
+        return super().construct_mapping(node, deep)
+
+
 def parse_frontmatter(text: str) -> tuple[dict | None, str | None]:
     """마크다운 본문에서 YAML frontmatter를 파싱한다.
 
@@ -156,12 +195,108 @@ def parse_frontmatter(text: str) -> tuple[dict | None, str | None]:
     if end == -1:
         return None, "unterminated frontmatter (closing '---' not found)"
     try:
-        data = yaml.safe_load(text[4:end])
+        data = yaml.load(text[4:end], Loader=_StrictLoader)
     except yaml.YAMLError as exc:
         return None, f"invalid YAML in frontmatter: {exc}"
     if not isinstance(data, dict):
         return None, "frontmatter is not a mapping (key: value)"
     return data, None
+
+
+def _strip_comment_spans(line: str) -> tuple[str, bool]:
+    """한 줄에서 같은 줄 개폐 HTML 주석 스팬을 공백 한 칸으로 치환한다.
+
+    빈 문자열 치환은 스팬 앞뒤 토큰을 융합시켜(`@meta/rules/a<!-- -->b.md`)
+    없던 import를 만들어내므로 금지 — 공백 치환은 위반 쪽으로 넘어지는
+    fail-safe다. 닫히지 않은 `<!--`는 그 위치부터 줄 끝을 잘라낸다.
+
+    Args:
+        line: 처리할 한 줄(활성 문맥).
+
+    Returns:
+        (치환된 줄, 미종결 주석이 열렸는지) 튜플.
+    """
+    out = line
+    while True:
+        start = out.find("<!--")
+        if start == -1:
+            return out, False
+        end = out.find("-->", start + 4)
+        if end == -1:
+            return out[:start], True
+        out = out[:start] + " " + out[end + 3 :]
+
+
+def _active_lines(text: str) -> list[str]:
+    """checker가 배포로 인정하는 '활성' 줄만 남기는 동결 스캐너.
+
+    정답 기준은 Claude Code 로더의 근사가 아니라 checker가 규정하는 유효
+    배포 형태다(#38). 모델링하는 문법: ```/~~~ 코드 펜스(선행 공백·info
+    string 허용, 같은 마커끼리만 닫힘)와 HTML 주석(여러 줄 가능). 상호작용
+    규칙은 하나 — 먼저 열린 쪽이 자기 닫힘까지 소유한다(펜스 안 `<!--`는
+    리터럴, 주석 안 펜스 마커는 비활성). 미종결 펜스·주석은 EOF까지
+    비활성(fail-safe). 여러 줄 주석의 닫는 줄 잔여 텍스트는 활성이지만
+    선행 공백을 붙여 독립 import 줄로는 인정되지 않게 한다.
+
+    모델 밖(문서화된 한계 — #66/#75式 문법 확장 경쟁을 막기 위해 동결):
+    인라인 코드 스팬, 인용구/리스트 속 펜스, 펜스 마커 길이 매칭. 들여쓰기
+    코드 블록은 import 검사에서는 _import_lines의 선행 공백 불허가 함께
+    닫지만, skill substring 검사에는 잔존한다.
+
+    Args:
+        text: 대상 파일 전체 내용.
+
+    Returns:
+        활성 줄 목록(주석 스팬은 공백 치환된 상태).
+    """
+    active: list[str] = []
+    state: str | None = None  # None | "```" | "~~~" | "comment"
+    for line in text.splitlines():
+        if state in ("```", "~~~"):
+            if line.lstrip().startswith(state):
+                state = None
+            continue
+        if state == "comment":
+            end = line.find("-->")
+            if end == -1:
+                continue
+            state = None
+            rest, opened = _strip_comment_spans(line[end + 3 :])
+            if opened:
+                state = "comment"
+            active.append(" " + rest)
+            continue
+        marker = line.lstrip()[:3]
+        if marker in ("```", "~~~"):
+            state = marker
+            continue
+        processed, opened = _strip_comment_spans(line)
+        if opened:
+            state = "comment"
+        active.append(processed)
+    return active
+
+
+def _import_lines(text: str) -> set[str]:
+    """활성 줄 중 독립 `@meta/rules/<file>.md` import 줄의 집합을 뽑는다.
+
+    선행 공백 불허(rstrip만 허용) — 들여쓰기 코드 블록 속 import가 인정되는
+    fail-open을 스캐너 확장 없이 닫는다. 무공백 연접(`...a.md@meta/...b.md`)
+    은 IMPORT_RE fullmatch를 통과하지만 융합 토큰이라 어떤 정확 import와도
+    불일치 — 검사가 위반 쪽으로 수렴한다.
+
+    Args:
+        text: 대상 파일 전체 내용.
+
+    Returns:
+        활성 독립 import 줄의 집합.
+    """
+    imports: set[str] = set()
+    for line in _active_lines(text):
+        candidate = line.rstrip()
+        if IMPORT_RE.fullmatch(candidate):
+            imports.add(candidate)
+    return imports
 
 
 def _hook_commands(settings: dict) -> list[str]:
@@ -220,9 +355,19 @@ def _skill_path_shape_violations(rel: Path, deployed_to: str) -> list[str]:
     파일 존재·경로 유효성과 무관한 검사라 check_rule_file이 존재 검사 앞
     단일 지점에서 호출한다 — bad_path/missing-target 어느 조기 return도
     형태 위반을 가리지 못하게. 다른 곳에서 재호출하면 이중 보고가 된다.
+
+    깊이는 정확히 4파트(.claude/skills/<이름>/SKILL.md) — Claude Code가
+    skill로 인식하는 유일한 위치라 더 얕거나 깊은 SKILL.md는 죽은 배포다
+    (#38). Path parts 비교라 './' 접두 같은 동치 표기는 정규화되어 통과한다
+    — claude-md pin의 raw 문자열 비교와 의도적 비대칭(그쪽 표기는 여기서
+    기존 테스트가 정규화 수용을 핀하고 있다).
     """
     deployed = Path(deployed_to)
-    if deployed.parts[:2] != (".claude", "skills") or deployed.name != "SKILL.md":
+    if (
+        deployed.parts[:2] != (".claude", "skills")
+        or deployed.name != "SKILL.md"
+        or len(deployed.parts) != 4
+    ):
         return [
             f"{rel}: skill deployed-to '{deployed_to}' must be a "
             "SKILL.md under .claude/skills/"
@@ -370,13 +515,50 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
                             f"match the canonical {shape} wrapper (#31 fail-open "
                             f"wiring) — got: {command} — expected exactly: {expected}"
                         )
-        package_dir = root / "meta" / "harness" / rule_path.stem.replace("-", "_")
+        package_name = rule_path.stem.replace("-", "_")
+        package_dir = root / "meta" / "harness" / package_name
         if not package_dir.is_dir():
             violations.append(
                 f"{rel}: hook harness package "
-                f"'meta/harness/{rule_path.stem.replace('-', '_')}/' does not exist"
+                f"'meta/harness/{package_name}/' does not exist"
             )
+        else:
+            # 두 파일 요구의 근거 서술은 여기가 SSOT다(#38; 정리 경위는
+            # PR #92 리뷰 스레드). __main__.py 부재는 `python -m` 진입점
+            # 부재 — 훅이 래퍼 아래에서 조용히 no-op이 된다(셸 실험으로
+            # 검증). __init__.py는 실행 요건이 아니라(namespace 패키지도
+            # -m으로 돌아가고 meta/harness 자체가 __init__.py 없이 돈다) 모든
+            # meta/harness 패키지를 regular package로 통일하는 메타층
+            # 규약이다 — 인벤토리 분류(_expected_artifacts)나 pytest prepend
+            # 모드 모듈 네이밍 같은 소비자들이 이 규약 위에 서 있다. 파일
+            # 실존만 본다(빈 파일 통과는 문서화된 한계 — 임포트 오류는
+            # pytest 몫). 디렉토리 부재 시엔 위 위반 하나로 충분해 파일
+            # 검사를 걸지 않는다.
+            if not (package_dir / "__init__.py").is_file():
+                violations.append(
+                    f"{rel}: hook harness package "
+                    f"'meta/harness/{package_name}/' is missing __init__.py "
+                    "— required by the meta-layer package convention"
+                )
+            if not (package_dir / "__main__.py").is_file():
+                violations.append(
+                    f"{rel}: hook harness package "
+                    f"'meta/harness/{package_name}/' is missing __main__.py "
+                    "— the `python -m` entry point"
+                )
         return violations
+
+    # claude-md 그릇의 대상 고정(#38)은 raw 문자열 검사라 파일 존재·경로
+    # 유효성과 무관하게 항상 여기서 수행한다 — 정규화 후 비교가 아니므로
+    # './CLAUDE.md' 같은 동치 표기도 거부한다(skill 깊이 검사의 parts 비교와
+    # 의도적 비대칭: 그쪽은 기존 테스트가 정규화 수용을 핀하고 있다).
+    claude_md_pinned = True
+    if enforce == "claude-md" and str(data["deployed-to"]) != "CLAUDE.md":
+        claude_md_pinned = False
+        violations.append(
+            f"{rel}: claude-md deployed-to '{data['deployed-to']}' must be "
+            "exactly 'CLAUDE.md' — the root CLAUDE.md is the only claude-md vessel"
+        )
 
     # skill 그릇의 SKILL.md 경로 형태는 문자열 검사라 파일 존재·경로 유효성과
     # 무관하게 항상 여기서 수행한다 — bad_path든 missing-target이든 조기
@@ -401,11 +583,16 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
 
     if enforce == "claude-md":
         # claude-md 그릇: @import 줄의 존재가 곧 실배포다 (매 세션 자동 로드).
+        # pin 위반이면 대상이 vessel이 아니므로 import 검사는 무의미 — skill
+        # 형태 위반의 참조 검사 억제와 대칭(존재 검사는 위에서 이미 수행됨).
+        if not claude_md_pinned:
+            return violations
         import_line = f"@meta/rules/{rule_path.name}"
-        if import_line not in target.read_text(encoding="utf-8"):
+        if import_line not in _import_lines(target.read_text(encoding="utf-8")):
             violations.append(
                 f"{rel}: '{data['deployed-to']}' does not contain the "
-                f"'{import_line}' import — declared but not actually deployed"
+                f"'{import_line}' import as an active standalone line "
+                "— declared but not actually deployed"
             )
     elif enforce == "skill":
         # skill 그릇 규약(v1): deployed-to는 .claude/skills/ 아래의 SKILL.md여야
@@ -416,10 +603,11 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         if skill_shape_violations:
             return violations
         reference = f"meta/rules/{rule_path.name}"
-        if reference not in target.read_text(encoding="utf-8"):
+        active_text = "\n".join(_active_lines(target.read_text(encoding="utf-8")))
+        if reference not in active_text:
             violations.append(
                 f"{rel}: '{data['deployed-to']}' does not reference "
-                f"'{reference}' — declared but not actually deployed"
+                f"'{reference}' in active text — declared but not actually deployed"
             )
     else:
         # 검증 미구현 그릇은 통과가 아니라 거부 — 검증 없는 배포 선언 금지.
@@ -432,26 +620,40 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
 
 
 def check_template_sync(root: Path) -> list[str]:
-    """root CLAUDE.md와 child 템플릿의 규칙 import 집합 동등성을 검증한다.
+    """root CLAUDE.md·child 템플릿의 실존과 규칙 import 집합 동등성을 검증한다.
 
     템플릿의 INHERITED 블록은 root CLAUDE.md Rules 섹션의 수동 복제본이라
     체커 없이는 드리프트가 조용히 누적된다. 추가 누락(root에만 있는 import)과
     제거 잔류(템플릿에만 남은 낡은 import)를 양방향으로 잡는다.
 
+    두 파일 중 하나라도 없으면 그 자체가 위반이다(#38) — 템플릿은 이 검사가
+    유일한 감시자고(어떤 규칙도 deployed-to로 선언하지 않는다), 루트
+    CLAUDE.md의 per-rule backstop은 claude-md 규칙이 1개 이상일 때만 성립하는
+    조건부 보장이라 여기서도 직접 보고한다(건강한 대상의 이중 보고 수용 패턴).
+
+    범위 밖(오너 수용 트레이드오프, PR #92 R1): 비활성 텍스트(주석·펜스) 속
+    import 잔해는 검사하지 않는다 — 주석 잔해는 배포 주장이 아니고, 비활성
+    텍스트 스캔은 활성/비활성 시맨틱과 어긋나며 정당한 규칙 언급까지 위반으로
+    만든다. 잔해 정리는 PR 리뷰의 몫.
+
     Args:
         root: 저장소 루트.
 
     Returns:
-        위반 메시지 목록. 두 파일 중 하나라도 없으면 검사할 동기화 지점이
-        없는 것이므로 빈 목록(개별 규칙의 deployed-to 검사가 부재를 잡는다).
+        위반 메시지 목록. 파일 부재 시 부재 위반만 담는다(비교 불가).
     """
     claude_md = root / "CLAUDE.md"
     template = root / TEMPLATE_PATH
-    if not claude_md.is_file() or not template.is_file():
-        return []
+    missing_files = [path for path in (claude_md, template) if not path.is_file()]
+    if missing_files:
+        return [
+            f"{path.relative_to(root)}: template sync target is missing — "
+            "restore it; the rule import lists cannot be compared"
+            for path in missing_files
+        ]
 
-    root_imports = set(IMPORT_RE.findall(claude_md.read_text(encoding="utf-8")))
-    template_imports = set(IMPORT_RE.findall(template.read_text(encoding="utf-8")))
+    root_imports = _import_lines(claude_md.read_text(encoding="utf-8"))
+    template_imports = _import_lines(template.read_text(encoding="utf-8"))
 
     violations: list[str] = []
     for missing in sorted(root_imports - template_imports):
@@ -464,6 +666,21 @@ def check_template_sync(root: Path) -> list[str]:
             f"{TEMPLATE_PATH}: contains '{stale}' absent from root CLAUDE.md "
             "— remove the stale import from the INHERITED FROM ATOM block"
         )
+
+    # 고아 import 역방향 스윕(#91): 규칙 파일이 지워졌는데 import가 양쪽에
+    # 남으면 규칙 순회도 sync 비교도 침묵한다 — 각 import를 규칙 레지스트리
+    # (rule_files)와 대조한다(check_hook_wiring과 같은 역방향 패턴). 파일
+    # 실존 검사가 아니라 집합 대조인 이유(R1 리뷰): `..` 관통 경로나
+    # README.md처럼 "실존하지만 규칙이 아닌" 대상이 통과하면 #91의 구멍이
+    # 그대로 다시 열린다.
+    valid_imports = {f"@meta/rules/{path.name}" for path in rule_files(root)}
+    for source, imports in ((claude_md, root_imports), (template, template_imports)):
+        source_rel = source.relative_to(root)
+        for imported in sorted(imports - valid_imports):
+            violations.append(
+                f"{source_rel}: orphan rule import '{imported}' — no such rule "
+                "in meta/rules/; remove the import or restore the rule"
+            )
     return violations
 
 

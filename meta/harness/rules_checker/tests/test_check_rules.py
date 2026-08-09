@@ -26,6 +26,8 @@ from harness.rules_checker.check_rules import (
     HOOK_COMMAND_BLOCKING,
     HOOK_COMMAND_NON_BLOCKING,
     INVENTORY_ROW_RE,
+    _active_lines,
+    _import_lines,
     check_rules,
     find_repo_root,
 )
@@ -47,17 +49,30 @@ INVENTORY_SKELETON = (
 
 
 def rule_violations(root: Path) -> list[str]:
-    """인벤토리 보류 안내를 뺀 위반 목록을 돌려준다.
+    """인벤토리 보류 안내·동기화 파일 부재 위반을 뺀 위반 목록을 돌려준다.
 
-    규칙 위반이 있으면 인벤토리 검사가 미뤄지고 그 사실이 위반으로 따라붙는다.
-    규칙 검사 자체를 다루는 테스트가 매번 그것까지 세면 불필요한 결합이 생기므로
-    걸러낸다 — 보류 동작은 전용 테스트가 고정한다.
+    규칙 위반이 있으면 인벤토리 검사가 미뤄지고 그 사실이 위반으로 따라붙고,
+    baseline 파일을 지우는 픽스처는 부재 위반이 따라붙는다. 규칙 검사 자체를
+    다루는 테스트가 매번 그것까지 세면 불필요한 결합이 생기므로 걸러낸다 —
+    두 동작 모두 전용 테스트가 고정한다. 부재 필터는 부재 위반의 고유 문구로만
+    거른다 — "does not exist" 류 범용 문구로 거르면 규칙 쪽 missing-target
+    위반까지 걸러진다.
     """
-    return [v for v in check_rules(root) if "coverage was not checked" not in v]
+    return [
+        v
+        for v in check_rules(root)
+        if "coverage was not checked" not in v
+        and "template sync target is missing" not in v
+    ]
 
 
 def make_repo(tmp_path: Path) -> Path:
-    """meta/rules/ 골격과 빈 인벤토리를 가진 가짜 저장소를 만든다.
+    """meta/rules/ 골격·빈 인벤토리·동기화 baseline을 가진 가짜 저장소를 만든다.
+
+    동기화 파일(루트 CLAUDE.md·child 템플릿) 부재가 위반이므로(#38) import
+    없는 동기화된 baseline 쌍을 기본 제공한다 — 부재 자체를 다루는 테스트는
+    baseline을 명시적으로 지우고, import를 쓰는 테스트는 deploy_claude_md로
+    양쪽을 함께 쓴다.
 
     Args:
         tmp_path: pytest가 제공하는 임시 디렉토리.
@@ -67,7 +82,24 @@ def make_repo(tmp_path: Path) -> Path:
     """
     (tmp_path / "meta" / "rules").mkdir(parents=True)
     (tmp_path / "meta" / "README.md").write_text(INVENTORY_SKELETON, encoding="utf-8")
+    (tmp_path / "CLAUDE.md").write_text("# fixture claude\n", encoding="utf-8")
+    template = tmp_path / "meta" / "templates" / "CLAUDE.template.md"
+    template.parent.mkdir(parents=True)
+    template.write_text("# fixture template\n", encoding="utf-8")
     return tmp_path
+
+
+def deploy_claude_md(root: Path, *imports: str) -> None:
+    """루트 CLAUDE.md와 child 템플릿에 같은 import 목록을 함께 쓴다.
+
+    한쪽에만 쓰면 템플릿 동기화 드리프트 위반이 따라붙으므로, import를 쓰는
+    green-path 테스트는 이 헬퍼로 두 파일을 동기 상태로 유지한다.
+    """
+    text = "".join(f"{line}\n" for line in imports)
+    (root / "CLAUDE.md").write_text(text, encoding="utf-8")
+    (root / "meta" / "templates" / "CLAUDE.template.md").write_text(
+        text, encoding="utf-8"
+    )
 
 
 def write_inventory(root: Path, text: str) -> None:
@@ -104,10 +136,11 @@ def write_rule(root: Path, name: str, body: str) -> Path:
 
 
 def make_harness_package(root: Path, name: str) -> None:
-    """import 가능한 하니스 패키지 디렉토리를 만든다."""
+    """import·`python -m` 실행이 가능한 하니스 패키지 디렉토리를 만든다."""
     package = root / "meta" / "harness" / name
     package.mkdir(parents=True, exist_ok=True)
     (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "__main__.py").write_text("", encoding="utf-8")
 
 
 def make_infra_stack(root: Path, name: str) -> None:
@@ -126,7 +159,7 @@ def valid_rule(rule_id: str) -> str:
 def test_valid_rule_passes(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "my-rule.md", valid_rule("my-rule"))
-    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    deploy_claude_md(root, "@meta/rules/my-rule.md")
     assert check_rules(root) == []
 
 
@@ -195,10 +228,39 @@ def test_broken_yaml_reported_not_raised(tmp_path: Path) -> None:
     assert "invalid YAML" in violations[0]
 
 
+def test_duplicate_frontmatter_key_is_rejected(tmp_path: Path) -> None:
+    # #38: safe_load의 last-win은 사람이 보는 선언과 checker 판정을 어긋나게
+    # 한다(enforce: hook 뒤 enforce: claude-md가 claude-md로 침묵 통과).
+    root = make_repo(tmp_path)
+    write_rule(
+        root,
+        "my-rule.md",
+        "---\nid: my-rule\ntier: convention\nenforce: hook\n"
+        "enforce: claude-md\ndeployed-to: CLAUDE.md\n---\n\nbody\n",
+    )
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "invalid YAML in frontmatter" in violations[0]
+    assert "enforce" in violations[0]
+
+
+def test_anchor_alias_frontmatter_still_parses(tmp_path: Path) -> None:
+    # 커스텀 로더가 표준 YAML 기능(앵커/별칭)을 깨지 않는지 방어 핀.
+    root = make_repo(tmp_path)
+    write_rule(
+        root,
+        "my-rule.md",
+        "---\nid: &a my-rule\ntier: convention\nenforce: claude-md\n"
+        "deployed-to: CLAUDE.md\nnote: *a\n---\n\nbody\n",
+    )
+    deploy_claude_md(root, "@meta/rules/my-rule.md")
+    assert check_rules(root) == []
+
+
 def test_id_filename_mismatch(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "actual-name.md", valid_rule("other-name"))
-    (root / "CLAUDE.md").write_text("@meta/rules/actual-name.md\n", encoding="utf-8")
+    deploy_claude_md(root, "@meta/rules/actual-name.md")
     violations = rule_violations(root)
     assert len(violations) == 1
     assert "does not match filename stem" in violations[0]
@@ -206,7 +268,8 @@ def test_id_filename_mismatch(tmp_path: Path) -> None:
 
 def test_missing_deploy_target(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
-    write_rule(root, "my-rule.md", valid_rule("my-rule"))  # CLAUDE.md 미생성
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    (root / "CLAUDE.md").unlink()  # baseline 제거 — 대상 부재 시나리오
     violations = rule_violations(root)
     assert len(violations) == 1
     assert "does not exist" in violations[0]
@@ -216,6 +279,117 @@ def test_declared_but_not_deployed(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "my-rule.md", valid_rule("my-rule"))
     (root / "CLAUDE.md").write_text("# no import here\n", encoding="utf-8")
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "declared but not actually deployed" in violations[0]
+
+
+def claude_md_rule(rule_id: str, deployed_to: str) -> str:
+    """deployed-to를 지정한 claude-md 규칙 본문을 만든다(#38 pin 테스트용)."""
+    return (
+        f"---\nid: {rule_id}\ntier: principle\nenforce: claude-md\n"
+        f"deployed-to: {deployed_to}\n---\n\nbody\n"
+    )
+
+
+def test_claude_md_arbitrary_file_is_rejected(tmp_path: Path) -> None:
+    # #38: import가 실재해도 루트 CLAUDE.md가 아니면 배포가 아니다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", claude_md_rule("my-rule", "docs/notes.md"))
+    (root / "docs").mkdir()
+    (root / "docs" / "notes.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "exactly 'CLAUDE.md'" in violations[0]
+
+
+def test_claude_md_pin_does_not_mask_missing_target(tmp_path: Path) -> None:
+    # pin 위반이 존재 검사를 가리지 않는다(skill 형태 검사와 대칭).
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", claude_md_rule("my-rule", "docs/missing.md"))
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("exactly 'CLAUDE.md'" in v for v in violations)
+    assert any("does not exist" in v for v in violations)
+
+
+def test_claude_md_dot_slash_variant_is_rejected(tmp_path: Path) -> None:
+    # raw 문자열 비교라 논리적 동치 표기도 거부한다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", claude_md_rule("my-rule", "./CLAUDE.md"))
+    (root / "CLAUDE.md").write_text("# base\n", encoding="utf-8")
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "exactly 'CLAUDE.md'" in violations[0]
+
+
+def test_claude_md_absolute_variant_is_rejected(tmp_path: Path) -> None:
+    # 절대경로 표기는 pin과 bad_path 둘 다 걸린다 — 누적 보고 확인.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", claude_md_rule("my-rule", "/CLAUDE.md"))
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("exactly 'CLAUDE.md'" in v for v in violations)
+    assert any("repo-root-relative" in v for v in violations)
+
+
+# 활성 줄 스캐너의 동결 문법 코퍼스(#38, PR #75의 _SEGMENT_CORPUS 패턴).
+# 각 항목: (텍스트, imp가 활성 독립 import로 인정되는가, 라벨). 라벨은 실패
+# 메시지용이자 케이스의 계약 설명이다 — 모델 밖 구문 확장 요구는 결함이
+# 아니라 문서화된 한계로 triage한다(스캐너 docstring 참조).
+_SCANNER_IMP = "@meta/rules/my-rule.md"
+_SCANNER_CORPUS = [
+    (f"{_SCANNER_IMP}\n", True, "독립 활성 줄은 인정"),
+    (f"# head\n\n{_SCANNER_IMP}\n", True, "다른 활성 줄과 공존해도 인정"),
+    (f"<!-- {_SCANNER_IMP} -->\n", False, "단일 줄 주석 속은 불인정"),
+    ("@meta/rules/my<!-- x -->-rule.md\n", False, "스팬 공백 치환이 토큰 융합 차단"),
+    (f"<!--\n{_SCANNER_IMP}\n-->\n", False, "여러 줄 주석 속은 불인정"),
+    (f"<!-- start\n{_SCANNER_IMP}\nend -->\n{_SCANNER_IMP}\n", True, "주석 종료 후 독립 줄은 활성"),
+    (f"<!--\nc\n-->{_SCANNER_IMP}\n", False, "닫는 줄 잔여는 활성이나 독립 줄은 아님"),
+    (f"```\n{_SCANNER_IMP}\n```\n", False, "``` 펜스 속은 불인정"),
+    (f"```python\n{_SCANNER_IMP}\n```\n", False, "info string 펜스도 동일"),
+    (f"~~~\n{_SCANNER_IMP}\n~~~\n", False, "~~~ 펜스 속은 불인정"),
+    (f"```\nx\n~~~\n{_SCANNER_IMP}\n```\n", False, "~~~는 ``` 펜스를 닫지 못함"),
+    (f"```\n{_SCANNER_IMP}\n", False, "미종결 펜스는 EOF까지 비활성(fail-safe)"),
+    (f"<!--\n```\n-->\n{_SCANNER_IMP}\n", True, "주석 안 펜스 마커는 펜스를 열지 않음"),
+    (f"```\n<!--\n```\n{_SCANNER_IMP}\n", True, "펜스 안 <!--는 주석으로 전이하지 않음"),
+    (f"    {_SCANNER_IMP}\n", False, "들여쓰기 줄(코드 블록)은 불인정"),
+    (f"see {_SCANNER_IMP} in\n", False, "인라인 언급은 불인정"),
+    (f"{_SCANNER_IMP}@meta/rules/other.md\n", False, "무공백 연접은 불일치로 수렴"),
+]
+
+
+def test_active_import_scanner_corpus() -> None:
+    for text, expected, label in _SCANNER_CORPUS:
+        assert (_SCANNER_IMP in _import_lines(text)) == expected, label
+
+
+def test_scanner_same_line_comment_keeps_remainder_active() -> None:
+    # 같은 줄 개폐 주석은 스팬만 죽고 앞뒤 텍스트는 활성으로 남는다.
+    joined = "\n".join(_active_lines("a <!-- x --> b"))
+    assert "a" in joined and "b" in joined
+    assert "x" not in joined
+
+
+def test_claude_md_fenced_import_is_not_deployed(tmp_path: Path) -> None:
+    # #38 지점 배선(probe p2b 승격): 펜스 속 import는 배포가 아니다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    (root / "CLAUDE.md").write_text(
+        "```\n@meta/rules/my-rule.md\n```\n", encoding="utf-8"
+    )
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "declared but not actually deployed" in violations[0]
+
+
+def test_claude_md_commented_import_is_not_deployed(tmp_path: Path) -> None:
+    # #38 지점 배선(probe p2a 승격): 주석 처리된 import는 배포가 아니다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    (root / "CLAUDE.md").write_text(
+        "<!-- @meta/rules/my-rule.md -->\n", encoding="utf-8"
+    )
     violations = rule_violations(root)
     assert len(violations) == 1
     assert "declared but not actually deployed" in violations[0]
@@ -266,10 +440,10 @@ def canonical_command(module: str, blocking: bool = True) -> str:
 
 
 def make_hook_deployment(root: Path, rule_id: str, settings_text: str) -> None:
-    """hook 규칙의 배포 대상(settings + harness 패키지)을 만든다."""
+    """hook 규칙의 배포 대상(settings + 실행 가능한 harness 패키지)을 만든다."""
     (root / ".claude").mkdir()
     (root / ".claude" / "settings.json").write_text(settings_text, encoding="utf-8")
-    (root / "meta" / "harness" / rule_id.replace("-", "_")).mkdir(parents=True)
+    make_harness_package(root, rule_id.replace("-", "_"))
 
 
 def test_valid_hook_rule_passes(tmp_path: Path) -> None:
@@ -320,6 +494,28 @@ def test_hook_rule_without_harness_package(tmp_path: Path) -> None:
     assert len(violations) == 1
     assert "does not exist" in violations[0]
     assert "meta/harness/my_guard/" in violations[0]
+
+
+def test_hook_package_without_init_is_rejected(tmp_path: Path) -> None:
+    # #38: __init__.py는 메타층 패키지 규약 — 근거 서술의 SSOT는 검사 지점 주석.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    make_hook_deployment(root, "my-guard", hook_settings(canonical_command("harness.my_guard")))
+    (root / "meta" / "harness" / "my_guard" / "__init__.py").unlink()
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "__init__.py" in violations[0]
+
+
+def test_hook_package_without_main_is_rejected(tmp_path: Path) -> None:
+    # __main__.py는 python -m 진입점 — 근거 서술의 SSOT는 검사 지점 주석.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    make_hook_deployment(root, "my-guard", hook_settings(canonical_command("harness.my_guard")))
+    (root / "meta" / "harness" / "my_guard" / "__main__.py").unlink()
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "__main__.py" in violations[0]
 
 
 def test_hook_rule_with_legacy_exec_command_fails(tmp_path: Path) -> None:
@@ -377,7 +573,7 @@ def test_blocking_on_non_hook_rule_is_rejected(tmp_path: Path) -> None:
         "deployed-to: CLAUDE.md\nblocking: true\n---\n\nbody\n"
     )
     write_rule(root, "my-rule.md", body)
-    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    deploy_claude_md(root, "@meta/rules/my-rule.md")
     violations = rule_violations(root)
     assert len(violations) == 1
     assert "'blocking' is only valid for hook rules" in violations[0]
@@ -918,17 +1114,62 @@ def test_skill_rule_without_reference(tmp_path: Path) -> None:
     assert "meta/rules/my-style.md" in violations[0]
 
 
+def test_skill_nested_path_is_rejected(tmp_path: Path) -> None:
+    # #38: skill은 정확히 .claude/skills/<이름>/SKILL.md 깊이만 로드된다.
+    root = make_repo(tmp_path)
+    write_rule(
+        root,
+        "my-style.md",
+        "---\nid: my-style\ntier: convention\nenforce: skill\n"
+        "deployed-to: .claude/skills/nested/deep/SKILL.md\n---\n",
+    )
+    skill_dir = root / ".claude" / "skills" / "nested" / "deep"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("meta/rules/my-style.md\n", encoding="utf-8")
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "must be a SKILL.md under .claude/skills/" in violations[0]
+
+
+def test_skill_shallow_path_is_rejected(tmp_path: Path) -> None:
+    # 얕은 쪽 경계(.claude/skills/SKILL.md, 3파트)도 스킬 위치가 아니다 —
+    # parts[:2]+name 검사만으로는 지금 통과하는 실존 구멍(#38 4R 리뷰).
+    root = make_repo(tmp_path)
+    write_rule(
+        root,
+        "my-style.md",
+        "---\nid: my-style\ntier: convention\nenforce: skill\n"
+        "deployed-to: .claude/skills/SKILL.md\n---\n",
+    )
+    skills_dir = root / ".claude" / "skills"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "SKILL.md").write_text("meta/rules/my-style.md\n", encoding="utf-8")
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "must be a SKILL.md under .claude/skills/" in violations[0]
+
+
+def test_skill_commented_reference_is_not_deployed(tmp_path: Path) -> None:
+    # #38 지점 배선(probe p2d 승격): 주석 속 참조는 배포가 아니다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-style.md", skill_rule("my-style"))
+    make_skill_deployment(root, "my-skill", "<!-- meta/rules/my-style.md -->\n")
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "does not reference" in violations[0]
+
+
 def write_template(root: Path, text: str) -> None:
-    """child 템플릿 파일을 만든다."""
+    """child 템플릿 파일을 만들거나 baseline을 덮어쓴다."""
     template = root / "meta" / "templates" / "CLAUDE.template.md"
-    template.parent.mkdir(parents=True)
+    template.parent.mkdir(parents=True, exist_ok=True)
     template.write_text(text, encoding="utf-8")
 
 
 def test_template_in_sync_passes(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "my-rule.md", valid_rule("my-rule"))
-    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    deploy_claude_md(root, "@meta/rules/my-rule.md")
     write_template(root, "@meta/rules/my-rule.md\n")
     assert check_rules(root) == []
 
@@ -936,7 +1177,7 @@ def test_template_in_sync_passes(tmp_path: Path) -> None:
 def test_template_missing_import(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "my-rule.md", valid_rule("my-rule"))
-    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    deploy_claude_md(root, "@meta/rules/my-rule.md")
     write_template(root, "# no imports\n")
     violations = check_rules(root)
     assert len(violations) == 1
@@ -946,12 +1187,108 @@ def test_template_missing_import(tmp_path: Path) -> None:
 def test_template_stale_import(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "my-rule.md", valid_rule("my-rule"))
-    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    deploy_claude_md(root, "@meta/rules/my-rule.md")
     write_template(root, "@meta/rules/my-rule.md\n@meta/rules/removed-rule.md\n")
     violations = check_rules(root)
+    # 지워진 규칙의 잔존 import는 드리프트(stale)이자 고아(#91)다.
+    assert len(violations) == 2
+    assert any("stale" in v and "'@meta/rules/removed-rule.md'" in v for v in violations)
+    assert any("orphan rule import" in v for v in violations)
+
+
+def test_template_fenced_import_counts_as_missing(tmp_path: Path) -> None:
+    # #38 지점 배선(probe p2c 승격): 템플릿 쪽 펜스 속 import는 집합에 없다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    deploy_claude_md(root, "@meta/rules/my-rule.md")
+    write_template(root, "```\n@meta/rules/my-rule.md\n```\n")
+    violations = check_rules(root)
     assert len(violations) == 1
-    assert "'@meta/rules/removed-rule.md'" in violations[0]
-    assert "stale" in violations[0]
+    assert "missing '@meta/rules/my-rule.md'" in violations[0]
+
+
+def test_root_commented_import_counts_as_stale(tmp_path: Path) -> None:
+    # #38 지점 배선(반대 방향): 루트 쪽이 주석이면 규칙 미배포 + 템플릿 stale.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    (root / "CLAUDE.md").write_text(
+        "<!-- @meta/rules/my-rule.md -->\n", encoding="utf-8"
+    )
+    write_template(root, "@meta/rules/my-rule.md\n")
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("declared but not actually deployed" in v for v in violations)
+    assert any("absent from root" in v for v in violations)
+
+
+def test_orphan_import_in_root_is_reported(tmp_path: Path) -> None:
+    # #91: 실존 규칙이 없는 import는 고아다 — 드리프트와 별개로 보고.
+    root = make_repo(tmp_path)
+    (root / "CLAUDE.md").write_text("@meta/rules/ghost.md\n", encoding="utf-8")
+    violations = check_rules(root)
+    assert len(violations) == 2
+    assert any("orphan rule import '@meta/rules/ghost.md'" in v for v in violations)
+    assert any("missing" in v for v in violations)
+
+
+def test_orphan_import_on_both_sides_is_reported(tmp_path: Path) -> None:
+    # #91의 침묵 케이스: 양쪽에 남은 고아는 sync가 통과시킨다 — 고아 검사만이
+    # 잡는다. 파일별 보고라 2건(복붙 수정 가능 메시지 관례).
+    root = make_repo(tmp_path)
+    deploy_claude_md(root, "@meta/rules/ghost.md")
+    violations = check_rules(root)
+    assert len(violations) == 2
+    assert all("orphan rule import '@meta/rules/ghost.md'" in v for v in violations)
+
+
+def test_traversal_import_is_orphan(tmp_path: Path) -> None:
+    # 리뷰 R1: ..로 meta/rules/ 밖 실존 파일을 가리키는 import는 파일 존재
+    # 검사를 통과했었다 — 레지스트리 대조는 통과시키지 않는다.
+    root = make_repo(tmp_path)
+    deploy_claude_md(root, "@meta/rules/../../CLAUDE.md")
+    violations = check_rules(root)
+    assert len(violations) == 2
+    assert all("orphan rule import" in v for v in violations)
+
+
+def test_non_rule_file_import_is_orphan(tmp_path: Path) -> None:
+    # 리뷰 R1: meta/rules/README.md는 실존하지만 규칙이 아니다.
+    root = make_repo(tmp_path)
+    write_rule(root, "README.md", "# not a rule\n")
+    deploy_claude_md(root, "@meta/rules/README.md")
+    violations = check_rules(root)
+    assert len(violations) == 2
+    assert all("orphan rule import" in v for v in violations)
+
+
+def test_missing_template_is_reported(tmp_path: Path) -> None:
+    # #38: 템플릿 부재의 유일한 감시자가 이 검사다 — 초록 통과 금지.
+    root = make_repo(tmp_path)
+    (root / "meta" / "templates" / "CLAUDE.template.md").unlink()
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "template sync target is missing" in violations[0]
+    assert "CLAUDE.template.md" in violations[0]
+
+
+def test_missing_root_claude_md_is_reported(tmp_path: Path) -> None:
+    # 루트 쪽 부재도 여기서 직접 보고한다 — claude-md 규칙이 하나도 없으면
+    # per-rule 검사의 backstop이 성립하지 않으므로(이중 보고 수용 패턴).
+    root = make_repo(tmp_path)
+    (root / "CLAUDE.md").unlink()
+    violations = check_rules(root)
+    assert len(violations) == 1
+    assert "template sync target is missing" in violations[0]
+    assert "CLAUDE.md" in violations[0]
+
+
+def test_both_sync_files_missing_are_reported(tmp_path: Path) -> None:
+    root = make_repo(tmp_path)
+    (root / "CLAUDE.md").unlink()
+    (root / "meta" / "templates" / "CLAUDE.template.md").unlink()
+    violations = check_rules(root)
+    assert len(violations) == 2
+    assert all("template sync target is missing" in v for v in violations)
 
 
 @pytest.mark.parametrize(
@@ -1011,7 +1348,7 @@ def test_inventory_file_missing(tmp_path: Path) -> None:
 def test_inventory_missing_rule_row(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "my-rule.md", valid_rule("my-rule"))
-    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    deploy_claude_md(root, "@meta/rules/my-rule.md")
     write_inventory(root, INVENTORY_SKELETON)  # 자동 등재된 행을 지운다
     violations = check_rules(root)
     assert len(violations) == 1
@@ -1022,7 +1359,7 @@ def test_inventory_missing_rules_heading(tmp_path: Path) -> None:
     # 헤딩 자체가 없으면 추출이 빈 집합이 되어 같은 forward 위반으로 드러난다.
     root = make_repo(tmp_path)
     write_rule(root, "my-rule.md", valid_rule("my-rule"))
-    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    deploy_claude_md(root, "@meta/rules/my-rule.md")
     write_inventory(
         root, "# inventory\n\n## Functional artifacts\n\n| name | notes |\n| --- | --- |\n"
     )
@@ -1141,7 +1478,7 @@ def test_inventory_runs_once_the_registry_is_clean(tmp_path: Path) -> None:
     # 보류는 한시적이다 — 규칙을 고치면 같은 드리프트가 바로 잡힌다.
     root = make_repo(tmp_path)
     write_rule(root, "my-rule.md", valid_rule("my-rule"))
-    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    deploy_claude_md(root, "@meta/rules/my-rule.md")
     make_infra_stack(root, "sandbox")
     violations = check_rules(root)
     assert not [v for v in violations if "coverage was not checked" in v]
@@ -1152,7 +1489,7 @@ def test_inventory_not_deferred_by_template_drift(tmp_path: Path) -> None:
     # 템플릿 동기화는 규칙 frontmatter와 무관하므로 보류 사유가 아니다.
     root = make_repo(tmp_path)
     write_rule(root, "my-rule.md", valid_rule("my-rule"))
-    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    deploy_claude_md(root, "@meta/rules/my-rule.md")
     write_template(root, "# no imports\n")
     make_infra_stack(root, "sandbox")
     violations = check_rules(root)
@@ -1193,7 +1530,7 @@ def test_inventory_uses_the_first_of_duplicated_headings(tmp_path: Path) -> None
     # 헤딩이 중복되면 첫 번째 구간만 읽는다 — 두 번째 블록은 추출되지 않는다.
     root = make_repo(tmp_path)
     write_rule(root, "my-rule.md", valid_rule("my-rule"))
-    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    deploy_claude_md(root, "@meta/rules/my-rule.md")
     write_inventory(
         root,
         "# inventory\n\n## Rules\n\n| id | notes |\n| --- | --- |\n"
@@ -1229,7 +1566,7 @@ def test_inventory_ignores_rows_outside_first_column_and_sections(
 ) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "my-rule.md", valid_rule("my-rule"))
-    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    deploy_claude_md(root, "@meta/rules/my-rule.md")
     write_inventory(
         root,
         "# inventory\n\n"
@@ -1245,7 +1582,7 @@ def test_inventory_ignores_rows_outside_first_column_and_sections(
 def test_inventory_tolerates_table_padding(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "my-rule.md", valid_rule("my-rule"))
-    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    deploy_claude_md(root, "@meta/rules/my-rule.md")
     write_inventory(
         root,
         "# inventory\n\n"
@@ -1260,7 +1597,7 @@ def test_inventory_tolerates_crlf_and_trailing_space(tmp_path: Path) -> None:
     # 헤딩 뒤 공백은 파이썬의 개행 정규화가 걷어내지 않으므로 rstrip이 필요하다.
     root = make_repo(tmp_path)
     write_rule(root, "my-rule.md", valid_rule("my-rule"))
-    (root / "CLAUDE.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    deploy_claude_md(root, "@meta/rules/my-rule.md")
     body = (root / "meta" / "README.md").read_text(encoding="utf-8")
     body = body.replace("## Rules\n", "## Rules  \n").replace("\n", "\r\n")
     (root / "meta" / "README.md").write_bytes(body.encode("utf-8"))
