@@ -508,7 +508,7 @@ def test_hook_package_without_init_is_rejected(tmp_path: Path) -> None:
 
 
 def test_hook_package_without_main_is_rejected(tmp_path: Path) -> None:
-    # __main__.py 없으면 python -m 진입점이 없어 훅이 조용히 no-op이 된다.
+    # __main__.py는 python -m 진입점 — 근거 서술의 SSOT는 검사 지점 주석.
     root = make_repo(tmp_path)
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
     make_hook_deployment(root, "my-guard", hook_settings(canonical_command("harness.my_guard")))

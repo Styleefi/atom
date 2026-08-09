@@ -523,15 +523,19 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
                 f"'meta/harness/{package_name}/' does not exist"
             )
         else:
-            # 두 파일 요구의 근거 서술은 여기가 SSOT다(#38; PR #92 R2에서
-            # 표면 축소 — 인과 주장을 여러 문서에 복제하다 두 번 과장됐다).
+            # 두 파일 요구의 근거 서술은 여기가 유일한 SSOT다(#38; PR #92
+            # R2-R3에서 표면 축소 완성 — 인과 주장을 여러 문서에 복제하다 두 번
+            # 과장됐고, 메시지에 남겼던 예외 카피도 지도와 어긋나 회수했다).
             # __main__.py 부재는 `python -m` 진입점 부재 — 훅이 래퍼 아래에서
             # 조용히 no-op이 된다(셸 실험으로 검증). __init__.py는 실행
             # 요건이 아니다 — namespace 패키지도 -m으로 돌아가고 meta/harness
             # 자체가 __init__.py 없이 돈다 — 모든 meta/harness 패키지를
-            # regular package로 통일하는 메타층 규약일 뿐이다. 파일 실존만
-            # 본다(빈 파일 통과는 문서화된 한계 — 임포트 오류는 pytest 몫).
-            # 디렉토리 부재 시엔 위 위반 하나로 충분해 파일 검사를 걸지 않는다.
+            # regular package로 통일하는 메타층 규약이며, 기계적 소비자는
+            # 인벤토리 분류 하나다(_expected_artifacts가 규칙 없는 하니스의
+            # 아티팩트 판정에 __init__.py 실존을 쓴다 — hook 패키지는 이름으로
+            # 제외되므로 이 검사와는 무관). 파일 실존만 본다(빈 파일 통과는
+            # 문서화된 한계 — 임포트 오류는 pytest 몫). 디렉토리 부재 시엔
+            # 위 위반 하나로 충분해 파일 검사를 걸지 않는다.
             if not (package_dir / "__init__.py").is_file():
                 violations.append(
                     f"{rel}: hook harness package "
@@ -542,7 +546,7 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
                 violations.append(
                     f"{rel}: hook harness package "
                     f"'meta/harness/{package_name}/' is missing __main__.py "
-                    "— `python -m` has no entry point, so the hook silently no-ops"
+                    "— the `python -m` entry point"
                 )
         return violations
 
