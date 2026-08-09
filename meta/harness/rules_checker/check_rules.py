@@ -27,9 +27,11 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
 규칙 단위 검사와 별개로 repo-level 검사를 셋 수행한다.
 
 - 템플릿 동기화: root CLAUDE.md와 child 템플릿(meta/templates/CLAUDE.template.md)
-  의 **활성** `@meta/rules/` import 집합이 동일한지 — 수동 동기화 지점의 침묵
+  이 실존하고(부재는 위반 — 템플릿은 이 검사가 유일한 감시자다, #38) 두 파일의
+  **활성** `@meta/rules/` import 집합이 동일한지 — 수동 동기화 지점의 침묵
   드리프트를 양방향으로 차단한다. skill 참조 검사도 같은 스캐너의 활성
-  텍스트에서만 substring을 본다.
+  텍스트에서만 substring을 본다. 활성 import가 가리키는 규칙 파일의 실존도
+  파일별로 확인한다(#91 — 지워진 규칙의 고아 import가 양쪽에 남는 침묵 채널).
 - hook 배선 역방향 스윕: 프로젝트 설정 파일(.claude/settings*.json — hook
   규칙이 없어도 무조건)과 hook 규칙들의 deployed-to에 있는 모든 훅 커맨드 중
   `-m harness.*`를 참조하는 것이 두 정본 래퍼 템플릿 중 하나와 정확히
