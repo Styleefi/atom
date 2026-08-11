@@ -908,20 +908,32 @@ def test_pathological_rule_yaml_does_not_kill_the_sweep(
     assert any("harness.legacy" in v for v in violations)
 
 
-def test_pathological_settings_does_not_kill_the_sweep(tmp_path: Path) -> None:
-    # settings 파일 하나의 파싱 사망(심중첩 JSON의 RecursionError — OSError도
-    # ValueError도 아님)이 스윕 전체를 뭉개면 안 된다(PR #93 R1 F1: 규칙
-    # 파일에 세 번 닫은 "하나가 전체를 가림" 클래스가 settings 대상 쪽에
-    # 열려 있었다). 대상별 가드가 다른 대상의 배선 위반을 보존해야 한다.
+def test_pathological_settings_does_not_kill_the_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # settings 파일 하나의 파싱 사망(_load_settings 분류 밖 예외 — 심중첩
+    # JSON의 RecursionError 등)이 스윕 전체를 뭉개면 안 된다(PR #93 R1 F1:
+    # 규칙 파일에 세 번 닫은 "하나가 전체를 가림" 클래스가 settings 대상
+    # 쪽에 열려 있었다). 대상별 가드가 다른 대상의 배선 위반을 보존해야
+    # 한다. 실입력(100k 중첩 [)으로 json 내부의 RecursionError를 때리는
+    # 방식은 CPython 구현 세부 의존이라, 형제 YAML 테스트의 수용된 고도
+    # (R1 F5)와 동일하게 대상 파일에서만 직접 raise하는 monkeypatch로 가드
+    # 영역을 핀한다(R2 F4). 기대 메시지는 rel 렌더링이라 Path로 조립한다 —
+    # POSIX 구분자 하드코딩은 native Windows에서 false red다(R2 F2).
     root = make_repo(tmp_path)
     write_legacy_wiring(root)
-    (root / ".claude" / "settings.local.json").write_text(
-        "[" * 100_000, encoding="utf-8"
-    )
+    (root / ".claude" / "settings.local.json").write_text("{}", encoding="utf-8")
+    real_load = check_rules_module._load_settings
+
+    def exploding_load(path: Path) -> tuple[dict | None, str | None]:
+        if path.name == "settings.local.json":
+            raise RecursionError("simulated pathological settings")
+        return real_load(path)
+
+    monkeypatch.setattr(check_rules_module, "_load_settings", exploding_load)
     violations = check_rules(root)
-    assert any(
-        ".claude/settings.local.json: internal checker error" in v for v in violations
-    )
+    expected = f"{Path('.claude') / 'settings.local.json'}: internal checker error"
+    assert any(expected in v for v in violations)
     assert any("harness.legacy" in v for v in violations)
 
 
