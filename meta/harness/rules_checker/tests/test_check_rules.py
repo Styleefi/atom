@@ -917,6 +917,29 @@ def test_unreadable_settings_is_a_violation_not_a_crash(tmp_path: Path) -> None:
     assert any("cannot verify hook wiring" in v for v in violations)
 
 
+def test_utf16_settings_reported_as_encoding_problem(tmp_path: Path) -> None:
+    # UnicodeDecodeError는 ValueError의 하위라 "is not valid JSON"으로
+    # 오분류되던 케이스 — JSON 문법이 멀쩡한 파일에 사실과 다른 진단을
+    # 내는 대신 인코딩 문제를 그대로 부른다(#42). 스윕도 같은 분류를 쓴다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text(
+        hook_settings(canonical_command("harness.my_guard")), encoding="utf-16"
+    )
+    make_harness_package(root, "my_guard")
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any(
+        "deployed-to target '.claude/settings.json' is not valid UTF-8" in v
+        for v in violations
+    )
+    assert any(
+        "cannot verify hook wiring — file is not valid UTF-8" in v
+        for v in violations
+    )
+
+
 def test_sweep_reports_unruled_corrupt_settings(tmp_path: Path) -> None:
     # hook 규칙이 없는 무조건 대상의 깨진 settings는 조용히 통과하면 안 된다
     # (리뷰 2R: 아무도 대신 보고하지 않는 조합이 green으로 새던 구멍).

@@ -299,6 +299,37 @@ def _import_lines(text: str) -> set[str]:
     return imports
 
 
+def _load_settings(path: Path) -> tuple[dict | None, str | None]:
+    """settings JSON 파일을 읽어 (최상위 객체, 문제 구절)로 돌려준다.
+
+    per-rule 검사와 역방향 스윕이 같은 실패 분류를 쓰게 하는 단일 로더다
+    (#42 — 같은 깨진 파일에 두 경로가 서로 다른 정밀도의 진단을 내던 중복).
+    실패 구절은 위반 메시지에 그대로 끼워 넣는 형태(주어 없는 서술)다.
+    UnicodeDecodeError는 ValueError의 하위라 반드시 먼저 잡는다 — JSON
+    문법이 멀쩡한 UTF-16 파일에 "is not valid JSON"이라고 답하지 않기 위함.
+    비객체(배열·null 등)는 파싱 성공이어도 문제로 분류한다 — 파싱 결과의
+    None을 실패 sentinel로 겸용하면 JSON 리터럴 null이 무위반 통과한다
+    (최종 게이트 리뷰: 침묵 통과 회귀).
+
+    Args:
+        path: settings JSON 파일 경로.
+
+    Returns:
+        (파싱된 dict, None) 또는 (None, 문제 구절) 튜플.
+    """
+    try:
+        parsed: object = json.loads(path.read_text(encoding="utf-8"))
+    except OSError:
+        return None, "cannot be read"
+    except UnicodeDecodeError:
+        return None, "is not valid UTF-8"
+    except ValueError:
+        return None, "is not valid JSON"
+    if not isinstance(parsed, dict):
+        return None, "is not a JSON object"
+    return parsed, None
+
+
 def _hook_commands(settings: dict) -> list[str]:
     """settings JSON의 hooks 구조에서 커맨드 문자열을 전부 뽑는다.
 
@@ -472,26 +503,11 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
                     f"{rel}: deployed-to target '{data['deployed-to']}' does not exist"
                 )
             else:
-                # problem 변수로 실패를 명시 추적한다 — parsed의 None을 실패
-                # sentinel로 겸용하면 JSON 리터럴 null이 무위반 통과한다
-                # (최종 게이트 리뷰: 침묵 통과 회귀).
-                problem: str | None = None
-                parsed: object = None
-                try:
-                    parsed = json.loads(target.read_text(encoding="utf-8"))
-                except OSError:
-                    problem = "cannot be read"
-                except ValueError:
-                    problem = "is not valid JSON"
-                if problem is None and not isinstance(parsed, dict):
-                    problem = "is not a JSON object"
+                settings, problem = _load_settings(target)
                 if problem is not None:
                     violations.append(
                         f"{rel}: deployed-to target '{data['deployed-to']}' {problem}"
                     )
-                else:
-                    assert isinstance(parsed, dict)
-                    settings = parsed
         if settings is not None:
             commands = _hook_commands(settings)
             matching = [c for c in commands if _references_module(c, module_name)]
@@ -911,20 +927,15 @@ def check_hook_wiring(root: Path) -> list[str]:
         if not target.is_file():
             continue
         rel = target.relative_to(root)
-        try:
-            settings: object = json.loads(target.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            settings = None
-        if not isinstance(settings, dict):
+        settings, problem = _load_settings(target)
+        if problem is not None:
             # ruled 대상도 예외 없이 보고한다 — 규칙별 검사는 frontmatter 오류
             # 등으로 조기 종료하면 여기까지 못 오므로, "규칙이 대신 보고한다"는
             # 면제 전제는 성립하지 않는다(최종 게이트 리뷰). ruled 대상의 이중
             # 보고는 per-rule/스윕 이중 검사와 같은 수용된 패턴.
-            violations.append(
-                f"{rel}: cannot verify hook wiring — file is unreadable or "
-                "not a JSON object"
-            )
+            violations.append(f"{rel}: cannot verify hook wiring — file {problem}")
             continue
+        assert settings is not None
         for command in _hook_commands(settings):
             tokens = _HOOK_MODULE_RE.findall(command)
             if not tokens:
