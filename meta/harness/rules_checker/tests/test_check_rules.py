@@ -149,7 +149,11 @@ def make_infra_stack(root: Path, name: str) -> None:
 
 
 def claude_md_rule(rule_id: str, deployed_to: str) -> str:
-    """deployed-to를 지정한 claude-md 규칙 본문을 만든다(#38 pin 테스트용)."""
+    """deployed-to를 지정한 claude-md 규칙 본문을 만든다.
+
+    valid_rule이 위임하는 공용 frontmatter 템플릿이다(#42) — #38 pin 테스트
+    전용이 아니므로 여기를 고치면 모든 claude-md 픽스처의 형태가 바뀐다.
+    """
     return (
         f"---\nid: {rule_id}\ntier: principle\nenforce: claude-md\n"
         f"deployed-to: {deployed_to}\n---\n\nbody\n"
@@ -881,7 +885,9 @@ def test_pathological_rule_yaml_does_not_kill_the_sweep(
     # 재귀 한계를 실제로 때리는 방식은 구현 세부 의존이라 파서가 반복
     # 구현으로 바뀌면 공허 통과한다(#43) — 마커를 심은 파일에서만 직접
     # raise하는 monkeypatch로 "파싱 중 어떤 예외"라는 가드 영역 자체를
-    # 구현 독립적으로 핀한다.
+    # 구현 독립적으로 핀한다. 실입력 심중첩을 실제 파서에 먹이는 커버리지는
+    # 이 재작성으로 의도적으로 내려놓았다 — 파서 교체 후 예외 대신 hang하는
+    # 부류는 미방어(수용된 트레이드오프, PR #93 R1 F5).
     root = make_repo(tmp_path)
     (root / "meta" / "rules" / "deep.md").write_text(
         "---\nid: deep\nexplode-marker: true\n---\n", encoding="utf-8"
