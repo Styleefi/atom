@@ -816,7 +816,12 @@ def test_broken_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
     # 규칙 파일 하나가 안 읽혀도(깨진 symlink) 스윕의 배선 위반은 살아야
     # 한다(최종 게이트 리뷰: 스윕 전체가 internal error 하나로 뭉개지던 가림).
     root = make_repo(tmp_path)
-    (root / "meta" / "rules" / "broken.md").symlink_to(root / "nonexistent.md")
+    try:
+        (root / "meta" / "rules" / "broken.md").symlink_to(root / "nonexistent.md")
+    except OSError:
+        # symlink 생성이 특권인 플랫폼(Developer Mode 없는 Windows, 제한된
+        # CI 컨테이너)에서는 에러가 아니라 능력 부재 skip이다(#43).
+        pytest.skip("symlink creation is not permitted on this platform")
     legacy = (
         "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
         '"$CLAUDE_PROJECT_DIR/meta" python -m harness.legacy; fi'
@@ -903,7 +908,11 @@ def test_skill_bad_path_does_not_mask_shape(tmp_path: Path) -> None:
     assert any("must be a SKILL.md under .claude/skills/" in v for v in violations)
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root는 mode 000도 읽을 수 있다")
+# getattr 폴백 — skipif 표현식은 수집 시점에 평가되므로 geteuid가 없는
+# 플랫폼(native Windows)에서는 모듈 수집 자체가 죽는다(#43).
+@pytest.mark.skipif(
+    getattr(os, "geteuid", lambda: -1)() == 0, reason="root는 mode 000도 읽을 수 있다"
+)
 def test_unreadable_settings_is_a_violation_not_a_crash(tmp_path: Path) -> None:
     # 읽기 불가 settings는 traceback이 아니라 위반이다(리뷰 2R: per-rule
     # read_text가 OSError 미포착으로 체커 사망).
