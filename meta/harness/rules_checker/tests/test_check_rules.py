@@ -208,6 +208,21 @@ def test_invalid_tier_enum(tmp_path: Path) -> None:
     assert "invalid tier value 'law'" in violations[0]
 
 
+def test_non_string_tier_is_invalid_not_a_crash(tmp_path: Path) -> None:
+    # 비문자열(비해시형) tier는 `in VALID_TIER`에서 TypeError로 새지 않고
+    # 기존 invalid-value 메시지로 깨끗하게 보고돼야 한다(#43).
+    root = make_repo(tmp_path)
+    write_rule(
+        root,
+        "bad-tier.md",
+        "---\nid: bad-tier\ntier: {a: b}\nenforce: claude-md\ndeployed-to: CLAUDE.md\n---\n",
+    )
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "invalid tier value" in violations[0]
+    assert "internal checker error" not in violations[0]
+
+
 def test_invalid_enforce_enum(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(
@@ -998,8 +1013,15 @@ def test_checker_never_raises_on_malformed_inputs(tmp_path: Path) -> None:
             (root / ".claude" / "settings.json").write_text(
                 settings_text, encoding="utf-8"
             )
-        # 예외 없이 위반 목록이 나오면 통과 — 내용은 각 시나리오 테스트가 핀.
-        assert isinstance(check_rules(root), list)
+        # 위반이 나오되 전역 방어(internal error)로 넘어진 것이면 안 된다 —
+        # isinstance(list) 단언은 전역 변환이 무조건 보장하는 동어반복이라
+        # 케이스 하나가 내부에서 죽어도 green이었다(#43). 내용은 각 시나리오
+        # 테스트가 핀하고, 여기서는 "깨끗한 위반으로 보고됐다"만 고정한다.
+        violations = check_rules(root)
+        assert violations, f"case {i}: expected violations"
+        assert not any("internal checker error" in v for v in violations), (
+            f"case {i}: {violations}"
+        )
 
 
 def test_missing_blocking_does_not_mask_other_defects(tmp_path: Path) -> None:

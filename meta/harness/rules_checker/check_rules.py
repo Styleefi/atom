@@ -402,8 +402,10 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
             f"{rel}: id '{data['id']}' does not match filename stem '{rule_path.stem}'"
         )
 
+    # isinstance 선행 — 비문자열(비해시형 dict/list 포함)이 `in` 멤버십에서
+    # TypeError로 새지 않고 기존 invalid-value 메시지로 보고되게 한다(#43).
     tier = data["tier"]
-    if tier not in VALID_TIER:
+    if not isinstance(tier, str) or tier not in VALID_TIER:
         violations.append(
             f"{rel}: invalid tier value '{tier}' "
             f"(allowed: {', '.join(sorted(VALID_TIER))})"
@@ -411,7 +413,7 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         return violations
 
     enforce = data["enforce"]
-    if enforce not in VALID_ENFORCE:
+    if not isinstance(enforce, str) or enforce not in VALID_ENFORCE:
         violations.append(
             f"{rel}: invalid enforce value '{enforce}' "
             f"(allowed: {', '.join(sorted(VALID_ENFORCE))})"
