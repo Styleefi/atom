@@ -959,8 +959,11 @@ def test_unreadable_settings_is_a_violation_not_a_crash(tmp_path: Path) -> None:
 
 def test_utf16_settings_reported_as_encoding_problem(tmp_path: Path) -> None:
     # UnicodeDecodeError는 ValueError의 하위라 "is not valid JSON"으로
-    # 오분류되던 케이스 — JSON 문법이 멀쩡한 파일에 사실과 다른 진단을
+    # 오분류되던 케이스 — 디코드가 실패하는 파일에 사실과 다른 진단을
     # 내는 대신 인코딩 문제를 그대로 부른다(#42). 스윕도 같은 분류를 쓴다.
+    # write_text의 utf-16은 BOM을 앞세워 UTF-8 디코드가 실패하는 형태다 —
+    # BOM 없는 UTF-16LE는 디코드가 우연히 성공해 이 분류 밖(문서화된 한계,
+    # _load_settings docstring 참조).
     root = make_repo(tmp_path)
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
     (root / ".claude").mkdir()

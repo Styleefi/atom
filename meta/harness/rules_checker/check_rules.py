@@ -305,8 +305,11 @@ def _load_settings(path: Path) -> tuple[dict | None, str | None]:
     per-rule 검사와 역방향 스윕이 같은 실패 분류를 쓰게 하는 단일 로더다
     (#42 — 같은 깨진 파일에 두 경로가 서로 다른 정밀도의 진단을 내던 중복).
     실패 구절은 위반 메시지에 그대로 끼워 넣는 형태(주어 없는 서술)다.
-    UnicodeDecodeError는 ValueError의 하위라 반드시 먼저 잡는다 — JSON
-    문법이 멀쩡한 UTF-16 파일에 "is not valid JSON"이라고 답하지 않기 위함.
+    UnicodeDecodeError는 ValueError의 하위라 반드시 먼저 잡는다 — UTF-8
+    디코드가 실패하는 파일(BOM 있는 UTF-16 등)에 "is not valid JSON"이라고
+    답하지 않기 위함. 분류 기준은 바이트의 실제 인코딩이 아니라 디코드
+    결과다(문서화된 한계) — 디코드가 우연히 성공하는 인코딩(BOM 없는
+    UTF-16LE의 NUL 바이트는 유효한 UTF-8)은 여전히 JSON 오류로 보고된다.
     비객체(배열·null 등)는 파싱 성공이어도 문제로 분류한다 — 파싱 결과의
     None을 실패 sentinel로 겸용하면 JSON 리터럴 null이 무위반 통과한다
     (최종 게이트 리뷰: 침묵 통과 회귀).
