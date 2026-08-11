@@ -406,6 +406,29 @@ def _skill_path_shape_violations(rel: Path, deployed_to: str) -> list[str]:
     return []
 
 
+def _resolve_deploy_target(root: Path, rel: Path, data: dict) -> tuple[Path, str | None]:
+    """deployed-to를 대상 경로로 해석하고 부재 여부를 판정한다.
+
+    hook 분기와 일반 분기가 같은 해석·부재 메시지를 복붙하던 것을 단일화한다
+    (#42). 부재 시의 제어 흐름(위반 누적 후 의존 검사만 skip vs 조기 return)은
+    호출 지점마다 다르게 핀돼 있으므로 여기서는 값 도출만 맡는다.
+
+    Args:
+        root: 저장소 루트.
+        rel: 위반 메시지에 앞세울 규칙 파일의 상대 경로.
+        data: 파싱된 frontmatter.
+
+    Returns:
+        (대상 경로, 부재 위반 메시지 or None) 튜플.
+    """
+    target = root / str(data["deployed-to"])
+    if not target.is_file():
+        return target, (
+            f"{rel}: deployed-to target '{data['deployed-to']}' does not exist"
+        )
+    return target, None
+
+
 def check_rule_file(rule_path: Path, root: Path) -> list[str]:
     """규칙 파일 하나를 검증하고 위반 목록을 돌려준다.
 
@@ -494,14 +517,15 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         # 의존 검사만 건너뛰며, 패키지 실존 검사는 항상 수행한다.
         # 한계: 이벤트/matcher 위치까지는 보지 않는다 — 차단형 템플릿이
         # UserPromptSubmit 아래에 있어도 통과한다(기계 검증은 범위 밖 결정).
-        module_name = "harness." + rule_path.stem.replace("-", "_")
+        # id→패키지 매핑은 여기서 한 번만 도출한다 — 모듈 참조 검사와 패키지
+        # 실존 검사가 독립 도출로 어긋날 수 있던 이중화 제거(#42).
+        package_name = rule_path.stem.replace("-", "_")
+        module_name = f"harness.{package_name}"
         settings: dict | None = None
         if not bad_path:
-            target = root / str(data["deployed-to"])
-            if not target.is_file():
-                violations.append(
-                    f"{rel}: deployed-to target '{data['deployed-to']}' does not exist"
-                )
+            target, missing = _resolve_deploy_target(root, rel, data)
+            if missing is not None:
+                violations.append(missing)
             else:
                 settings, problem = _load_settings(target)
                 if problem is not None:
@@ -533,7 +557,6 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
                             f"match the canonical {shape} wrapper (#31 fail-open "
                             f"wiring) — got: {command} — expected exactly: {expected}"
                         )
-        package_name = rule_path.stem.replace("-", "_")
         package_dir = root / "meta" / "harness" / package_name
         if not package_dir.is_dir():
             violations.append(
@@ -592,11 +615,9 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
     if bad_path:
         return violations
 
-    target = root / str(data["deployed-to"])
-    if not target.is_file():
-        violations.append(
-            f"{rel}: deployed-to target '{data['deployed-to']}' does not exist"
-        )
+    target, missing = _resolve_deploy_target(root, rel, data)
+    if missing is not None:
+        violations.append(missing)
         return violations
 
     if enforce == "claude-md":
