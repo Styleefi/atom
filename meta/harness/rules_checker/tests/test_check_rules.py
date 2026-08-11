@@ -16,7 +16,6 @@ meta/README.md를 가져야 한다. 이를 개별 테스트에 떠넘기지 않�
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -968,18 +967,28 @@ def test_skill_bad_path_does_not_mask_shape(tmp_path: Path) -> None:
     assert any("must be a SKILL.md under .claude/skills/" in v for v in violations)
 
 
-# getattr 폴백 — skipif 표현식은 수집 시점에 평가되므로 geteuid가 없는
-# 플랫폼(native Windows)에서는 모듈 수집 자체가 죽는다(#43). 폴백은 0이어야
-# 한다 — geteuid 없는 플랫폼은 POSIX 모드 비트도 지원하지 않아 chmod(0o000)
-# 이 읽기를 못 막으므로 root와 같은 사유로 skip이 정답이다. -1 폴백은
-# 수집만 살리고 테스트를 실행시켜 그 플랫폼에서 오탐 red를 냈다(PR #93 R1).
-@pytest.mark.skipif(
-    getattr(os, "geteuid", lambda: 0)() == 0,
-    reason="root 또는 POSIX 모드 비트 미지원 플랫폼은 mode 000도 읽을 수 있다",
-)
 def test_unreadable_settings_is_a_violation_not_a_crash(tmp_path: Path) -> None:
     # 읽기 불가 settings는 traceback이 아니라 위반이다(리뷰 2R: per-rule
     # read_text가 OSError 미포착으로 체커 사망).
+    # 전제(mode 000이 읽기를 막는다)는 플랫폼 프록시가 아니라 능력 probe로
+    # 확인한다 — geteuid 기반 skipif는 수집 시점 사망(#43)을 거쳐 "geteuid
+    # 없음 = 모드 비트 미지원"이라는 미검증 가정까지 왔던 경로다(PR #93
+    # R1-R2). probe는 root(000도 읽힘)와 비POSIX 플랫폼을 같은 사유로 자연
+    # 포섭한다 — symlink probe(R1 F4)와 같은 고도.
+    probe = tmp_path / "mode-probe"
+    probe.write_text("x", encoding="utf-8")
+    probe.chmod(0o000)
+    try:
+        try:
+            probe.read_text(encoding="utf-8")
+            readable = True
+        except OSError:
+            readable = False
+    finally:
+        # 000 잔재는 tmp_path 청소를 방해할 수 있다 — 원복.
+        probe.chmod(0o600)
+    if readable:
+        pytest.skip("mode 000 does not prevent reading in this environment")
     root = make_repo(tmp_path)
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
     settings = hook_settings(canonical_command("harness.my_guard"))
