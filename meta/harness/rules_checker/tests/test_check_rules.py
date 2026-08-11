@@ -217,18 +217,30 @@ def test_invalid_tier_enum(tmp_path: Path) -> None:
     assert "invalid tier value 'law'" in violations[0]
 
 
-def test_non_string_tier_is_invalid_not_a_crash(tmp_path: Path) -> None:
-    # 비문자열(비해시형) tier는 `in VALID_TIER`에서 TypeError로 새지 않고
-    # 기존 invalid-value 메시지로 깨끗하게 보고돼야 한다(#43).
+@pytest.mark.parametrize(
+    ("field_lines", "expected"),
+    [
+        ("tier: {a: b}\nenforce: claude-md", "invalid tier value"),
+        ("tier: convention\nenforce: {a: b}", "invalid enforce value"),
+    ],
+    ids=["tier", "enforce"],
+)
+def test_non_string_enum_is_invalid_not_a_crash(
+    tmp_path: Path, field_lines: str, expected: str
+) -> None:
+    # 비문자열(비해시형) tier/enforce는 `in VALID_*` 멤버십에서 TypeError로
+    # 새지 않고 기존 invalid-value 메시지로 깨끗하게 보고돼야 한다(#43).
+    # enforce 케이스는 PR #93 R1 F6 — fuzz의 유일한 비문자열 케이스는 tier에서
+    # 조기 return해 enforce 가드가 미핀이었다(mutation 생존 실측).
     root = make_repo(tmp_path)
     write_rule(
         root,
-        "bad-tier.md",
-        "---\nid: bad-tier\ntier: {a: b}\nenforce: claude-md\ndeployed-to: CLAUDE.md\n---\n",
+        "bad-enum.md",
+        f"---\nid: bad-enum\n{field_lines}\ndeployed-to: CLAUDE.md\n---\n",
     )
     violations = rule_violations(root)
     assert len(violations) == 1
-    assert "invalid tier value" in violations[0]
+    assert expected in violations[0]
     assert "internal checker error" not in violations[0]
 
 
