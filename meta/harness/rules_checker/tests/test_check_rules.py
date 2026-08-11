@@ -935,9 +935,13 @@ def test_skill_bad_path_does_not_mask_shape(tmp_path: Path) -> None:
 
 
 # getattr 폴백 — skipif 표현식은 수집 시점에 평가되므로 geteuid가 없는
-# 플랫폼(native Windows)에서는 모듈 수집 자체가 죽는다(#43).
+# 플랫폼(native Windows)에서는 모듈 수집 자체가 죽는다(#43). 폴백은 0이어야
+# 한다 — geteuid 없는 플랫폼은 POSIX 모드 비트도 지원하지 않아 chmod(0o000)
+# 이 읽기를 못 막으므로 root와 같은 사유로 skip이 정답이다. -1 폴백은
+# 수집만 살리고 테스트를 실행시켜 그 플랫폼에서 오탐 red를 냈다(PR #93 R1).
 @pytest.mark.skipif(
-    getattr(os, "geteuid", lambda: -1)() == 0, reason="root는 mode 000도 읽을 수 있다"
+    getattr(os, "geteuid", lambda: 0)() == 0,
+    reason="root 또는 POSIX 모드 비트 미지원 플랫폼은 mode 000도 읽을 수 있다",
 )
 def test_unreadable_settings_is_a_violation_not_a_crash(tmp_path: Path) -> None:
     # 읽기 불가 settings는 traceback이 아니라 위반이다(리뷰 2R: per-rule
