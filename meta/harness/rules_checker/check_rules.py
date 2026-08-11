@@ -948,38 +948,62 @@ def check_hook_wiring(root: Path) -> list[str]:
         if not target.is_file():
             continue
         rel = target.relative_to(root)
-        settings, problem = _load_settings(target)
-        if problem is not None:
-            # ruled 대상도 예외 없이 보고한다 — 규칙별 검사는 frontmatter 오류
-            # 등으로 조기 종료하면 여기까지 못 오므로, "규칙이 대신 보고한다"는
-            # 면제 전제는 성립하지 않는다(최종 게이트 리뷰). ruled 대상의 이중
-            # 보고는 per-rule/스윕 이중 검사와 같은 수용된 패턴.
-            violations.append(f"{rel}: cannot verify hook wiring — file {problem}")
-            continue
-        assert settings is not None
-        for command in _hook_commands(settings):
-            tokens = _HOOK_MODULE_RE.findall(command)
-            if not tokens:
-                continue
-            if len(set(tokens)) > 1:
-                violations.append(
-                    f"{rel}: hook command references multiple harness modules "
-                    f"({', '.join(sorted(set(tokens)))}) — split into one "
-                    "canonical hook command per module"
-                )
-                continue
-            module = tokens[0]
-            expected_blocking = HOOK_COMMAND_BLOCKING.replace("{module}", module)
-            expected_non_blocking = HOOK_COMMAND_NON_BLOCKING.replace(
-                "{module}", module
+        try:
+            violations.extend(_target_wiring_violations(rel, target))
+        except Exception as exc:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
+            # 대상 파일 하나의 파싱 사망(심중첩 JSON의 RecursionError 등 —
+            # _load_settings 분류 밖 예외)이 스윕 전체를 뭉개면 다른 대상의
+            # 배선 위반이 가려진다 — 규칙 순회의 per-rule 가드와 같은 영역
+            # 가드로 사망을 대상 단위에 국지화한다(PR #93 R1).
+            violations.append(
+                f"{rel}: internal checker error — {type(exc).__name__}: {exc}"
             )
-            if command not in (expected_blocking, expected_non_blocking):
-                violations.append(
-                    f"{rel}: hook command referencing '{module}' matches neither "
-                    f"canonical wrapper (#31 fail-open wiring) — got: {command} "
-                    f"— expected exactly (blocking): {expected_blocking} — or "
-                    f"(non-blocking): {expected_non_blocking}"
-                )
+    return violations
+
+
+def _target_wiring_violations(rel: Path, target: Path) -> list[str]:
+    """settings 대상 파일 하나의 훅 배선 위반을 돌려준다(check_hook_wiring 전용).
+
+    Args:
+        rel: 위반 메시지에 앞세울 대상 파일의 상대 경로.
+        target: 검사할 settings JSON 경로.
+
+    Returns:
+        위반 메시지 목록. 비어 있으면 통과.
+    """
+    violations: list[str] = []
+    settings, problem = _load_settings(target)
+    if problem is not None:
+        # ruled 대상도 예외 없이 보고한다 — 규칙별 검사는 frontmatter 오류
+        # 등으로 조기 종료하면 여기까지 못 오므로, "규칙이 대신 보고한다"는
+        # 면제 전제는 성립하지 않는다(최종 게이트 리뷰). ruled 대상의 이중
+        # 보고는 per-rule/스윕 이중 검사와 같은 수용된 패턴.
+        violations.append(f"{rel}: cannot verify hook wiring — file {problem}")
+        return violations
+    assert settings is not None
+    for command in _hook_commands(settings):
+        tokens = _HOOK_MODULE_RE.findall(command)
+        if not tokens:
+            continue
+        if len(set(tokens)) > 1:
+            violations.append(
+                f"{rel}: hook command references multiple harness modules "
+                f"({', '.join(sorted(set(tokens)))}) — split into one "
+                "canonical hook command per module"
+            )
+            continue
+        module = tokens[0]
+        expected_blocking = HOOK_COMMAND_BLOCKING.replace("{module}", module)
+        expected_non_blocking = HOOK_COMMAND_NON_BLOCKING.replace(
+            "{module}", module
+        )
+        if command not in (expected_blocking, expected_non_blocking):
+            violations.append(
+                f"{rel}: hook command referencing '{module}' matches neither "
+                f"canonical wrapper (#31 fail-open wiring) — got: {command} "
+                f"— expected exactly (blocking): {expected_blocking} — or "
+                f"(non-blocking): {expected_non_blocking}"
+            )
     return violations
 
 

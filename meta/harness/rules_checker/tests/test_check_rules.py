@@ -886,6 +886,23 @@ def test_pathological_rule_yaml_does_not_kill_the_sweep(
     assert any("harness.legacy" in v for v in violations)
 
 
+def test_pathological_settings_does_not_kill_the_sweep(tmp_path: Path) -> None:
+    # settings 파일 하나의 파싱 사망(심중첩 JSON의 RecursionError — OSError도
+    # ValueError도 아님)이 스윕 전체를 뭉개면 안 된다(PR #93 R1 F1: 규칙
+    # 파일에 세 번 닫은 "하나가 전체를 가림" 클래스가 settings 대상 쪽에
+    # 열려 있었다). 대상별 가드가 다른 대상의 배선 위반을 보존해야 한다.
+    root = make_repo(tmp_path)
+    write_legacy_wiring(root)
+    (root / ".claude" / "settings.local.json").write_text(
+        "[" * 100_000, encoding="utf-8"
+    )
+    violations = check_rules(root)
+    assert any(
+        ".claude/settings.local.json: internal checker error" in v for v in violations
+    )
+    assert any("harness.legacy" in v for v in violations)
+
+
 def test_skill_missing_target_does_not_mask_shape(tmp_path: Path) -> None:
     # 대상 파일 부재가 SKILL.md 형태 위반을 가리면 안 된다(탈출 관찰 라운드:
     # bad_path만 고치고 missing-target 경로에 같은 가림이 남아 있었다).
