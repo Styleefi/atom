@@ -812,6 +812,22 @@ def test_broken_rule_plus_corrupt_settings_both_reported(tmp_path: Path) -> None
     assert any("cannot verify hook wiring" in v for v in violations)
 
 
+def write_legacy_wiring(root: Path) -> None:
+    """스윕이 잡아야 할 구식(exec) harness.legacy 배선을 settings에 심는다.
+
+    *_does_not_kill_the_sweep 계열의 공용 픽스처 — "깨진 규칙 파일 곁에서도
+    스윕의 배선 위반은 살아 있다"의 배선 절반을 담당한다(#43 복붙 제거).
+    """
+    legacy = (
+        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
+        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.legacy; fi'
+    )
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text(
+        hook_settings(legacy), encoding="utf-8"
+    )
+
+
 def test_broken_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
     # 규칙 파일 하나가 안 읽혀도(깨진 symlink) 스윕의 배선 위반은 살아야
     # 한다(최종 게이트 리뷰: 스윕 전체가 internal error 하나로 뭉개지던 가림).
@@ -822,14 +838,7 @@ def test_broken_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
         # symlink 생성이 특권인 플랫폼(Developer Mode 없는 Windows, 제한된
         # CI 컨테이너)에서는 에러가 아니라 능력 부재 skip이다(#43).
         pytest.skip("symlink creation is not permitted on this platform")
-    legacy = (
-        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
-        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.legacy; fi'
-    )
-    (root / ".claude").mkdir()
-    (root / ".claude" / "settings.json").write_text(
-        hook_settings(legacy), encoding="utf-8"
-    )
+    write_legacy_wiring(root)
     violations = rule_violations(root)
     # per-rule 방어의 보고인지(스윕 붕괴 메시지가 아니라) 규칙 경로로 앵커한다.
     assert any("meta/rules/broken.md: internal checker error" in v for v in violations)
@@ -841,14 +850,7 @@ def test_non_utf8_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
     # 안 된다(탈출 관찰 라운드: OSError만 잡던 가드가 같은 가림을 재발시킴).
     root = make_repo(tmp_path)
     (root / "meta" / "rules" / "badenc.md").write_bytes(b"\xbe\xbe\xbe")
-    legacy = (
-        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
-        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.legacy; fi'
-    )
-    (root / ".claude").mkdir()
-    (root / ".claude" / "settings.json").write_text(
-        hook_settings(legacy), encoding="utf-8"
-    )
+    write_legacy_wiring(root)
     violations = rule_violations(root)
     assert any("meta/rules/badenc.md: internal checker error" in v for v in violations)
     assert any("harness.legacy" in v for v in violations)
@@ -862,14 +864,7 @@ def test_pathological_rule_yaml_does_not_kill_the_sweep(tmp_path: Path) -> None:
     (root / "meta" / "rules" / "deep.md").write_text(
         "---\nx: " + "[" * 8000 + "\n---\n", encoding="utf-8"
     )
-    legacy = (
-        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
-        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.legacy; fi'
-    )
-    (root / ".claude").mkdir()
-    (root / ".claude" / "settings.json").write_text(
-        hook_settings(legacy), encoding="utf-8"
-    )
+    write_legacy_wiring(root)
     violations = rule_violations(root)
     # 형제 테스트들과 동일하게 "run은 red" 절반도 핀한다 — 규칙이 조용히
     # 건너뛰어지는 회귀를 이 테스트만 놓치면 안 된다(최종 게이트 R6).
@@ -1071,24 +1066,16 @@ def test_missing_blocking_does_not_mask_other_defects(tmp_path: Path) -> None:
     assert any("does not exist" in v for v in violations)
 
 
-def test_hook_rule_with_non_object_settings(tmp_path: Path) -> None:
-    # 배열 등 비객체 settings는 전용 메시지로 보고한다(리뷰 발견: "not
-    # referenced"로 오도하던 케이스). 스윕도 예외 없이 함께 보고한다.
+@pytest.mark.parametrize("payload", ["[]", "null"], ids=["array", "null"])
+def test_non_object_settings_is_rejected(tmp_path: Path, payload: str) -> None:
+    # 파싱은 성공하지만 객체가 아닌 settings는 전용 메시지로 보고하고, 스윕도
+    # 예외 없이 함께 보고한다. array: "not referenced"로 오도하던 케이스(리뷰
+    # 발견). null: parsed의 None 겸용 sentinel이 만든 침묵 통과 회귀(최종
+    # 게이트 리뷰). 단언이 동일한 쌍이라 parametrize로 묶는다(#43 — 두 벌
+    # 유지 시 한쪽만 고쳐지는 부분 편집 드리프트).
     root = make_repo(tmp_path)
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
-    make_hook_deployment(root, "my-guard", "[]")
-    violations = rule_violations(root)
-    assert len(violations) == 2
-    assert any("is not a JSON object" in v for v in violations)
-    assert any("cannot verify hook wiring" in v for v in violations)
-
-
-def test_null_settings_is_rejected(tmp_path: Path) -> None:
-    # JSON 리터럴 null은 무위반 통과가 아니라 비객체 위반이다(최종 게이트
-    # 리뷰: parsed의 None 겸용 sentinel이 만든 침묵 통과 회귀).
-    root = make_repo(tmp_path)
-    write_rule(root, "my-guard.md", hook_rule("my-guard"))
-    make_hook_deployment(root, "my-guard", "null")
+    make_hook_deployment(root, "my-guard", payload)
     violations = rule_violations(root)
     assert len(violations) == 2
     assert any("is not a JSON object" in v for v in violations)
