@@ -16,6 +16,7 @@ rules_checker의 정본 템플릿(HOOK_COMMAND_BLOCKING/NON_BLOCKING)을 실제
 
 from __future__ import annotations
 
+import importlib
 import shutil
 import subprocess
 from pathlib import Path
@@ -130,19 +131,30 @@ def test_non_blocking_wrapper_passes_stdout_through(tmp_path: Path) -> None:
     assert result.stdout.strip() == "REMINDER"
 
 
-def test_blocking_template_remaps_the_guards_sentinel() -> None:
-    # 가드 상수 ↔ 래퍼 템플릿의 실결합(리뷰 발견: 트리비얼 ==42 단정은 아무
-    # 것도 묶지 못함). 값이 갈라지면 차단이 조용히 비차단 경고로 강등되므로,
-    # 템플릿 문자열이 각 가드의 EXIT_BLOCK을 되매핑 조건으로 쓰는지 대조한다.
-    # importorskip: 가드를 정합하게 제거한 자식 프로젝트에서 이 파일 수집이
-    # 통째로 죽지 않도록(리뷰 2R) 모듈 부재는 이 테스트만 skip으로 수렴시킨다.
-    for module_name in (
+@pytest.mark.parametrize(
+    "module_name",
+    [
         "harness.commit_backstop.backstop",
         "harness.commit_guard.guard",
         "harness.issue_duplicate_guard.guard",
-    ):
-        guard = pytest.importorskip(module_name)
-        assert f'-eq {guard.EXIT_BLOCK} ' in HOOK_COMMAND_BLOCKING
+    ],
+)
+def test_blocking_template_remaps_the_guards_sentinel(module_name: str) -> None:
+    # 가드 상수 ↔ 래퍼 템플릿의 실결합(리뷰 발견: 트리비얼 ==42 단정은 아무
+    # 것도 묶지 못함). 값이 갈라지면 차단이 조용히 비차단 경고로 강등되므로,
+    # 템플릿 문자열이 각 가드의 EXIT_BLOCK을 되매핑 조건으로 쓰는지 대조한다.
+    # skip은 "가드를 정합하게 제거한 자식 프로젝트"만을 위한 완화이므로 그
+    # 모듈(또는 그 가드 패키지) 자체의 부재로 좁힌다 — importorskip은 가드
+    # 내부의 깨진 import까지 삼켜 결합 검증을 침묵 skip시켰다(#43). 가드별
+    # parametrize라 한 가드의 skip이 나머지 검증을 막지도 않는다. 최상위
+    # harness 부재는 이 파일의 모듈 레벨 import가 먼저 죽어 여기 도달 불가.
+    try:
+        guard = importlib.import_module(module_name)
+    except ModuleNotFoundError as exc:
+        if exc.name in (module_name, module_name.rsplit(".", 1)[0]):
+            pytest.skip(f"guard module removed: {exc.name}")
+        raise
+    assert f'-eq {guard.EXIT_BLOCK} ' in HOOK_COMMAND_BLOCKING
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv not installed")
