@@ -148,12 +148,21 @@ def make_infra_stack(root: Path, name: str) -> None:
     (root / "meta" / "infra" / name).mkdir(parents=True, exist_ok=True)
 
 
-def valid_rule(rule_id: str) -> str:
-    """유효한 claude-md 규칙 본문을 만든다."""
+def claude_md_rule(rule_id: str, deployed_to: str) -> str:
+    """deployed-to를 지정한 claude-md 규칙 본문을 만든다(#38 pin 테스트용)."""
     return (
         f"---\nid: {rule_id}\ntier: principle\nenforce: claude-md\n"
-        "deployed-to: CLAUDE.md\n---\n\nbody\n"
+        f"deployed-to: {deployed_to}\n---\n\nbody\n"
     )
+
+
+def valid_rule(rule_id: str) -> str:
+    """유효한 claude-md 규칙 본문을 만든다.
+
+    claude_md_rule에 위임한다 — frontmatter 템플릿을 두 헬퍼가 독립 보유하면
+    스키마 변경 시 한쪽만 고쳐져 서로 다른 규칙 형태를 검사하게 된다(#42).
+    """
+    return claude_md_rule(rule_id, "CLAUDE.md")
 
 
 def test_valid_rule_passes(tmp_path: Path) -> None:
@@ -297,14 +306,6 @@ def test_declared_but_not_deployed(tmp_path: Path) -> None:
     violations = rule_violations(root)
     assert len(violations) == 1
     assert "declared but not actually deployed" in violations[0]
-
-
-def claude_md_rule(rule_id: str, deployed_to: str) -> str:
-    """deployed-to를 지정한 claude-md 규칙 본문을 만든다(#38 pin 테스트용)."""
-    return (
-        f"---\nid: {rule_id}\ntier: principle\nenforce: claude-md\n"
-        f"deployed-to: {deployed_to}\n---\n\nbody\n"
-    )
 
 
 def test_claude_md_arbitrary_file_is_rejected(tmp_path: Path) -> None:
