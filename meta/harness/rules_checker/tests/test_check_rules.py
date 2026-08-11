@@ -833,11 +833,15 @@ def test_broken_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
     # 한다(최종 게이트 리뷰: 스윕 전체가 internal error 하나로 뭉개지던 가림).
     root = make_repo(tmp_path)
     try:
-        (root / "meta" / "rules" / "broken.md").symlink_to(root / "nonexistent.md")
+        # 능력 probe는 항상-새로운 전용 경로에서 한다 — 실제 픽스처 생성까지
+        # try로 감싸면 능력과 무관한 OSError(픽스처 드리프트의 FileExistsError
+        # 등)도 조용히 skip으로 수렴해 이 핀 자체가 은퇴한다(PR #93 R1).
+        (tmp_path / "symlink-probe").symlink_to(tmp_path / "missing")
     except OSError:
         # symlink 생성이 특권인 플랫폼(Developer Mode 없는 Windows, 제한된
         # CI 컨테이너)에서는 에러가 아니라 능력 부재 skip이다(#43).
         pytest.skip("symlink creation is not permitted on this platform")
+    (root / "meta" / "rules" / "broken.md").symlink_to(root / "nonexistent.md")
     write_legacy_wiring(root)
     violations = rule_violations(root)
     # per-rule 방어의 보고인지(스윕 붕괴 메시지가 아니라) 규칙 경로로 앵커한다.
