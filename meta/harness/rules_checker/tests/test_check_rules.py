@@ -856,14 +856,28 @@ def test_non_utf8_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
     assert any("harness.legacy" in v for v in violations)
 
 
-def test_pathological_rule_yaml_does_not_kill_the_sweep(tmp_path: Path) -> None:
+def test_pathological_rule_yaml_does_not_kill_the_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # 파싱 중 예외(YAML 중첩의 RecursionError — OSError도 UnicodeDecodeError도
     # 아님)도 스윕을 뭉개면 안 된다(탈출 관찰 2R: 가드가 예외 타입만 넓히고
-    # 영역을 안 넓혀 같은 가림이 세 번째 재발).
+    # 영역을 안 넓혀 같은 가림이 세 번째 재발). 8000중첩 `[`로 PyYAML의
+    # 재귀 한계를 실제로 때리는 방식은 구현 세부 의존이라 파서가 반복
+    # 구현으로 바뀌면 공허 통과한다(#43) — 마커를 심은 파일에서만 직접
+    # raise하는 monkeypatch로 "파싱 중 어떤 예외"라는 가드 영역 자체를
+    # 구현 독립적으로 핀한다.
     root = make_repo(tmp_path)
     (root / "meta" / "rules" / "deep.md").write_text(
-        "---\nx: " + "[" * 8000 + "\n---\n", encoding="utf-8"
+        "---\nid: deep\nexplode-marker: true\n---\n", encoding="utf-8"
     )
+    real_parse = check_rules_module.parse_frontmatter
+
+    def exploding_parse(text: str) -> tuple[dict | None, str | None]:
+        if "explode-marker" in text:
+            raise RecursionError("simulated pathological frontmatter")
+        return real_parse(text)
+
+    monkeypatch.setattr(check_rules_module, "parse_frontmatter", exploding_parse)
     write_legacy_wiring(root)
     violations = rule_violations(root)
     # 형제 테스트들과 동일하게 "run은 red" 절반도 핀한다 — 규칙이 조용히
