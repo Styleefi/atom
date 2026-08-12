@@ -915,7 +915,10 @@ def test_broken_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
     write_legacy_wiring(root)
     violations = rule_violations(root)
     # per-rule 방어의 보고인지(스윕 붕괴 메시지가 아니라) 규칙 경로로 앵커한다.
-    assert any("meta/rules/broken.md: internal checker error" in v for v in violations)
+    # 기대 경로는 rel(relative_to) 렌더링이라 Path로 조립한다 — POSIX 구분자
+    # 하드코딩은 native Windows에서 false red다(#94).
+    expected = f"{Path('meta') / 'rules' / 'broken.md'}: internal checker error"
+    assert any(expected in v for v in violations)
     assert any("harness.legacy" in v for v in violations)
 
 
@@ -926,7 +929,8 @@ def test_non_utf8_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
     (root / "meta" / "rules" / "badenc.md").write_bytes(b"\xbe\xbe\xbe")
     write_legacy_wiring(root)
     violations = rule_violations(root)
-    assert any("meta/rules/badenc.md: internal checker error" in v for v in violations)
+    expected = f"{Path('meta') / 'rules' / 'badenc.md'}: internal checker error"
+    assert any(expected in v for v in violations)
     assert any("harness.legacy" in v for v in violations)
 
 
@@ -958,7 +962,8 @@ def test_pathological_rule_yaml_does_not_kill_the_sweep(
     violations = rule_violations(root)
     # 형제 테스트들과 동일하게 "run은 red" 절반도 핀한다 — 규칙이 조용히
     # 건너뛰어지는 회귀를 이 테스트만 놓치면 안 된다(최종 게이트 R6).
-    assert any("meta/rules/deep.md: internal checker error" in v for v in violations)
+    expected = f"{Path('meta') / 'rules' / 'deep.md'}: internal checker error"
+    assert any(expected in v for v in violations)
     assert any("harness.legacy" in v for v in violations)
 
 
