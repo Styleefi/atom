@@ -48,6 +48,15 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
 
 경로는 실행 위치와 무관하게 이 파일의 고정 위치(meta/harness/rules_checker/)
 로부터 역산한 저장소 루트 기준으로 해석하므로 로컬과 CI에서 결과가 동일하다.
+
+경로 의미론 경계(PR #93 R3, 오너 수용): deployed-to는 POSIX 의미론
+(PurePosixPath)으로 해석·검증한다. native Windows에서 checker를 실행하면
+같은 문자열이 다르게 재해석되는 표기(드라이브 문자 C:/x, 백슬래시 구분자
+..\\x)가 스크린과 어긋날 수 있는데, 그 표기 부류는 방어 범위 밖이다 —
+표기 단위 방어는 세 층(#40 리뷰의 posix .. → #93 R2 드라이브 문자 → R3
+백슬래시 ..)을 내려가며 닫히지 않았다. 원천 봉쇄(deployed-to 문법에서
+백슬래시·콜론 거부 — 전 플랫폼에서 시끄러운 위반, Linux에서 테스트 가능)는
+#94의 몫이다.
 """
 
 from __future__ import annotations
@@ -299,6 +308,40 @@ def _import_lines(text: str) -> set[str]:
     return imports
 
 
+def _load_settings(path: Path) -> tuple[dict | None, str | None]:
+    """settings JSON 파일을 읽어 (최상위 객체, 문제 구절)로 돌려준다.
+
+    per-rule 검사와 역방향 스윕이 같은 실패 분류를 쓰게 하는 단일 로더다
+    (#42 — 같은 깨진 파일에 두 경로가 서로 다른 정밀도의 진단을 내던 중복).
+    실패 구절은 위반 메시지에 그대로 끼워 넣는 형태(주어 없는 서술)다.
+    UnicodeDecodeError는 ValueError의 하위라 반드시 먼저 잡는다 — UTF-8
+    디코드가 실패하는 파일(BOM 있는 UTF-16 등)에 "is not valid JSON"이라고
+    답하지 않기 위함. 분류 기준은 바이트의 실제 인코딩이 아니라 디코드
+    결과다(문서화된 한계) — 디코드가 우연히 성공하는 인코딩(BOM 없는
+    UTF-16LE의 NUL 바이트는 유효한 UTF-8)은 여전히 JSON 오류로 보고된다.
+    비객체(배열·null 등)는 파싱 성공이어도 문제로 분류한다 — 파싱 결과의
+    None을 실패 sentinel로 겸용하면 JSON 리터럴 null이 무위반 통과한다
+    (최종 게이트 리뷰: 침묵 통과 회귀).
+
+    Args:
+        path: settings JSON 파일 경로.
+
+    Returns:
+        (파싱된 dict, None) 또는 (None, 문제 구절) 튜플.
+    """
+    try:
+        parsed: object = json.loads(path.read_text(encoding="utf-8"))
+    except OSError:
+        return None, "cannot be read"
+    except UnicodeDecodeError:
+        return None, "is not valid UTF-8"
+    except ValueError:
+        return None, "is not valid JSON"
+    if not isinstance(parsed, dict):
+        return None, "is not a JSON object"
+    return parsed, None
+
+
 def _hook_commands(settings: dict) -> list[str]:
     """settings JSON의 hooks 구조에서 커맨드 문자열을 전부 뽑는다.
 
@@ -375,6 +418,29 @@ def _skill_path_shape_violations(rel: Path, deployed_to: str) -> list[str]:
     return []
 
 
+def _resolve_deploy_target(root: Path, rel: Path, data: dict) -> tuple[Path, str | None]:
+    """deployed-to를 대상 경로로 해석하고 부재 여부를 판정한다.
+
+    hook 분기와 일반 분기가 같은 해석·부재 메시지를 복붙하던 것을 단일화한다
+    (#42). 부재 시의 제어 흐름(위반 누적 후 의존 검사만 skip vs 조기 return)은
+    호출 지점마다 다르게 핀돼 있으므로 여기서는 값 도출만 맡는다.
+
+    Args:
+        root: 저장소 루트.
+        rel: 위반 메시지에 앞세울 규칙 파일의 상대 경로.
+        data: 파싱된 frontmatter.
+
+    Returns:
+        (대상 경로, 부재 위반 메시지 or None) 튜플.
+    """
+    target = root / str(data["deployed-to"])
+    if not target.is_file():
+        return target, (
+            f"{rel}: deployed-to target '{data['deployed-to']}' does not exist"
+        )
+    return target, None
+
+
 def check_rule_file(rule_path: Path, root: Path) -> list[str]:
     """규칙 파일 하나를 검증하고 위반 목록을 돌려준다.
 
@@ -402,8 +468,10 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
             f"{rel}: id '{data['id']}' does not match filename stem '{rule_path.stem}'"
         )
 
+    # isinstance 선행 — 비문자열(비해시형 dict/list 포함)이 `in` 멤버십에서
+    # TypeError로 새지 않고 기존 invalid-value 메시지로 보고되게 한다(#43).
     tier = data["tier"]
-    if tier not in VALID_TIER:
+    if not isinstance(tier, str) or tier not in VALID_TIER:
         violations.append(
             f"{rel}: invalid tier value '{tier}' "
             f"(allowed: {', '.join(sorted(VALID_TIER))})"
@@ -411,7 +479,7 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         return violations
 
     enforce = data["enforce"]
-    if enforce not in VALID_ENFORCE:
+    if not isinstance(enforce, str) or enforce not in VALID_ENFORCE:
         violations.append(
             f"{rel}: invalid enforce value '{enforce}' "
             f"(allowed: {', '.join(sorted(VALID_ENFORCE))})"
@@ -461,35 +529,21 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         # 의존 검사만 건너뛰며, 패키지 실존 검사는 항상 수행한다.
         # 한계: 이벤트/matcher 위치까지는 보지 않는다 — 차단형 템플릿이
         # UserPromptSubmit 아래에 있어도 통과한다(기계 검증은 범위 밖 결정).
-        module_name = "harness." + rule_path.stem.replace("-", "_")
+        # id→패키지 매핑은 여기서 한 번만 도출한다 — 모듈 참조 검사와 패키지
+        # 실존 검사가 독립 도출로 어긋날 수 있던 이중화 제거(#42).
+        package_name = rule_path.stem.replace("-", "_")
+        module_name = f"harness.{package_name}"
         settings: dict | None = None
         if not bad_path:
-            target = root / str(data["deployed-to"])
-            if not target.is_file():
-                violations.append(
-                    f"{rel}: deployed-to target '{data['deployed-to']}' does not exist"
-                )
+            target, missing = _resolve_deploy_target(root, rel, data)
+            if missing is not None:
+                violations.append(missing)
             else:
-                # problem 변수로 실패를 명시 추적한다 — parsed의 None을 실패
-                # sentinel로 겸용하면 JSON 리터럴 null이 무위반 통과한다
-                # (최종 게이트 리뷰: 침묵 통과 회귀).
-                problem: str | None = None
-                parsed: object = None
-                try:
-                    parsed = json.loads(target.read_text(encoding="utf-8"))
-                except OSError:
-                    problem = "cannot be read"
-                except ValueError:
-                    problem = "is not valid JSON"
-                if problem is None and not isinstance(parsed, dict):
-                    problem = "is not a JSON object"
+                settings, problem = _load_settings(target)
                 if problem is not None:
                     violations.append(
                         f"{rel}: deployed-to target '{data['deployed-to']}' {problem}"
                     )
-                else:
-                    assert isinstance(parsed, dict)
-                    settings = parsed
         if settings is not None:
             commands = _hook_commands(settings)
             matching = [c for c in commands if _references_module(c, module_name)]
@@ -515,7 +569,6 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
                             f"match the canonical {shape} wrapper (#31 fail-open "
                             f"wiring) — got: {command} — expected exactly: {expected}"
                         )
-        package_name = rule_path.stem.replace("-", "_")
         package_dir = root / "meta" / "harness" / package_name
         if not package_dir.is_dir():
             violations.append(
@@ -574,11 +627,9 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
     if bad_path:
         return violations
 
-    target = root / str(data["deployed-to"])
-    if not target.is_file():
-        violations.append(
-            f"{rel}: deployed-to target '{data['deployed-to']}' does not exist"
-        )
+    target, missing = _resolve_deploy_target(root, rel, data)
+    if missing is not None:
+        violations.append(missing)
         return violations
 
     if enforce == "claude-md":
@@ -881,6 +932,7 @@ def check_hook_wiring(root: Path) -> list[str]:
         root / ".claude" / "settings.json",
         root / ".claude" / "settings.local.json",
     }
+    violations: list[str] = []
     ruled: set[Path] = set()
     for rule_path in rule_files(root):
         try:
@@ -902,50 +954,86 @@ def check_hook_wiring(root: Path) -> list[str]:
                 # 저장소 밖 경로 — 규칙별 검사가 위반 보고. relative_to는
                 # 어휘적이라 ..를 못 거르므로(#40 리뷰 2R) 여기서 배제한다.
                 continue
-            ruled.add(root / str(data["deployed-to"]))
+            candidate = root / str(data["deployed-to"])
+            if not candidate.is_relative_to(root):
+                # 위 스크린을 통과하는 표기도 join이 root를 대체하면 저장소
+                # 밖이다(Windows의 드라이브 문자 C:/x — posix 기준 비절대).
+                # 침묵 배제가 아니라 위반으로 소리낸다 — per-rule 쪽도 같은
+                # 표기를 못 거르는 동안(#94) 조용히 빼면 저장소 밖 배포가
+                # green으로 통과한다(PR #93 R3: 거부는 침묵 통과가 아니다).
+                # 이 검사는 어휘적이라 join 결과가 root 아래로 남는 재해석
+                # 표기(백슬래시 .. 등)는 못 잡는다 — 그 부류는 POSIX 의미론
+                # 경계(모듈 docstring)와 #94의 문법 강화 몫. POSIX에서는
+                # 도달 불가 분기라 테스트가 없다(명시 예외).
+                violations.append(
+                    f"{rule_path.relative_to(root)}: deployed-to "
+                    f"'{data['deployed-to']}' resolves outside the repository "
+                    "on this platform — not swept; use a repo-root-relative "
+                    "POSIX path"
+                )
+                continue
+            ruled.add(candidate)
 
-    violations: list[str] = []
     for target in sorted(unconditional | ruled):
         if not target.is_file():
             continue
         rel = target.relative_to(root)
         try:
-            settings: object = json.loads(target.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            settings = None
-        if not isinstance(settings, dict):
-            # ruled 대상도 예외 없이 보고한다 — 규칙별 검사는 frontmatter 오류
-            # 등으로 조기 종료하면 여기까지 못 오므로, "규칙이 대신 보고한다"는
-            # 면제 전제는 성립하지 않는다(최종 게이트 리뷰). ruled 대상의 이중
-            # 보고는 per-rule/스윕 이중 검사와 같은 수용된 패턴.
+            violations.extend(_target_wiring_violations(rel, target))
+        except Exception as exc:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
+            # 대상 파일 하나의 파싱 사망(심중첩 JSON의 RecursionError 등 —
+            # _load_settings 분류 밖 예외)이 스윕 전체를 뭉개면 다른 대상의
+            # 배선 위반이 가려진다 — 규칙 순회의 per-rule 가드와 같은 영역
+            # 가드로 사망을 대상 단위에 국지화한다(PR #93 R1).
             violations.append(
-                f"{rel}: cannot verify hook wiring — file is unreadable or "
-                "not a JSON object"
+                f"{rel}: internal checker error — {type(exc).__name__}: {exc}"
+            )
+    return violations
+
+
+def _target_wiring_violations(rel: Path, target: Path) -> list[str]:
+    """settings 대상 파일 하나의 훅 배선 위반을 돌려준다(check_hook_wiring 전용).
+
+    Args:
+        rel: 위반 메시지에 앞세울 대상 파일의 상대 경로.
+        target: 검사할 settings JSON 경로.
+
+    Returns:
+        위반 메시지 목록. 비어 있으면 통과.
+    """
+    violations: list[str] = []
+    settings, problem = _load_settings(target)
+    if problem is not None:
+        # ruled 대상도 예외 없이 보고한다 — 규칙별 검사는 frontmatter 오류
+        # 등으로 조기 종료하면 여기까지 못 오므로, "규칙이 대신 보고한다"는
+        # 면제 전제는 성립하지 않는다(최종 게이트 리뷰). ruled 대상의 이중
+        # 보고는 per-rule/스윕 이중 검사와 같은 수용된 패턴.
+        violations.append(f"{rel}: cannot verify hook wiring — file {problem}")
+        return violations
+    assert settings is not None
+    for command in _hook_commands(settings):
+        tokens = _HOOK_MODULE_RE.findall(command)
+        if not tokens:
+            continue
+        if len(set(tokens)) > 1:
+            violations.append(
+                f"{rel}: hook command references multiple harness modules "
+                f"({', '.join(sorted(set(tokens)))}) — split into one "
+                "canonical hook command per module"
             )
             continue
-        for command in _hook_commands(settings):
-            tokens = _HOOK_MODULE_RE.findall(command)
-            if not tokens:
-                continue
-            if len(set(tokens)) > 1:
-                violations.append(
-                    f"{rel}: hook command references multiple harness modules "
-                    f"({', '.join(sorted(set(tokens)))}) — split into one "
-                    "canonical hook command per module"
-                )
-                continue
-            module = tokens[0]
-            expected_blocking = HOOK_COMMAND_BLOCKING.replace("{module}", module)
-            expected_non_blocking = HOOK_COMMAND_NON_BLOCKING.replace(
-                "{module}", module
+        module = tokens[0]
+        expected_blocking = HOOK_COMMAND_BLOCKING.replace("{module}", module)
+        expected_non_blocking = HOOK_COMMAND_NON_BLOCKING.replace(
+            "{module}", module
+        )
+        if command not in (expected_blocking, expected_non_blocking):
+            violations.append(
+                f"{rel}: hook command referencing '{module}' matches neither "
+                f"canonical wrapper (#31 fail-open wiring) — got: {command} "
+                f"— expected exactly (blocking): {expected_blocking} — or "
+                f"(non-blocking): {expected_non_blocking}"
             )
-            if command not in (expected_blocking, expected_non_blocking):
-                violations.append(
-                    f"{rel}: hook command referencing '{module}' matches neither "
-                    f"canonical wrapper (#31 fail-open wiring) — got: {command} "
-                    f"— expected exactly (blocking): {expected_blocking} — or "
-                    f"(non-blocking): {expected_non_blocking}"
-                )
     return violations
 
 

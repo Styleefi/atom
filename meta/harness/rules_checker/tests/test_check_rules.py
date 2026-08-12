@@ -16,7 +16,6 @@ meta/README.md를 가져야 한다. 이를 개별 테스트에 떠넘기지 않�
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -148,12 +147,25 @@ def make_infra_stack(root: Path, name: str) -> None:
     (root / "meta" / "infra" / name).mkdir(parents=True, exist_ok=True)
 
 
-def valid_rule(rule_id: str) -> str:
-    """유효한 claude-md 규칙 본문을 만든다."""
+def claude_md_rule(rule_id: str, deployed_to: str) -> str:
+    """deployed-to를 지정한 claude-md 규칙 본문을 만든다.
+
+    valid_rule이 위임하는 공용 frontmatter 템플릿이다(#42) — #38 pin 테스트
+    전용이 아니므로 여기를 고치면 모든 claude-md 픽스처의 형태가 바뀐다.
+    """
     return (
         f"---\nid: {rule_id}\ntier: principle\nenforce: claude-md\n"
-        "deployed-to: CLAUDE.md\n---\n\nbody\n"
+        f"deployed-to: {deployed_to}\n---\n\nbody\n"
     )
+
+
+def valid_rule(rule_id: str) -> str:
+    """유효한 claude-md 규칙 본문을 만든다.
+
+    claude_md_rule에 위임한다 — frontmatter 템플릿을 두 헬퍼가 독립 보유하면
+    스키마 변경 시 한쪽만 고쳐져 서로 다른 규칙 형태를 검사하게 된다(#42).
+    """
+    return claude_md_rule(rule_id, "CLAUDE.md")
 
 
 def test_valid_rule_passes(tmp_path: Path) -> None:
@@ -206,6 +218,33 @@ def test_invalid_tier_enum(tmp_path: Path) -> None:
     violations = rule_violations(root)
     assert len(violations) == 1
     assert "invalid tier value 'law'" in violations[0]
+
+
+@pytest.mark.parametrize(
+    ("field_lines", "expected"),
+    [
+        ("tier: {a: b}\nenforce: claude-md", "invalid tier value"),
+        ("tier: convention\nenforce: {a: b}", "invalid enforce value"),
+    ],
+    ids=["tier", "enforce"],
+)
+def test_non_string_enum_is_invalid_not_a_crash(
+    tmp_path: Path, field_lines: str, expected: str
+) -> None:
+    # 비문자열(비해시형) tier/enforce는 `in VALID_*` 멤버십에서 TypeError로
+    # 새지 않고 기존 invalid-value 메시지로 깨끗하게 보고돼야 한다(#43).
+    # enforce 케이스는 PR #93 R1 F6 — fuzz의 유일한 비문자열 케이스는 tier에서
+    # 조기 return해 enforce 가드가 미핀이었다(mutation 생존 실측).
+    root = make_repo(tmp_path)
+    write_rule(
+        root,
+        "bad-enum.md",
+        f"---\nid: bad-enum\n{field_lines}\ndeployed-to: CLAUDE.md\n---\n",
+    )
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert expected in violations[0]
+    assert "internal checker error" not in violations[0]
 
 
 def test_invalid_enforce_enum(tmp_path: Path) -> None:
@@ -282,14 +321,6 @@ def test_declared_but_not_deployed(tmp_path: Path) -> None:
     violations = rule_violations(root)
     assert len(violations) == 1
     assert "declared but not actually deployed" in violations[0]
-
-
-def claude_md_rule(rule_id: str, deployed_to: str) -> str:
-    """deployed-to를 지정한 claude-md 규칙 본문을 만든다(#38 pin 테스트용)."""
-    return (
-        f"---\nid: {rule_id}\ntier: principle\nenforce: claude-md\n"
-        f"deployed-to: {deployed_to}\n---\n\nbody\n"
-    )
 
 
 def test_claude_md_arbitrary_file_is_rejected(tmp_path: Path) -> None:
@@ -796,11 +827,12 @@ def test_broken_rule_plus_corrupt_settings_both_reported(tmp_path: Path) -> None
     assert any("cannot verify hook wiring" in v for v in violations)
 
 
-def test_broken_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
-    # 규칙 파일 하나가 안 읽혀도(깨진 symlink) 스윕의 배선 위반은 살아야
-    # 한다(최종 게이트 리뷰: 스윕 전체가 internal error 하나로 뭉개지던 가림).
-    root = make_repo(tmp_path)
-    (root / "meta" / "rules" / "broken.md").symlink_to(root / "nonexistent.md")
+def write_legacy_wiring(root: Path) -> None:
+    """스윕이 잡아야 할 구식(exec) harness.legacy 배선을 settings에 심는다.
+
+    *_does_not_kill_the_sweep 계열의 공용 픽스처 — "깨진 규칙 파일 곁에서도
+    스윕의 배선 위반은 살아 있다"의 배선 절반을 담당한다(#43 복붙 제거).
+    """
     legacy = (
         "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
         '"$CLAUDE_PROJECT_DIR/meta" python -m harness.legacy; fi'
@@ -809,6 +841,23 @@ def test_broken_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
     (root / ".claude" / "settings.json").write_text(
         hook_settings(legacy), encoding="utf-8"
     )
+
+
+def test_broken_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
+    # 규칙 파일 하나가 안 읽혀도(깨진 symlink) 스윕의 배선 위반은 살아야
+    # 한다(최종 게이트 리뷰: 스윕 전체가 internal error 하나로 뭉개지던 가림).
+    root = make_repo(tmp_path)
+    try:
+        # 능력 probe는 항상-새로운 전용 경로에서 한다 — 실제 픽스처 생성까지
+        # try로 감싸면 능력과 무관한 OSError(픽스처 드리프트의 FileExistsError
+        # 등)도 조용히 skip으로 수렴해 이 핀 자체가 은퇴한다(PR #93 R1).
+        (tmp_path / "symlink-probe").symlink_to(tmp_path / "missing")
+    except OSError:
+        # symlink 생성이 특권인 플랫폼(Developer Mode 없는 Windows, 제한된
+        # CI 컨테이너)에서는 에러가 아니라 능력 부재 skip이다(#43).
+        pytest.skip("symlink creation is not permitted on this platform")
+    (root / "meta" / "rules" / "broken.md").symlink_to(root / "nonexistent.md")
+    write_legacy_wiring(root)
     violations = rule_violations(root)
     # per-rule 방어의 보고인지(스윕 붕괴 메시지가 아니라) 규칙 경로로 앵커한다.
     assert any("meta/rules/broken.md: internal checker error" in v for v in violations)
@@ -820,39 +869,70 @@ def test_non_utf8_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
     # 안 된다(탈출 관찰 라운드: OSError만 잡던 가드가 같은 가림을 재발시킴).
     root = make_repo(tmp_path)
     (root / "meta" / "rules" / "badenc.md").write_bytes(b"\xbe\xbe\xbe")
-    legacy = (
-        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
-        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.legacy; fi'
-    )
-    (root / ".claude").mkdir()
-    (root / ".claude" / "settings.json").write_text(
-        hook_settings(legacy), encoding="utf-8"
-    )
+    write_legacy_wiring(root)
     violations = rule_violations(root)
     assert any("meta/rules/badenc.md: internal checker error" in v for v in violations)
     assert any("harness.legacy" in v for v in violations)
 
 
-def test_pathological_rule_yaml_does_not_kill_the_sweep(tmp_path: Path) -> None:
+def test_pathological_rule_yaml_does_not_kill_the_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # 파싱 중 예외(YAML 중첩의 RecursionError — OSError도 UnicodeDecodeError도
     # 아님)도 스윕을 뭉개면 안 된다(탈출 관찰 2R: 가드가 예외 타입만 넓히고
-    # 영역을 안 넓혀 같은 가림이 세 번째 재발).
+    # 영역을 안 넓혀 같은 가림이 세 번째 재발). 8000중첩 `[`로 PyYAML의
+    # 재귀 한계를 실제로 때리는 방식은 구현 세부 의존이라 파서가 반복
+    # 구현으로 바뀌면 공허 통과한다(#43) — 마커를 심은 파일에서만 직접
+    # raise하는 monkeypatch로 "파싱 중 어떤 예외"라는 가드 영역 자체를
+    # 구현 독립적으로 핀한다. 실입력 심중첩을 실제 파서에 먹이는 커버리지는
+    # 이 재작성으로 의도적으로 내려놓았다 — 파서 교체 후 예외 대신 hang하는
+    # 부류는 미방어(수용된 트레이드오프, PR #93 R1 F5).
     root = make_repo(tmp_path)
     (root / "meta" / "rules" / "deep.md").write_text(
-        "---\nx: " + "[" * 8000 + "\n---\n", encoding="utf-8"
+        "---\nid: deep\nexplode-marker: true\n---\n", encoding="utf-8"
     )
-    legacy = (
-        "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
-        '"$CLAUDE_PROJECT_DIR/meta" python -m harness.legacy; fi'
-    )
-    (root / ".claude").mkdir()
-    (root / ".claude" / "settings.json").write_text(
-        hook_settings(legacy), encoding="utf-8"
-    )
+    real_parse = check_rules_module.parse_frontmatter
+
+    def exploding_parse(text: str) -> tuple[dict | None, str | None]:
+        if "explode-marker" in text:
+            raise RecursionError("simulated pathological frontmatter")
+        return real_parse(text)
+
+    monkeypatch.setattr(check_rules_module, "parse_frontmatter", exploding_parse)
+    write_legacy_wiring(root)
     violations = rule_violations(root)
     # 형제 테스트들과 동일하게 "run은 red" 절반도 핀한다 — 규칙이 조용히
     # 건너뛰어지는 회귀를 이 테스트만 놓치면 안 된다(최종 게이트 R6).
     assert any("meta/rules/deep.md: internal checker error" in v for v in violations)
+    assert any("harness.legacy" in v for v in violations)
+
+
+def test_pathological_settings_does_not_kill_the_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # settings 파일 하나의 파싱 사망(_load_settings 분류 밖 예외 — 심중첩
+    # JSON의 RecursionError 등)이 스윕 전체를 뭉개면 안 된다(PR #93 R1 F1:
+    # 규칙 파일에 세 번 닫은 "하나가 전체를 가림" 클래스가 settings 대상
+    # 쪽에 열려 있었다). 대상별 가드가 다른 대상의 배선 위반을 보존해야
+    # 한다. 실입력(100k 중첩 [)으로 json 내부의 RecursionError를 때리는
+    # 방식은 CPython 구현 세부 의존이라, 형제 YAML 테스트의 수용된 고도
+    # (R1 F5)와 동일하게 대상 파일에서만 직접 raise하는 monkeypatch로 가드
+    # 영역을 핀한다(R2 F4). 기대 메시지는 rel 렌더링이라 Path로 조립한다 —
+    # POSIX 구분자 하드코딩은 native Windows에서 false red다(R2 F2).
+    root = make_repo(tmp_path)
+    write_legacy_wiring(root)
+    (root / ".claude" / "settings.local.json").write_text("{}", encoding="utf-8")
+    real_load = check_rules_module._load_settings
+
+    def exploding_load(path: Path) -> tuple[dict | None, str | None]:
+        if path.name == "settings.local.json":
+            raise RecursionError("simulated pathological settings")
+        return real_load(path)
+
+    monkeypatch.setattr(check_rules_module, "_load_settings", exploding_load)
+    violations = check_rules(root)
+    expected = f"{Path('.claude') / 'settings.local.json'}: internal checker error"
+    assert any(expected in v for v in violations)
     assert any("harness.legacy" in v for v in violations)
 
 
@@ -887,10 +967,27 @@ def test_skill_bad_path_does_not_mask_shape(tmp_path: Path) -> None:
     assert any("must be a SKILL.md under .claude/skills/" in v for v in violations)
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root는 mode 000도 읽을 수 있다")
 def test_unreadable_settings_is_a_violation_not_a_crash(tmp_path: Path) -> None:
     # 읽기 불가 settings는 traceback이 아니라 위반이다(리뷰 2R: per-rule
     # read_text가 OSError 미포착으로 체커 사망).
+    # 전제(mode 000이 읽기를 막는다)는 플랫폼 프록시가 아니라 능력 probe로
+    # 확인한다 — geteuid 기반 skipif는 수집 시점 사망(#43)을 거쳐 "geteuid
+    # 없음 = 모드 비트 미지원"이라는 미검증 가정까지 왔던 경로다(PR #93
+    # R1-R2). probe는 root(000도 읽힘)와 비POSIX 플랫폼을 같은 사유로 자연
+    # 포섭한다 — symlink probe(R1 F4)와 같은 고도.
+    # 000 잔재는 원복하지 않는다 — POSIX 삭제는 디렉토리 권한 소관이라 tmp
+    # 청소를 방해하지 않고, 아래 본 픽스처의 settings.json 000도 같은 상태로
+    # 남는다(R3: "청소 방해" 주장은 사실이 아닌 과잉 방어였다).
+    probe = tmp_path / "mode-probe"
+    probe.write_text("x", encoding="utf-8")
+    probe.chmod(0o000)
+    try:
+        probe.read_text(encoding="utf-8")
+        readable = True
+    except OSError:
+        readable = False
+    if readable:
+        pytest.skip("mode 000 does not prevent reading in this environment")
     root = make_repo(tmp_path)
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
     settings = hook_settings(canonical_command("harness.my_guard"))
@@ -900,6 +997,32 @@ def test_unreadable_settings_is_a_violation_not_a_crash(tmp_path: Path) -> None:
     assert len(violations) == 2
     assert any("cannot be read" in v for v in violations)
     assert any("cannot verify hook wiring" in v for v in violations)
+
+
+def test_utf16_settings_reported_as_encoding_problem(tmp_path: Path) -> None:
+    # UnicodeDecodeError는 ValueError의 하위라 "is not valid JSON"으로
+    # 오분류되던 케이스 — 디코드가 실패하는 파일에 사실과 다른 진단을
+    # 내는 대신 인코딩 문제를 그대로 부른다(#42). 스윕도 같은 분류를 쓴다.
+    # write_text의 utf-16은 BOM을 앞세워 UTF-8 디코드가 실패하는 형태다 —
+    # BOM 없는 UTF-16LE는 디코드가 우연히 성공해 이 분류 밖(문서화된 한계,
+    # _load_settings docstring 참조).
+    root = make_repo(tmp_path)
+    write_rule(root, "my-guard.md", hook_rule("my-guard"))
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text(
+        hook_settings(canonical_command("harness.my_guard")), encoding="utf-16"
+    )
+    make_harness_package(root, "my_guard")
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any(
+        "deployed-to target '.claude/settings.json' is not valid UTF-8" in v
+        for v in violations
+    )
+    assert any(
+        "cannot verify hook wiring — file is not valid UTF-8" in v
+        for v in violations
+    )
 
 
 def test_sweep_reports_unruled_corrupt_settings(tmp_path: Path) -> None:
@@ -998,8 +1121,15 @@ def test_checker_never_raises_on_malformed_inputs(tmp_path: Path) -> None:
             (root / ".claude" / "settings.json").write_text(
                 settings_text, encoding="utf-8"
             )
-        # 예외 없이 위반 목록이 나오면 통과 — 내용은 각 시나리오 테스트가 핀.
-        assert isinstance(check_rules(root), list)
+        # 위반이 나오되 전역 방어(internal error)로 넘어진 것이면 안 된다 —
+        # isinstance(list) 단언은 전역 변환이 무조건 보장하는 동어반복이라
+        # 케이스 하나가 내부에서 죽어도 green이었다(#43). 내용은 각 시나리오
+        # 테스트가 핀하고, 여기서는 "깨끗한 위반으로 보고됐다"만 고정한다.
+        violations = check_rules(root)
+        assert violations, f"case {i}: expected violations"
+        assert not any("internal checker error" in v for v in violations), (
+            f"case {i}: {violations}"
+        )
 
 
 def test_missing_blocking_does_not_mask_other_defects(tmp_path: Path) -> None:
@@ -1016,24 +1146,16 @@ def test_missing_blocking_does_not_mask_other_defects(tmp_path: Path) -> None:
     assert any("does not exist" in v for v in violations)
 
 
-def test_hook_rule_with_non_object_settings(tmp_path: Path) -> None:
-    # 배열 등 비객체 settings는 전용 메시지로 보고한다(리뷰 발견: "not
-    # referenced"로 오도하던 케이스). 스윕도 예외 없이 함께 보고한다.
+@pytest.mark.parametrize("payload", ["[]", "null"], ids=["array", "null"])
+def test_non_object_settings_is_rejected(tmp_path: Path, payload: str) -> None:
+    # 파싱은 성공하지만 객체가 아닌 settings는 전용 메시지로 보고하고, 스윕도
+    # 예외 없이 함께 보고한다. array: "not referenced"로 오도하던 케이스(리뷰
+    # 발견). null: parsed의 None 겸용 sentinel이 만든 침묵 통과 회귀(최종
+    # 게이트 리뷰). 단언이 동일한 쌍이라 parametrize로 묶는다(#43 — 두 벌
+    # 유지 시 한쪽만 고쳐지는 부분 편집 드리프트).
     root = make_repo(tmp_path)
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
-    make_hook_deployment(root, "my-guard", "[]")
-    violations = rule_violations(root)
-    assert len(violations) == 2
-    assert any("is not a JSON object" in v for v in violations)
-    assert any("cannot verify hook wiring" in v for v in violations)
-
-
-def test_null_settings_is_rejected(tmp_path: Path) -> None:
-    # JSON 리터럴 null은 무위반 통과가 아니라 비객체 위반이다(최종 게이트
-    # 리뷰: parsed의 None 겸용 sentinel이 만든 침묵 통과 회귀).
-    root = make_repo(tmp_path)
-    write_rule(root, "my-guard.md", hook_rule("my-guard"))
-    make_hook_deployment(root, "my-guard", "null")
+    make_hook_deployment(root, "my-guard", payload)
     violations = rule_violations(root)
     assert len(violations) == 2
     assert any("is not a JSON object" in v for v in violations)
