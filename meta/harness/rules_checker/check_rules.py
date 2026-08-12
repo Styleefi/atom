@@ -49,10 +49,15 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
 경로는 실행 위치와 무관하게 이 파일의 고정 위치(meta/harness/rules_checker/)
 로부터 역산한 저장소 루트 기준으로 해석하므로 로컬과 CI에서 결과가 동일하다.
 
-deployed-to 문법: 저장소 루트 기준 POSIX 상대 경로만 유효하며, 백슬래시·
-콜론을 담은 값은 거부된다(#94 — Windows에서 재해석되는 표기(드라이브 문자
-C:/x, 백슬래시 구분자 ..\\x)를 문법에서 원천 봉쇄해 모든 플랫폼에서 위반으로
-만든다; 검증은 check_rule_file, PR #93 R3의 의미론 경계 선언은 이로써 해제).
+deployed-to 문법: 저장소 루트 기준 POSIX 상대 경로만 유효하며, 백슬래시나
+콜론을 담은 문자열 값은 거부된다(#94 — root를 탈출하는 Windows 재해석
+표기(드라이브 문자 C:/x, 백슬래시 .. 구분자)를 문법에서 봉쇄해 모든
+플랫폼에서 위반으로 만든다; 검증은 check_rule_file, PR #93 R3의 의미론 경계
+선언은 이로써 해제). 문서화된 한계 둘(PR #95 R1): 문법은 YAML 파싱 후의
+문자열 값 기준이라 스칼라 해석이 콜론을 소거한 표기(10:30 → 정수 630)는
+문법 위반 대신 대상 부재 위반으로 잡히고, 콜론·백슬래시 없는 Windows 재해석
+(후행 점·공백, 대소문자 접기)은 root 탈출 없이도 플랫폼 간 판정이 갈릴 수
+있다 — 어느 쪽도 침묵 통과는 아니며 run은 Linux/CI 기준으로 red다.
 """
 
 from __future__ import annotations
@@ -986,11 +991,13 @@ def check_hook_wiring(root: Path) -> list[str]:
         if data.get("enforce") == "hook" and data.get("deployed-to"):
             if any(_deployed_to_screen(str(data["deployed-to"]))):
                 # 저장소 밖(절대·..) 또는 비POSIX 문법(백슬래시·콜론 — #94)
-                # — 규칙별 검사가 위반 보고. relative_to는 어휘적이라 ..를 못
-                # 거르므로(#40 리뷰 2R) 여기서 배제한다. 이 스크린을 다 지난
-                # 표기는 순수 POSIX 상대 경로라 어떤 플랫폼의 join 의미론에서도
-                # root 아래에 남는다 — PR #93 R3의 어휘적 격리 분기는 문법
-                # 강화로 도달 불가가 되어 제거됨(경계 해제).
+                # — 규칙별 검사가 위반 보고(deployed-to 스크린은 어떤 조기
+                # return보다 먼저 돌므로 이 전제는 조합 무관하게 성립, #95 R1
+                # F3). relative_to는 어휘적이라 ..를 못 거르므로(#40 리뷰 2R)
+                # 여기서 배제한다. 이 스크린을 다 지난 표기는 앵커·구분자
+                # 재해석의 원료(절대 표기·..·백슬래시·콜론)가 없어 어떤
+                # 플랫폼의 join 의미론에서도 root 아래에 남는다 — PR #93 R3의
+                # 어휘적 격리 분기는 문법 강화로 도달 불가가 되어 제거됨.
                 continue
             ruled.add(root / str(data["deployed-to"]))
 
