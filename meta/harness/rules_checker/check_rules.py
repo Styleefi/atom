@@ -414,6 +414,25 @@ def _skill_path_shape_violations(rel: Path, deployed_to: str) -> list[str]:
     return []
 
 
+def _deployed_to_screen(raw: str) -> tuple[bool, bool]:
+    """deployed-to raw 문자열의 (경로 탈출, 문법 위반) 여부를 판정한다.
+
+    per-rule 검사와 역방향 스윕이 같은 스크린을 쓰게 하는 단일 술어(#95) —
+    스윕의 배제 조건과 per-rule의 거부 문법이 사본 드리프트로 갈라지면
+    "배제됐는데 아무도 보고하지 않는" 침묵 조합이 되살아난다(PR #93 R3).
+
+    Args:
+        raw: frontmatter에서 str()로 뽑은 deployed-to 값.
+
+    Returns:
+        (절대경로/..로 root를 이탈하는지, 백슬래시/콜론 문법 위반인지) 튜플.
+    """
+    deployed = PurePosixPath(raw)
+    escapes = deployed.is_absolute() or ".." in deployed.parts
+    bad_grammar = "\\" in raw or ":" in raw
+    return escapes, bad_grammar
+
+
 def _resolve_deploy_target(root: Path, rel: Path, data: dict) -> tuple[Path, str | None]:
     """deployed-to를 대상 경로로 해석하고 부재 여부를 판정한다.
 
@@ -467,8 +486,8 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         # 패키지 실존)는 여전히 수행 가능하며, 조기 return은 같은 규칙의 다른
         # 결함을 가린다.
         raw_deployed = str(data["deployed-to"])
-        deployed = PurePosixPath(raw_deployed)
-        if deployed.is_absolute() or ".." in deployed.parts:
+        escapes, bad_grammar = _deployed_to_screen(raw_deployed)
+        if escapes:
             bad_path = True
             violations.append(
                 f"{rel}: deployed-to '{data['deployed-to']}' must be a "
@@ -479,7 +498,7 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         # 루프가 세 층을 추격한 부류)의 원료다 — 표기 단위 방어 대신 문법에서
         # 원천 거부해 모든 플랫폼에서 시끄러운 위반으로 만든다. bad_path에
         # 합류시켜 join 의존 검사만 억제한다(조기 return 없음).
-        if "\\" in raw_deployed or ":" in raw_deployed:
+        if bad_grammar:
             bad_path = True
             violations.append(
                 f"{rel}: deployed-to '{data['deployed-to']}' must not contain "
@@ -965,14 +984,7 @@ def check_hook_wiring(root: Path) -> list[str]:
         if error or data is None:
             continue
         if data.get("enforce") == "hook" and data.get("deployed-to"):
-            deployed = PurePosixPath(str(data["deployed-to"]))
-            raw_deployed = str(data["deployed-to"])
-            if (
-                deployed.is_absolute()
-                or ".." in deployed.parts
-                or "\\" in raw_deployed
-                or ":" in raw_deployed
-            ):
+            if any(_deployed_to_screen(str(data["deployed-to"]))):
                 # 저장소 밖(절대·..) 또는 비POSIX 문법(백슬래시·콜론 — #94)
                 # — 규칙별 검사가 위반 보고. relative_to는 어휘적이라 ..를 못
                 # 거르므로(#40 리뷰 2R) 여기서 배제한다. 이 스크린을 다 지난
