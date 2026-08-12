@@ -781,6 +781,61 @@ def test_absolute_deployed_to_is_rejected_not_crash(tmp_path: Path) -> None:
     assert any("does not exist" in v for v in violations)
 
 
+@pytest.mark.parametrize(
+    ("deployed_to", "expected_count", "expect_path_violation"),
+    [
+        # 개수는 동시 발동을 명시 계산해 핀한다(제미나이 G4) — claude-md
+        # 그릇이라 pin 위반("exactly 'CLAUDE.md'")이 항상 함께 발동한다.
+        ("C:/x", 2, False),  # 문법 + pin — 드라이브 문자(콜론)
+        ("..\\x", 2, False),  # 문법 + pin — 백슬래시 .. (posix 스크린 밖)
+        ("a\\b.json", 2, False),  # 문법 + pin — 내부 백슬래시
+        ("folder:name.md", 2, False),  # 순수 문법 — 절대경로 검사와 독립 발동
+        ("/folder:name.md", 3, True),  # 문법 + 절대경로 동시 발동 — 누적 핀
+    ],
+    ids=[
+        "drive-colon",
+        "backslash-dotdot",
+        "inner-backslash",
+        "pure-colon",
+        "colon-plus-absolute",
+    ],
+)
+def test_non_posix_deployed_to_is_rejected(
+    tmp_path: Path, deployed_to: str, expected_count: int, expect_path_violation: bool
+) -> None:
+    # 백슬래시·콜론은 POSIX 스크린이 못 보는 Windows 재해석 표기(드라이브
+    # 문자, 백슬래시 구분자)의 원료다 — 표기 단위 방어 대신 문법에서 원천
+    # 거부해 모든 플랫폼에서 시끄러운 위반으로 만든다(#94, PR #93의 세 층
+    # 추격 종결).
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", claude_md_rule("my-rule", deployed_to))
+    violations = rule_violations(root)
+    assert len(violations) == expected_count
+    assert any("must not contain backslashes or colons" in v for v in violations)
+    assert not any("internal checker error" in v for v in violations)
+    has_path_violation = any(
+        "must be a repo-root-relative path inside" in v for v in violations
+    )
+    assert has_path_violation == expect_path_violation
+
+
+def test_bad_grammar_does_not_mask_blocking_and_package(tmp_path: Path) -> None:
+    # 문법 위반 + blocking 부재 + 패키지 부재 → 셋 다 한 번에 보고
+    # (test_bad_path_does_not_mask_blocking_and_package 미러 — 문법 위반도
+    # 같은 가림 방지 흐름에 합류함을 핀).
+    root = make_repo(tmp_path)
+    body = (
+        "---\nid: my-guard\ntier: convention\nenforce: hook\n"
+        "deployed-to: settings\\my.json\n---\n\nbody\n"
+    )
+    write_rule(root, "my-guard.md", body)
+    violations = rule_violations(root)
+    assert len(violations) == 3
+    assert any("must not contain backslashes or colons" in v for v in violations)
+    assert any("must declare 'blocking" in v for v in violations)
+    assert any("does not exist" in v for v in violations)
+
+
 def test_bad_path_does_not_mask_blocking_and_package(tmp_path: Path) -> None:
     # 경로 위반 + blocking 부재 + 패키지 부재 → 셋 다 한 번에 보고(리뷰 2R:
     # 조기 return 가림 패턴을 hook 분기에서 구조적으로 제거했음을 핀).

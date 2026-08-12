@@ -498,6 +498,19 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
             "repo-root-relative path inside the repository"
         )
 
+    # 문법 검사(#94): 백슬래시·콜론은 POSIX 스크린이 못 보는 Windows 재해석
+    # 표기(드라이브 문자 C:/x, 백슬래시 구분자 ..\x — PR #93 리뷰 루프가 세
+    # 층을 추격한 부류)의 원료다 — 표기 단위 방어 대신 문법에서 원천 거부해
+    # 모든 플랫폼에서 시끄러운 위반으로 만든다. bad_path에 합류시켜 join 의존
+    # 검사만 억제한다(조기 return 없음 — 기존 가림 방지 구조 유지).
+    raw_deployed = str(data["deployed-to"])
+    if "\\" in raw_deployed or ":" in raw_deployed:
+        bad_path = True
+        violations.append(
+            f"{rel}: deployed-to '{data['deployed-to']}' must not contain "
+            "backslashes or colons — use a repo-root-relative POSIX path"
+        )
+
     # blocking 스키마(hook 전용). 위반이어도 계속 진행한다 — 존재·참조·패키지
     # 검사는 blocking과 무관하고, 템플릿 비교만 유효한 bool을 요구하므로 그
     # 비교를 건너뛰면 된다(조기 return은 같은 규칙의 다른 결함을 가린다).
