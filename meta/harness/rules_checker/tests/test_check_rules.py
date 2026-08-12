@@ -975,18 +975,17 @@ def test_unreadable_settings_is_a_violation_not_a_crash(tmp_path: Path) -> None:
     # 없음 = 모드 비트 미지원"이라는 미검증 가정까지 왔던 경로다(PR #93
     # R1-R2). probe는 root(000도 읽힘)와 비POSIX 플랫폼을 같은 사유로 자연
     # 포섭한다 — symlink probe(R1 F4)와 같은 고도.
+    # 000 잔재는 원복하지 않는다 — POSIX 삭제는 디렉토리 권한 소관이라 tmp
+    # 청소를 방해하지 않고, 아래 본 픽스처의 settings.json 000도 같은 상태로
+    # 남는다(R3: "청소 방해" 주장은 사실이 아닌 과잉 방어였다).
     probe = tmp_path / "mode-probe"
     probe.write_text("x", encoding="utf-8")
     probe.chmod(0o000)
     try:
-        try:
-            probe.read_text(encoding="utf-8")
-            readable = True
-        except OSError:
-            readable = False
-    finally:
-        # 000 잔재는 tmp_path 청소를 방해할 수 있다 — 원복.
-        probe.chmod(0o600)
+        probe.read_text(encoding="utf-8")
+        readable = True
+    except OSError:
+        readable = False
     if readable:
         pytest.skip("mode 000 does not prevent reading in this environment")
     root = make_repo(tmp_path)
