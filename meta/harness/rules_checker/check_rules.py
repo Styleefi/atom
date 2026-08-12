@@ -49,14 +49,10 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
 경로는 실행 위치와 무관하게 이 파일의 고정 위치(meta/harness/rules_checker/)
 로부터 역산한 저장소 루트 기준으로 해석하므로 로컬과 CI에서 결과가 동일하다.
 
-경로 의미론 경계(PR #93 R3, 오너 수용): deployed-to는 POSIX 의미론
-(PurePosixPath)으로 해석·검증한다. native Windows에서 checker를 실행하면
-같은 문자열이 다르게 재해석되는 표기(드라이브 문자 C:/x, 백슬래시 구분자
-..\\x)가 스크린과 어긋날 수 있는데, 그 표기 부류는 방어 범위 밖이다 —
-표기 단위 방어는 세 층(#40 리뷰의 posix .. → #93 R2 드라이브 문자 → R3
-백슬래시 ..)을 내려가며 닫히지 않았다. 원천 봉쇄(deployed-to 문법에서
-백슬래시·콜론 거부 — 전 플랫폼에서 시끄러운 위반, Linux에서 테스트 가능)는
-#94의 몫이다.
+deployed-to 문법: 저장소 루트 기준 POSIX 상대 경로만 유효하며, 백슬래시·
+콜론을 담은 값은 거부된다(#94 — Windows에서 재해석되는 표기(드라이브 문자
+C:/x, 백슬래시 구분자 ..\\x)를 문법에서 원천 봉쇄해 모든 플랫폼에서 위반으로
+만든다; 검증은 check_rule_file, PR #93 R3의 의미론 경계 선언은 이로써 해제).
 """
 
 from __future__ import annotations
@@ -963,29 +959,21 @@ def check_hook_wiring(root: Path) -> list[str]:
             continue
         if data.get("enforce") == "hook" and data.get("deployed-to"):
             deployed = PurePosixPath(str(data["deployed-to"]))
-            if deployed.is_absolute() or ".." in deployed.parts:
-                # 저장소 밖 경로 — 규칙별 검사가 위반 보고. relative_to는
-                # 어휘적이라 ..를 못 거르므로(#40 리뷰 2R) 여기서 배제한다.
+            raw_deployed = str(data["deployed-to"])
+            if (
+                deployed.is_absolute()
+                or ".." in deployed.parts
+                or "\\" in raw_deployed
+                or ":" in raw_deployed
+            ):
+                # 저장소 밖(절대·..) 또는 비POSIX 문법(백슬래시·콜론 — #94)
+                # — 규칙별 검사가 위반 보고. relative_to는 어휘적이라 ..를 못
+                # 거르므로(#40 리뷰 2R) 여기서 배제한다. 이 스크린을 다 지난
+                # 표기는 순수 POSIX 상대 경로라 어떤 플랫폼의 join 의미론에서도
+                # root 아래에 남는다 — PR #93 R3의 어휘적 격리 분기는 문법
+                # 강화로 도달 불가가 되어 제거됨(경계 해제).
                 continue
-            candidate = root / str(data["deployed-to"])
-            if not candidate.is_relative_to(root):
-                # 위 스크린을 통과하는 표기도 join이 root를 대체하면 저장소
-                # 밖이다(Windows의 드라이브 문자 C:/x — posix 기준 비절대).
-                # 침묵 배제가 아니라 위반으로 소리낸다 — per-rule 쪽도 같은
-                # 표기를 못 거르는 동안(#94) 조용히 빼면 저장소 밖 배포가
-                # green으로 통과한다(PR #93 R3: 거부는 침묵 통과가 아니다).
-                # 이 검사는 어휘적이라 join 결과가 root 아래로 남는 재해석
-                # 표기(백슬래시 .. 등)는 못 잡는다 — 그 부류는 POSIX 의미론
-                # 경계(모듈 docstring)와 #94의 문법 강화 몫. POSIX에서는
-                # 도달 불가 분기라 테스트가 없다(명시 예외).
-                violations.append(
-                    f"{rule_path.relative_to(root)}: deployed-to "
-                    f"'{data['deployed-to']}' resolves outside the repository "
-                    "on this platform — not swept; use a repo-root-relative "
-                    "POSIX path"
-                )
-                continue
-            ruled.add(candidate)
+            ruled.add(root / str(data["deployed-to"]))
 
     for target in sorted(unconditional | ruled):
         if not target.is_file():

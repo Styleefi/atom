@@ -1129,6 +1129,24 @@ def test_dotdot_deployed_to_is_not_swept(tmp_path: Path) -> None:
     assert not any("outside_rogue" in v for v in violations)
 
 
+def test_backslash_deployed_to_is_not_swept(tmp_path: Path) -> None:
+    # 비POSIX 문법 deployed-to는 스윕 대상에서 배제된다(#94) — 보고는 per-rule
+    # 문법 위반이 맡고, 곁의 무조건 대상(settings.json) 스윕은 살아야 한다
+    # (test_dotdot_deployed_to_is_not_swept 미러).
+    root = make_repo(tmp_path)
+    body = (
+        "---\nid: my-guard\ntier: convention\nenforce: hook\n"
+        "deployed-to: hooks\\settings.json\nblocking: true\n---\n\nbody\n"
+    )
+    write_rule(root, "my-guard.md", body)
+    write_legacy_wiring(root)
+    violations = rule_violations(root)
+    # 문법 위반 + 패키지 부재(per-rule) + legacy 배선(스윕) = 3건.
+    assert len(violations) == 3
+    assert any("must not contain backslashes or colons" in v for v in violations)
+    assert any("harness.legacy" in v for v in violations)
+
+
 def test_sweep_flags_multi_module_command(tmp_path: Path) -> None:
     # 한 커맨드가 harness 모듈 두 개를 참조하면 첫 토큰 기준 오보고 대신
     # "모듈별 분리" 안내를 낸다(리뷰 2R).
