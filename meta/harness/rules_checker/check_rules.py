@@ -455,9 +455,41 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         return [f"{rel}: {error}"]
     assert data is not None
 
+    # deployed-to 스크린은 다른 필드의 유효성과 무관하다 — 필드 누락·enum
+    # 오류의 조기 return 뒤에 두면 그 오류와 결합한 경로·문법 위반이 한 실행
+    # 가려져, 스윕의 "per-rule 검사가 위반 보고" 전제가 그 조합에서 무너진다
+    # (PR #95 R1 F3). 값이 있으면 어떤 조기 return보다 먼저 수행한다.
+    bad_path = False
+    if data.get("deployed-to"):
+        # deployed-to는 저장소 내 상대 경로여야 한다. 절대경로/..는 root와의
+        # join을 통째로 대체하거나 검사 대상을 저장소 밖으로 보낸다(#40 리뷰).
+        # 위반이어도 진행한다 — 경로와 무관한 검사(blocking 스키마, hook
+        # 패키지 실존)는 여전히 수행 가능하며, 조기 return은 같은 규칙의 다른
+        # 결함을 가린다.
+        raw_deployed = str(data["deployed-to"])
+        deployed = PurePosixPath(raw_deployed)
+        if deployed.is_absolute() or ".." in deployed.parts:
+            bad_path = True
+            violations.append(
+                f"{rel}: deployed-to '{data['deployed-to']}' must be a "
+                "repo-root-relative path inside the repository"
+            )
+        # 문법 검사(#94): 백슬래시·콜론은 POSIX 스크린이 못 보는 Windows
+        # 재해석 표기(드라이브 문자 C:/x, 백슬래시 구분자 ..\x — PR #93 리뷰
+        # 루프가 세 층을 추격한 부류)의 원료다 — 표기 단위 방어 대신 문법에서
+        # 원천 거부해 모든 플랫폼에서 시끄러운 위반으로 만든다. bad_path에
+        # 합류시켜 join 의존 검사만 억제한다(조기 return 없음).
+        if "\\" in raw_deployed or ":" in raw_deployed:
+            bad_path = True
+            violations.append(
+                f"{rel}: deployed-to '{data['deployed-to']}' must not contain "
+                "backslashes or colons — use a repo-root-relative POSIX path"
+            )
+
     missing = [f for f in REQUIRED_FIELDS if not data.get(f)]
     if missing:
-        return [f"{rel}: missing required field(s): {', '.join(missing)}"]
+        violations.append(f"{rel}: missing required field(s): {', '.join(missing)}")
+        return violations
 
     if data["id"] != rule_path.stem:
         violations.append(
@@ -481,31 +513,6 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
             f"(allowed: {', '.join(sorted(VALID_ENFORCE))})"
         )
         return violations
-
-    # deployed-to는 저장소 내 상대 경로여야 한다. 절대경로/..는 root와의 join을
-    # 통째로 대체하거나 검사 대상을 저장소 밖으로 보낸다(#40 리뷰). 위반이어도
-    # 진행한다 — 경로와 무관한 검사(blocking 스키마, hook 패키지 실존)는 여전히
-    # 수행 가능하며, 조기 return은 같은 규칙의 다른 결함을 가린다.
-    deployed = PurePosixPath(str(data["deployed-to"]))
-    bad_path = deployed.is_absolute() or ".." in deployed.parts
-    if bad_path:
-        violations.append(
-            f"{rel}: deployed-to '{data['deployed-to']}' must be a "
-            "repo-root-relative path inside the repository"
-        )
-
-    # 문법 검사(#94): 백슬래시·콜론은 POSIX 스크린이 못 보는 Windows 재해석
-    # 표기(드라이브 문자 C:/x, 백슬래시 구분자 ..\x — PR #93 리뷰 루프가 세
-    # 층을 추격한 부류)의 원료다 — 표기 단위 방어 대신 문법에서 원천 거부해
-    # 모든 플랫폼에서 시끄러운 위반으로 만든다. bad_path에 합류시켜 join 의존
-    # 검사만 억제한다(조기 return 없음 — 기존 가림 방지 구조 유지).
-    raw_deployed = str(data["deployed-to"])
-    if "\\" in raw_deployed or ":" in raw_deployed:
-        bad_path = True
-        violations.append(
-            f"{rel}: deployed-to '{data['deployed-to']}' must not contain "
-            "backslashes or colons — use a repo-root-relative POSIX path"
-        )
 
     # blocking 스키마(hook 전용). 위반이어도 계속 진행한다 — 존재·참조·패키지
     # 검사는 blocking과 무관하고, 템플릿 비교만 유효한 bool을 요구하므로 그

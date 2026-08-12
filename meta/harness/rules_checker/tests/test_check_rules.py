@@ -819,6 +819,22 @@ def test_non_posix_deployed_to_is_rejected(
     assert has_path_violation == expect_path_violation
 
 
+def test_enum_error_does_not_mask_grammar(tmp_path: Path) -> None:
+    # enum 오류의 조기 return이 deployed-to 스크린을 가리면, 스윕이 "per-rule
+    # 검사가 위반 보고"를 전제로 배제한 대상이 한 실행 동안 아무에게도
+    # 보고되지 않는다(PR #95 R1 F3) — 두 위반이 한 실행에 함께 나와야 한다.
+    root = make_repo(tmp_path)
+    body = (
+        "---\nid: my-guard\ntier: bogus\nenforce: hook\n"
+        "deployed-to: hooks\\settings.json\nblocking: true\n---\n\nbody\n"
+    )
+    write_rule(root, "my-guard.md", body)
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("invalid tier value" in v for v in violations)
+    assert any("must not contain backslashes or colons" in v for v in violations)
+
+
 def test_bad_grammar_does_not_mask_blocking_and_package(tmp_path: Path) -> None:
     # 문법 위반 + blocking 부재 + 패키지 부재 → 셋 다 한 번에 보고
     # (test_bad_path_does_not_mask_blocking_and_package 미러 — 문법 위반도
