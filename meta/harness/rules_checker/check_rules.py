@@ -404,9 +404,12 @@ def _skill_path_shape_violations(rel: Path, deployed_to: str) -> list[str]:
     skill로 인식하는 유일한 위치라 더 얕거나 깊은 SKILL.md는 죽은 배포다
     (#38). Path parts 비교라 './' 접두 같은 동치 표기는 정규화되어 통과한다
     — claude-md pin의 raw 문자열 비교와 의도적 비대칭(그쪽 표기는 여기서
-    기존 테스트가 정규화 수용을 핀하고 있다).
+    기존 테스트가 정규화 수용을 핀하고 있다). PurePosixPath로 flavor를
+    고정한다(#95 R1 F2) — native flavor는 백슬래시 표기의 파트 분해가
+    플랫폼마다 갈려 같은 저장소의 위반 집합이 달라진다(POSIX에서는 동작
+    동일, 비POSIX 분기라 테스트 없음 — 명시 예외).
     """
-    deployed = Path(deployed_to)
+    deployed = PurePosixPath(deployed_to)
     if (
         deployed.parts[:2] != (".claude", "skills")
         or deployed.name != "SKILL.md"
