@@ -482,10 +482,9 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
     assert data is not None
 
     # deployed-to 스크린은 다른 필드의 유효성과 무관하다 — 필드 누락·enum
-    # 오류의 조기 return 뒤에 두면 그 오류와 결합한 경로·문법 위반이 한 실행
-    # 가려져, 스윕의 "per-rule 검사가 위반 보고" 전제가 그 조합에서 무너진다
-    # (PR #95 R1 F3). 값이 있으면 필드 누락·enum 오류의 조기 return보다 먼저
-    # 수행한다 — 순서 보장의 핀은 masking 계열 테스트들이다.
+    # 오류의 조기 return 뒤에 뒀다가 그 오류와 결합한 경로·문법 위반이 한
+    # 실행 가려져, 스윕의 "per-rule 검사가 위반 보고" 전제가 무너진 전력이
+    # 있다(PR #95 R1 F3 — 그래서 스크린이 여기, 게이트들 앞에 있다).
     bad_path = False
     if data.get("deployed-to"):
         # deployed-to는 저장소 내 상대 경로여야 한다. 절대경로/..는 root와의
@@ -993,11 +992,11 @@ def check_hook_wiring(root: Path) -> list[str]:
         if data.get("enforce") == "hook" and data.get("deployed-to"):
             if any(_deployed_to_screen(str(data["deployed-to"]))):
                 # 저장소 밖(절대·..) 또는 비POSIX 문법(백슬래시·콜론 — #94)
-                # — 규칙별 검사가 위반 보고(스크린은 필드 누락·enum 오류의
-                # 조기 return보다 먼저 돌고, 파싱 실패 규칙은 이 스윕도
-                # 대상을 못 얻어 배제 자체가 없다 — #95 R1-R2, 순서 핀은
-                # masking 계열 테스트). relative_to는 어휘적이라 ..를 못
-                # 거르므로(#40 리뷰 2R) 여기서 배제한다. 이 스크린을 다 지난 표기는 앵커·구분자
+                # 표기는 배제하고 보고는 규칙별 검사에 맡긴다(#95 R1-R2 —
+                # 조기 return이 스크린을 가리던 조합은 스크린 호이스트로 닫힌
+                # 경위. 파싱 실패 규칙은 이 스윕도 대상을 못 얻어 배제 자체가
+                # 없다). relative_to는 어휘적이라 ..를 못 거르므로(#40 리뷰
+                # 2R) 여기서 배제한다. 이 스크린을 다 지난 표기는 앵커·구분자
                 # 재해석의 원료(절대 표기·..·백슬래시·콜론)가 없어 어떤
                 # 플랫폼의 join 의미론에서도 root 아래에 남는다 — PR #93 R3의
                 # 어휘적 격리 분기는 문법 강화로 도달 불가가 되어 제거됨.

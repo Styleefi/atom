@@ -819,19 +819,32 @@ def test_non_posix_deployed_to_is_rejected(
     assert has_path_violation == expect_path_violation
 
 
-def test_enum_error_does_not_mask_grammar(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("enum_lines", "expected"),
+    [
+        ("tier: bogus\nenforce: hook", "invalid tier value"),
+        ("tier: convention\nenforce: webhook", "invalid enforce value"),
+    ],
+    ids=["tier", "enforce"],
+)
+def test_enum_error_does_not_mask_grammar(
+    tmp_path: Path, enum_lines: str, expected: str
+) -> None:
     # enum 오류의 조기 return이 deployed-to 스크린을 가리면, 스윕이 "per-rule
     # 검사가 위반 보고"를 전제로 배제한 대상이 한 실행 동안 아무에게도
     # 보고되지 않는다(PR #95 R1 F3) — 두 위반이 한 실행에 함께 나와야 한다.
+    # 이 parametrize가 check_rule_file의 스크린-게이트 순서를 tier·enforce
+    # 게이트 각각에 핀한다(R3: enforce 절반이 미핀인 채 주석이 핀을
+    # 주장했다 — 핀 주장은 주석이 아니라 테스트가 담는다).
     root = make_repo(tmp_path)
     body = (
-        "---\nid: my-guard\ntier: bogus\nenforce: hook\n"
+        f"---\nid: my-guard\n{enum_lines}\n"
         "deployed-to: hooks\\settings.json\nblocking: true\n---\n\nbody\n"
     )
     write_rule(root, "my-guard.md", body)
     violations = rule_violations(root)
     assert len(violations) == 2
-    assert any("invalid tier value" in v for v in violations)
+    assert any(expected in v for v in violations)
     assert any("must not contain backslashes or colons" in v for v in violations)
 
 
