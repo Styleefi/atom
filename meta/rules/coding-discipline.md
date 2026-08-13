@@ -44,6 +44,32 @@ Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, sim
 
 The test: Every changed line should trace directly to the user's request.
 
+## Comment claims
+
+**Comments state immutable facts - rationale, provenance, pointers.
+Guarantees live in tests.**
+
+Prose is never machine-verified. A comment asserting a mutable global
+property rots the moment an edit elsewhere changes that property, and the
+next reader inherits a false premise.
+
+- Say why the code exists and which failure or decision produced it -
+  history is append-only, so no future edit can falsify it.
+- Don't state guarantees ("always", "on every platform", "before any
+  early return"), outcome predictions, or pin claims ("this ordering is
+  pinned by the masking tests").
+- A verifiable claim belongs in a test. Reference direction is one-way:
+  the test cites the code site it pins; code comments never name tests.
+- One causal narrative lives in exactly one place; other sites point to
+  it instead of restating it.
+- The write-time test: "Can an edit elsewhere falsify this sentence?"
+  If yes - move it to a test, make it a pointer, or delete it.
+
+When fixing prose flagged under this rule, delete or relocate - don't
+reword. A rewrite is a new claim. (Origin: one overclaim class recurred
+six times across the PR #93/#95 review loops, 2026-08-09..14, surviving
+two rounds of careful rewording; adopted as a rule per #96.)
+
 ## Read errors, don't guess
 
 **Read the actual error/log line. Don't pattern-match from memory.**
