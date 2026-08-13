@@ -835,6 +835,23 @@ def test_enum_error_does_not_mask_grammar(tmp_path: Path) -> None:
     assert any("must not contain backslashes or colons" in v for v in violations)
 
 
+def test_missing_field_does_not_mask_grammar(tmp_path: Path) -> None:
+    # F3 수정의 나머지 절반 핀(PR #95 R2): missing-field return이 신선한
+    # 리스트 반환으로 되돌아가면 스크린 위반이 침묵 소멸한다(revert 시
+    # 스위트 green 실측). 스크린이 필드 누락 조기 return보다 먼저 도는 순서
+    # 보장은 주석이 아니라 이 테스트가 핀한다.
+    root = make_repo(tmp_path)
+    body = (
+        "---\nid: my-guard\nenforce: hook\n"
+        "deployed-to: hooks\\settings.json\nblocking: true\n---\n\nbody\n"
+    )
+    write_rule(root, "my-guard.md", body)
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("must not contain backslashes or colons" in v for v in violations)
+    assert any("missing required field(s): tier" in v for v in violations)
+
+
 def test_bad_grammar_does_not_mask_blocking_and_package(tmp_path: Path) -> None:
     # 문법 위반 + blocking 부재 + 패키지 부재 → 셋 다 한 번에 보고
     # (test_bad_path_does_not_mask_blocking_and_package 미러 — 문법 위반도
