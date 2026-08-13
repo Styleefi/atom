@@ -781,6 +781,107 @@ def test_absolute_deployed_to_is_rejected_not_crash(tmp_path: Path) -> None:
     assert any("does not exist" in v for v in violations)
 
 
+@pytest.mark.parametrize(
+    ("deployed_to", "expected_count", "expect_path_violation"),
+    [
+        # 개수는 동시 발동을 명시 계산해 핀한다(제미나이 G4) — claude-md
+        # 그릇이라 pin 위반("exactly 'CLAUDE.md'")이 항상 함께 발동한다.
+        ("C:/x", 2, False),  # 문법 + pin — 드라이브 문자(콜론)
+        ("..\\x", 2, False),  # 문법 + pin — 백슬래시 .. (posix 스크린 밖)
+        ("a\\b.json", 2, False),  # 문법 + pin — 내부 백슬래시
+        ("folder:name.md", 2, False),  # 순수 문법 — 절대경로 검사와 독립 발동
+        ("/folder:name.md", 3, True),  # 문법 + 절대경로 동시 발동 — 누적 핀
+    ],
+    ids=[
+        "drive-colon",
+        "backslash-dotdot",
+        "inner-backslash",
+        "pure-colon",
+        "colon-plus-absolute",
+    ],
+)
+def test_non_posix_deployed_to_is_rejected(
+    tmp_path: Path, deployed_to: str, expected_count: int, expect_path_violation: bool
+) -> None:
+    # 백슬래시·콜론은 POSIX 스크린이 못 보는 Windows 재해석 표기(드라이브
+    # 문자, 백슬래시 구분자)의 원료다 — 표기 단위 방어 대신 문법에서 원천
+    # 거부해 모든 플랫폼에서 시끄러운 위반으로 만든다(#94, PR #93의 세 층
+    # 추격 종결).
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", claude_md_rule("my-rule", deployed_to))
+    violations = rule_violations(root)
+    assert len(violations) == expected_count
+    assert any("must not contain backslashes or colons" in v for v in violations)
+    assert not any("internal checker error" in v for v in violations)
+    has_path_violation = any(
+        "must be a repo-root-relative path inside" in v for v in violations
+    )
+    assert has_path_violation == expect_path_violation
+
+
+@pytest.mark.parametrize(
+    ("enum_lines", "expected"),
+    [
+        ("tier: bogus\nenforce: hook", "invalid tier value"),
+        ("tier: convention\nenforce: webhook", "invalid enforce value"),
+    ],
+    ids=["tier", "enforce"],
+)
+def test_enum_error_does_not_mask_grammar(
+    tmp_path: Path, enum_lines: str, expected: str
+) -> None:
+    # enum 오류의 조기 return이 deployed-to 스크린을 가리면, 스윕이 "per-rule
+    # 검사가 위반 보고"를 전제로 배제한 대상이 한 실행 동안 아무에게도
+    # 보고되지 않는다(PR #95 R1 F3) — 두 위반이 한 실행에 함께 나와야 한다.
+    # 이 parametrize가 check_rule_file의 스크린-게이트 순서를 tier·enforce
+    # 게이트 각각에 핀한다(R3: enforce 절반이 미핀인 채 주석이 핀을
+    # 주장했다 — 핀 주장은 주석이 아니라 테스트가 담는다).
+    root = make_repo(tmp_path)
+    body = (
+        f"---\nid: my-guard\n{enum_lines}\n"
+        "deployed-to: hooks\\settings.json\nblocking: true\n---\n\nbody\n"
+    )
+    write_rule(root, "my-guard.md", body)
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any(expected in v for v in violations)
+    assert any("must not contain backslashes or colons" in v for v in violations)
+
+
+def test_missing_field_does_not_mask_grammar(tmp_path: Path) -> None:
+    # F3 수정의 나머지 절반 핀(PR #95 R2): missing-field return이 신선한
+    # 리스트 반환으로 되돌아가면 스크린 위반이 침묵 소멸한다(revert 시
+    # 스위트 green 실측). 스크린이 필드 누락 조기 return보다 먼저 도는 순서
+    # 보장은 주석이 아니라 이 테스트가 핀한다.
+    root = make_repo(tmp_path)
+    body = (
+        "---\nid: my-guard\nenforce: hook\n"
+        "deployed-to: hooks\\settings.json\nblocking: true\n---\n\nbody\n"
+    )
+    write_rule(root, "my-guard.md", body)
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("must not contain backslashes or colons" in v for v in violations)
+    assert any("missing required field(s): tier" in v for v in violations)
+
+
+def test_bad_grammar_does_not_mask_blocking_and_package(tmp_path: Path) -> None:
+    # 문법 위반 + blocking 부재 + 패키지 부재 → 셋 다 한 번에 보고
+    # (test_bad_path_does_not_mask_blocking_and_package 미러 — 문법 위반도
+    # 같은 가림 방지 흐름에 합류함을 핀).
+    root = make_repo(tmp_path)
+    body = (
+        "---\nid: my-guard\ntier: convention\nenforce: hook\n"
+        "deployed-to: settings\\my.json\n---\n\nbody\n"
+    )
+    write_rule(root, "my-guard.md", body)
+    violations = rule_violations(root)
+    assert len(violations) == 3
+    assert any("must not contain backslashes or colons" in v for v in violations)
+    assert any("must declare 'blocking" in v for v in violations)
+    assert any("does not exist" in v for v in violations)
+
+
 def test_bad_path_does_not_mask_blocking_and_package(tmp_path: Path) -> None:
     # 경로 위반 + blocking 부재 + 패키지 부재 → 셋 다 한 번에 보고(리뷰 2R:
     # 조기 return 가림 패턴을 hook 분기에서 구조적으로 제거했음을 핀).
@@ -860,7 +961,10 @@ def test_broken_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
     write_legacy_wiring(root)
     violations = rule_violations(root)
     # per-rule 방어의 보고인지(스윕 붕괴 메시지가 아니라) 규칙 경로로 앵커한다.
-    assert any("meta/rules/broken.md: internal checker error" in v for v in violations)
+    # 기대 경로는 rel(relative_to) 렌더링이라 Path로 조립한다 — POSIX 구분자
+    # 하드코딩은 native Windows에서 false red다(#94).
+    expected = f"{Path('meta') / 'rules' / 'broken.md'}: internal checker error"
+    assert any(expected in v for v in violations)
     assert any("harness.legacy" in v for v in violations)
 
 
@@ -871,7 +975,8 @@ def test_non_utf8_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
     (root / "meta" / "rules" / "badenc.md").write_bytes(b"\xbe\xbe\xbe")
     write_legacy_wiring(root)
     violations = rule_violations(root)
-    assert any("meta/rules/badenc.md: internal checker error" in v for v in violations)
+    expected = f"{Path('meta') / 'rules' / 'badenc.md'}: internal checker error"
+    assert any(expected in v for v in violations)
     assert any("harness.legacy" in v for v in violations)
 
 
@@ -903,7 +1008,8 @@ def test_pathological_rule_yaml_does_not_kill_the_sweep(
     violations = rule_violations(root)
     # 형제 테스트들과 동일하게 "run은 red" 절반도 핀한다 — 규칙이 조용히
     # 건너뛰어지는 회귀를 이 테스트만 놓치면 안 된다(최종 게이트 R6).
-    assert any("meta/rules/deep.md: internal checker error" in v for v in violations)
+    expected = f"{Path('meta') / 'rules' / 'deep.md'}: internal checker error"
+    assert any(expected in v for v in violations)
     assert any("harness.legacy" in v for v in violations)
 
 
@@ -1072,6 +1178,24 @@ def test_dotdot_deployed_to_is_not_swept(tmp_path: Path) -> None:
     # 경로 위반 + 패키지 부재만 — 저장소 밖 파일의 내용은 절대 검사되지 않는다.
     assert len(violations) == 2
     assert not any("outside_rogue" in v for v in violations)
+
+
+def test_backslash_deployed_to_is_not_swept(tmp_path: Path) -> None:
+    # 비POSIX 문법 deployed-to는 스윕 대상에서 배제된다(#94) — 보고는 per-rule
+    # 문법 위반이 맡고, 곁의 무조건 대상(settings.json) 스윕은 살아야 한다
+    # (test_dotdot_deployed_to_is_not_swept 미러).
+    root = make_repo(tmp_path)
+    body = (
+        "---\nid: my-guard\ntier: convention\nenforce: hook\n"
+        "deployed-to: hooks\\settings.json\nblocking: true\n---\n\nbody\n"
+    )
+    write_rule(root, "my-guard.md", body)
+    write_legacy_wiring(root)
+    violations = rule_violations(root)
+    # 문법 위반 + 패키지 부재(per-rule) + legacy 배선(스윕) = 3건.
+    assert len(violations) == 3
+    assert any("must not contain backslashes or colons" in v for v in violations)
+    assert any("harness.legacy" in v for v in violations)
 
 
 def test_sweep_flags_multi_module_command(tmp_path: Path) -> None:

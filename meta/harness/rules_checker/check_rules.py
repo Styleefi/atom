@@ -49,14 +49,14 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
 경로는 실행 위치와 무관하게 이 파일의 고정 위치(meta/harness/rules_checker/)
 로부터 역산한 저장소 루트 기준으로 해석하므로 로컬과 CI에서 결과가 동일하다.
 
-경로 의미론 경계(PR #93 R3, 오너 수용): deployed-to는 POSIX 의미론
-(PurePosixPath)으로 해석·검증한다. native Windows에서 checker를 실행하면
-같은 문자열이 다르게 재해석되는 표기(드라이브 문자 C:/x, 백슬래시 구분자
-..\\x)가 스크린과 어긋날 수 있는데, 그 표기 부류는 방어 범위 밖이다 —
-표기 단위 방어는 세 층(#40 리뷰의 posix .. → #93 R2 드라이브 문자 → R3
-백슬래시 ..)을 내려가며 닫히지 않았다. 원천 봉쇄(deployed-to 문법에서
-백슬래시·콜론 거부 — 전 플랫폼에서 시끄러운 위반, Linux에서 테스트 가능)는
-#94의 몫이다.
+deployed-to 문법: 저장소 루트 기준 POSIX 상대 경로만 유효하며, 백슬래시나
+콜론을 담은 문자열 값은 거부된다(#94 — root를 탈출하는 Windows 재해석
+표기(드라이브 문자 C:/x, 백슬래시 .. 구분자)를 문법에서 봉쇄해 모든
+플랫폼에서 위반으로 만든다; 검증은 check_rule_file, PR #93 R3의 의미론 경계
+선언은 이로써 해제). 문법이 방어하지 않는 표기 둘(PR #95 R1-R2, 결과
+무보장): YAML 스칼라 해석이 문자열화 전에 콜론을 소거하는 표기(10:30 →
+정수 630), 그리고 콜론·백슬래시 없이 플랫폼별로 다르게 해석되는 이름
+(후행 점·공백, 대소문자 접기).
 """
 
 from __future__ import annotations
@@ -403,9 +403,12 @@ def _skill_path_shape_violations(rel: Path, deployed_to: str) -> list[str]:
     skill로 인식하는 유일한 위치라 더 얕거나 깊은 SKILL.md는 죽은 배포다
     (#38). Path parts 비교라 './' 접두 같은 동치 표기는 정규화되어 통과한다
     — claude-md pin의 raw 문자열 비교와 의도적 비대칭(그쪽 표기는 여기서
-    기존 테스트가 정규화 수용을 핀하고 있다).
+    기존 테스트가 정규화 수용을 핀하고 있다). PurePosixPath로 flavor를
+    고정한다(#95 R1 F2) — native flavor는 백슬래시 표기의 파트 분해가
+    플랫폼마다 갈려 같은 저장소의 위반 집합이 달라진다(POSIX에서는 동작
+    동일, 비POSIX 분기라 테스트 없음 — 명시 예외).
     """
-    deployed = Path(deployed_to)
+    deployed = PurePosixPath(deployed_to)
     if (
         deployed.parts[:2] != (".claude", "skills")
         or deployed.name != "SKILL.md"
@@ -416,6 +419,25 @@ def _skill_path_shape_violations(rel: Path, deployed_to: str) -> list[str]:
             "SKILL.md under .claude/skills/"
         ]
     return []
+
+
+def _deployed_to_screen(raw: str) -> tuple[bool, bool]:
+    """deployed-to raw 문자열의 (경로 탈출, 문법 위반) 여부를 판정한다.
+
+    per-rule 검사와 역방향 스윕이 같은 스크린을 쓰게 하는 단일 술어(#95) —
+    스윕의 배제 조건과 per-rule의 거부 문법이 사본 드리프트로 갈라지면
+    "배제됐는데 아무도 보고하지 않는" 침묵 조합이 되살아난다(PR #93 R3).
+
+    Args:
+        raw: frontmatter에서 str()로 뽑은 deployed-to 값.
+
+    Returns:
+        (절대경로/..로 root를 이탈하는지, 백슬래시/콜론 문법 위반인지) 튜플.
+    """
+    deployed = PurePosixPath(raw)
+    escapes = deployed.is_absolute() or ".." in deployed.parts
+    bad_grammar = "\\" in raw or ":" in raw
+    return escapes, bad_grammar
 
 
 def _resolve_deploy_target(root: Path, rel: Path, data: dict) -> tuple[Path, str | None]:
@@ -459,9 +481,40 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         return [f"{rel}: {error}"]
     assert data is not None
 
+    # deployed-to 스크린은 다른 필드의 유효성과 무관하다 — 필드 누락·enum
+    # 오류의 조기 return 뒤에 뒀다가 그 오류와 결합한 경로·문법 위반이 한
+    # 실행 가려져, 스윕의 "per-rule 검사가 위반 보고" 전제가 무너진 전력이
+    # 있다(PR #95 R1 F3 — 그래서 스크린이 여기, 게이트들 앞에 있다).
+    bad_path = False
+    if data.get("deployed-to"):
+        # deployed-to는 저장소 내 상대 경로여야 한다. 절대경로/..는 root와의
+        # join을 통째로 대체하거나 검사 대상을 저장소 밖으로 보낸다(#40 리뷰).
+        # 위반이어도 여기서 return하지 않는다 — 조기 return은 같은 규칙의
+        # 다른 결함을 가린다(가림 방지 구조).
+        raw_deployed = str(data["deployed-to"])
+        escapes, bad_grammar = _deployed_to_screen(raw_deployed)
+        if escapes:
+            bad_path = True
+            violations.append(
+                f"{rel}: deployed-to '{data['deployed-to']}' must be a "
+                "repo-root-relative path inside the repository"
+            )
+        # 문법 검사(#94): 백슬래시·콜론은 POSIX 스크린이 못 보는 Windows
+        # 재해석 표기(드라이브 문자 C:/x, 백슬래시 구분자 ..\x — PR #93 리뷰
+        # 루프가 세 층을 추격한 부류)의 원료다 — 표기 단위 방어 대신 문법에서
+        # 원천 거부해 모든 플랫폼에서 시끄러운 위반으로 만든다. bad_path에
+        # 합류시켜 join 의존 검사만 억제한다(조기 return 없음).
+        if bad_grammar:
+            bad_path = True
+            violations.append(
+                f"{rel}: deployed-to '{data['deployed-to']}' must not contain "
+                "backslashes or colons — use a repo-root-relative POSIX path"
+            )
+
     missing = [f for f in REQUIRED_FIELDS if not data.get(f)]
     if missing:
-        return [f"{rel}: missing required field(s): {', '.join(missing)}"]
+        violations.append(f"{rel}: missing required field(s): {', '.join(missing)}")
+        return violations
 
     if data["id"] != rule_path.stem:
         violations.append(
@@ -485,18 +538,6 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
             f"(allowed: {', '.join(sorted(VALID_ENFORCE))})"
         )
         return violations
-
-    # deployed-to는 저장소 내 상대 경로여야 한다. 절대경로/..는 root와의 join을
-    # 통째로 대체하거나 검사 대상을 저장소 밖으로 보낸다(#40 리뷰). 위반이어도
-    # 진행한다 — 경로와 무관한 검사(blocking 스키마, hook 패키지 실존)는 여전히
-    # 수행 가능하며, 조기 return은 같은 규칙의 다른 결함을 가린다.
-    deployed = PurePosixPath(str(data["deployed-to"]))
-    bad_path = deployed.is_absolute() or ".." in deployed.parts
-    if bad_path:
-        violations.append(
-            f"{rel}: deployed-to '{data['deployed-to']}' must be a "
-            "repo-root-relative path inside the repository"
-        )
 
     # blocking 스키마(hook 전용). 위반이어도 계속 진행한다 — 존재·참조·패키지
     # 검사는 blocking과 무관하고, 템플릿 비교만 유효한 bool을 요구하므로 그
@@ -949,30 +990,18 @@ def check_hook_wiring(root: Path) -> list[str]:
         if error or data is None:
             continue
         if data.get("enforce") == "hook" and data.get("deployed-to"):
-            deployed = PurePosixPath(str(data["deployed-to"]))
-            if deployed.is_absolute() or ".." in deployed.parts:
-                # 저장소 밖 경로 — 규칙별 검사가 위반 보고. relative_to는
-                # 어휘적이라 ..를 못 거르므로(#40 리뷰 2R) 여기서 배제한다.
+            if any(_deployed_to_screen(str(data["deployed-to"]))):
+                # 저장소 밖(절대·..) 또는 비POSIX 문법(백슬래시·콜론 — #94)
+                # 표기는 배제하고 보고는 규칙별 검사에 맡긴다(#95 R1-R2 —
+                # 조기 return이 스크린을 가리던 조합은 스크린 호이스트로 닫힌
+                # 경위. 파싱 실패 규칙은 이 스윕도 대상을 못 얻어 배제 자체가
+                # 없다). relative_to는 어휘적이라 ..를 못 거르므로(#40 리뷰
+                # 2R) 여기서 배제한다. 이 스크린을 다 지난 표기는 앵커·구분자
+                # 재해석의 원료(절대 표기·..·백슬래시·콜론)가 없어 어떤
+                # 플랫폼의 join 의미론에서도 root 아래에 남는다 — PR #93 R3의
+                # 어휘적 격리 분기는 문법 강화로 도달 불가가 되어 제거됨.
                 continue
-            candidate = root / str(data["deployed-to"])
-            if not candidate.is_relative_to(root):
-                # 위 스크린을 통과하는 표기도 join이 root를 대체하면 저장소
-                # 밖이다(Windows의 드라이브 문자 C:/x — posix 기준 비절대).
-                # 침묵 배제가 아니라 위반으로 소리낸다 — per-rule 쪽도 같은
-                # 표기를 못 거르는 동안(#94) 조용히 빼면 저장소 밖 배포가
-                # green으로 통과한다(PR #93 R3: 거부는 침묵 통과가 아니다).
-                # 이 검사는 어휘적이라 join 결과가 root 아래로 남는 재해석
-                # 표기(백슬래시 .. 등)는 못 잡는다 — 그 부류는 POSIX 의미론
-                # 경계(모듈 docstring)와 #94의 문법 강화 몫. POSIX에서는
-                # 도달 불가 분기라 테스트가 없다(명시 예외).
-                violations.append(
-                    f"{rule_path.relative_to(root)}: deployed-to "
-                    f"'{data['deployed-to']}' resolves outside the repository "
-                    "on this platform — not swept; use a repo-root-relative "
-                    "POSIX path"
-                )
-                continue
-            ruled.add(candidate)
+            ruled.add(root / str(data["deployed-to"]))
 
     for target in sorted(unconditional | ruled):
         if not target.is_file():
