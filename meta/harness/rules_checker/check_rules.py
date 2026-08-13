@@ -53,11 +53,10 @@ deployed-to 문법: 저장소 루트 기준 POSIX 상대 경로만 유효하며,
 콜론을 담은 문자열 값은 거부된다(#94 — root를 탈출하는 Windows 재해석
 표기(드라이브 문자 C:/x, 백슬래시 .. 구분자)를 문법에서 봉쇄해 모든
 플랫폼에서 위반으로 만든다; 검증은 check_rule_file, PR #93 R3의 의미론 경계
-선언은 이로써 해제). 문서화된 한계 둘(PR #95 R1): 문법은 YAML 파싱 후의
-문자열 값 기준이라 스칼라 해석이 콜론을 소거한 표기(10:30 → 정수 630)는
-문법 위반 대신 대상 부재 위반으로 잡히고, 콜론·백슬래시 없는 Windows 재해석
-(후행 점·공백, 대소문자 접기)은 root 탈출 없이도 플랫폼 간 판정이 갈릴 수
-있다 — 어느 쪽도 침묵 통과는 아니며 run은 Linux/CI 기준으로 red다.
+선언은 이로써 해제). 문법이 방어하지 않는 표기 둘(PR #95 R1-R2, 결과
+무보장): YAML 스칼라 해석이 문자열화 전에 콜론을 소거하는 표기(10:30 →
+정수 630), 그리고 콜론·백슬래시 없이 플랫폼별로 다르게 해석되는 이름
+(후행 점·공백, 대소문자 접기).
 """
 
 from __future__ import annotations
@@ -485,14 +484,14 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
     # deployed-to 스크린은 다른 필드의 유효성과 무관하다 — 필드 누락·enum
     # 오류의 조기 return 뒤에 두면 그 오류와 결합한 경로·문법 위반이 한 실행
     # 가려져, 스윕의 "per-rule 검사가 위반 보고" 전제가 그 조합에서 무너진다
-    # (PR #95 R1 F3). 값이 있으면 어떤 조기 return보다 먼저 수행한다.
+    # (PR #95 R1 F3). 값이 있으면 필드 누락·enum 오류의 조기 return보다 먼저
+    # 수행한다 — 순서 보장의 핀은 masking 계열 테스트들이다.
     bad_path = False
     if data.get("deployed-to"):
         # deployed-to는 저장소 내 상대 경로여야 한다. 절대경로/..는 root와의
         # join을 통째로 대체하거나 검사 대상을 저장소 밖으로 보낸다(#40 리뷰).
-        # 위반이어도 진행한다 — 경로와 무관한 검사(blocking 스키마, hook
-        # 패키지 실존)는 여전히 수행 가능하며, 조기 return은 같은 규칙의 다른
-        # 결함을 가린다.
+        # 위반이어도 여기서 return하지 않는다 — 조기 return은 같은 규칙의
+        # 다른 결함을 가린다(가림 방지 구조).
         raw_deployed = str(data["deployed-to"])
         escapes, bad_grammar = _deployed_to_screen(raw_deployed)
         if escapes:
@@ -994,10 +993,11 @@ def check_hook_wiring(root: Path) -> list[str]:
         if data.get("enforce") == "hook" and data.get("deployed-to"):
             if any(_deployed_to_screen(str(data["deployed-to"]))):
                 # 저장소 밖(절대·..) 또는 비POSIX 문법(백슬래시·콜론 — #94)
-                # — 규칙별 검사가 위반 보고(deployed-to 스크린은 어떤 조기
-                # return보다 먼저 돌므로 이 전제는 조합 무관하게 성립, #95 R1
-                # F3). relative_to는 어휘적이라 ..를 못 거르므로(#40 리뷰 2R)
-                # 여기서 배제한다. 이 스크린을 다 지난 표기는 앵커·구분자
+                # — 규칙별 검사가 위반 보고(스크린은 필드 누락·enum 오류의
+                # 조기 return보다 먼저 돌고, 파싱 실패 규칙은 이 스윕도
+                # 대상을 못 얻어 배제 자체가 없다 — #95 R1-R2, 순서 핀은
+                # masking 계열 테스트). relative_to는 어휘적이라 ..를 못
+                # 거르므로(#40 리뷰 2R) 여기서 배제한다. 이 스크린을 다 지난 표기는 앵커·구분자
                 # 재해석의 원료(절대 표기·..·백슬래시·콜론)가 없어 어떤
                 # 플랫폼의 join 의미론에서도 root 아래에 남는다 — PR #93 R3의
                 # 어휘적 격리 분기는 문법 강화로 도달 불가가 되어 제거됨.
