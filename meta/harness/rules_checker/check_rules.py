@@ -105,8 +105,9 @@ HOOK_COMMAND_NON_BLOCKING = (
 # 표기(python/python3/uv run)와 무관하게 변형 배선을 잡는다. `\s*`는 붙여쓰기
 # (`-mharness.x` — 유효한 인터프리터 호출)까지 커버. 점 포함 캡처로 하위모듈
 # 진입점(harness.a.b)도 온전히 뽑는다. 한계: 따옴표로 감싼 모듈명
-# (`-m "harness.x"`)은 미감지 — bash -c 간접 실행과 같은 잔여 클래스
-# (문서화된 한계).
+# (`-m "harness.x"`)은 미감지. ruled hook에서는 _references_module도 같은
+# 이유로 매치가 없어 "does not reference" 위반으로 넘어지고(fail-closed),
+# unruled는 bash -c 간접 실행과 같은 잔여 클래스다.
 _HOOK_MODULE_RE = re.compile(r"(?<!\S)-m\s*(harness\.\w+(?:\.\w+)*)")
 
 # 규칙 import 토큰의 형태. _import_lines가 활성 줄에 fullmatch로 적용한다 —
