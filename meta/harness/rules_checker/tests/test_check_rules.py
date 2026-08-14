@@ -53,7 +53,9 @@ def rule_violations(root: Path) -> list[str]:
     규칙 위반이 있으면 인벤토리 검사가 미뤄지고 그 사실이 위반으로 따라붙고,
     baseline 파일을 지우는 픽스처는 부재 위반이 따라붙는다. 규칙 검사 자체를
     다루는 테스트가 매번 그것까지 세면 불필요한 결합이 생기므로 걸러낸다 —
-    두 동작 모두 전용 테스트가 고정한다. 부재 필터는 부재 위반의 고유 문구로만
+    보류 동작은 test_inventory_deferred_while_a_rule_is_violating 계열에,
+    부재 위반은 test_missing_template_is_reported 계열에 있다. 부재 필터는
+    부재 위반의 고유 문구로만
     거른다 — "does not exist" 류 범용 문구로 거르면 규칙 쪽 missing-target
     위반까지 걸러진다.
     """
@@ -784,8 +786,8 @@ def test_absolute_deployed_to_is_rejected_not_crash(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("deployed_to", "expected_count", "expect_path_violation"),
     [
-        # 개수는 동시 발동을 명시 계산해 핀한다(제미나이 G4) — claude-md
-        # 그릇이라 pin 위반("exactly 'CLAUDE.md'")이 항상 함께 발동한다.
+        # 개수는 동시 발동의 명시 계산이다(제미나이 G4) — 이 표의 표기는
+        # 전부 claude-md pin("exactly 'CLAUDE.md'")도 위반이라 함께 발동한다.
         ("C:/x", 2, False),  # 문법 + pin — 드라이브 문자(콜론)
         ("..\\x", 2, False),  # 문법 + pin — 백슬래시 .. (posix 스크린 밖)
         ("a\\b.json", 2, False),  # 문법 + pin — 내부 백슬래시
@@ -805,8 +807,7 @@ def test_non_posix_deployed_to_is_rejected(
 ) -> None:
     # 백슬래시·콜론은 POSIX 스크린이 못 보는 Windows 재해석 표기(드라이브
     # 문자, 백슬래시 구분자)의 원료다 — 표기 단위 방어 대신 문법에서 원천
-    # 거부해 모든 플랫폼에서 시끄러운 위반으로 만든다(#94, PR #93의 세 층
-    # 추격 종결).
+    # 거부하는 설계다(#94, PR #93의 세 층 추격 종결).
     root = make_repo(tmp_path)
     write_rule(root, "my-rule.md", claude_md_rule("my-rule", deployed_to))
     violations = rule_violations(root)
@@ -867,8 +868,7 @@ def test_missing_field_does_not_mask_grammar(tmp_path: Path) -> None:
 
 def test_bad_grammar_does_not_mask_blocking_and_package(tmp_path: Path) -> None:
     # 문법 위반 + blocking 부재 + 패키지 부재 → 셋 다 한 번에 보고
-    # (test_bad_path_does_not_mask_blocking_and_package 미러 — 문법 위반도
-    # 같은 가림 방지 흐름에 합류함을 핀).
+    # (test_bad_path_does_not_mask_blocking_and_package 미러의 문법 위반판).
     root = make_repo(tmp_path)
     body = (
         "---\nid: my-guard\ntier: convention\nenforce: hook\n"
@@ -883,8 +883,8 @@ def test_bad_grammar_does_not_mask_blocking_and_package(tmp_path: Path) -> None:
 
 
 def test_bad_path_does_not_mask_blocking_and_package(tmp_path: Path) -> None:
-    # 경로 위반 + blocking 부재 + 패키지 부재 → 셋 다 한 번에 보고(리뷰 2R:
-    # 조기 return 가림 패턴을 hook 분기에서 구조적으로 제거했음을 핀).
+    # 경로 위반 + blocking 부재 + 패키지 부재 → 셋 다 한 번에 보고(리뷰
+    # 2R에서 hook 분기의 조기 return 가림 패턴을 제거한 경위의 시나리오).
     root = make_repo(tmp_path)
     body = (
         "---\nid: my-guard\ntier: convention\nenforce: hook\n"
@@ -961,8 +961,8 @@ def test_broken_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
     write_legacy_wiring(root)
     violations = rule_violations(root)
     # per-rule 방어의 보고인지(스윕 붕괴 메시지가 아니라) 규칙 경로로 앵커한다.
-    # 기대 경로는 rel(relative_to) 렌더링이라 Path로 조립한다 — POSIX 구분자
-    # 하드코딩은 native Windows에서 false red다(#94).
+    # 기대 경로는 rel(relative_to) 렌더링이라 Path로 조립한다 — 구현과 같은
+    # 방식으로 조립해 구분자 하드코딩을 피한다(#94).
     expected = f"{Path('meta') / 'rules' / 'broken.md'}: internal checker error"
     assert any(expected in v for v in violations)
     assert any("harness.legacy" in v for v in violations)
@@ -988,8 +988,8 @@ def test_pathological_rule_yaml_does_not_kill_the_sweep(
     # 영역을 안 넓혀 같은 가림이 세 번째 재발). 8000중첩 `[`로 PyYAML의
     # 재귀 한계를 실제로 때리는 방식은 구현 세부 의존이라 파서가 반복
     # 구현으로 바뀌면 공허 통과한다(#43) — 마커를 심은 파일에서만 직접
-    # raise하는 monkeypatch로 "파싱 중 어떤 예외"라는 가드 영역 자체를
-    # 구현 독립적으로 핀한다. 실입력 심중첩을 실제 파서에 먹이는 커버리지는
+    # raise하는 monkeypatch로, 가드가 예외 타입이 아니라 파싱 영역을
+    # 감싸는지를 구현 독립적으로 검사한다. 실입력 심중첩을 실제 파서에 먹이는 커버리지는
     # 이 재작성으로 의도적으로 내려놓았다 — 파서 교체 후 예외 대신 hang하는
     # 부류는 미방어(수용된 트레이드오프, PR #93 R1 F5).
     root = make_repo(tmp_path)
@@ -1006,7 +1006,7 @@ def test_pathological_rule_yaml_does_not_kill_the_sweep(
     monkeypatch.setattr(check_rules_module, "parse_frontmatter", exploding_parse)
     write_legacy_wiring(root)
     violations = rule_violations(root)
-    # 형제 테스트들과 동일하게 "run은 red" 절반도 핀한다 — 규칙이 조용히
+    # "run은 red" 절반(internal error 보고)도 함께 단정한다 — 규칙이 조용히
     # 건너뛰어지는 회귀를 이 테스트만 놓치면 안 된다(최종 게이트 R6).
     expected = f"{Path('meta') / 'rules' / 'deep.md'}: internal checker error"
     assert any(expected in v for v in violations)
@@ -1021,10 +1021,10 @@ def test_pathological_settings_does_not_kill_the_sweep(
     # 규칙 파일에 세 번 닫은 "하나가 전체를 가림" 클래스가 settings 대상
     # 쪽에 열려 있었다). 대상별 가드가 다른 대상의 배선 위반을 보존해야
     # 한다. 실입력(100k 중첩 [)으로 json 내부의 RecursionError를 때리는
-    # 방식은 CPython 구현 세부 의존이라, 형제 YAML 테스트의 수용된 고도
-    # (R1 F5)와 동일하게 대상 파일에서만 직접 raise하는 monkeypatch로 가드
-    # 영역을 핀한다(R2 F4). 기대 메시지는 rel 렌더링이라 Path로 조립한다 —
-    # POSIX 구분자 하드코딩은 native Windows에서 false red다(R2 F2).
+    # 방식은 CPython 구현 세부 의존이라, 형제 YAML 테스트와 같은 고도(R1
+    # F5)로 대상 파일에서만 직접 raise하는 monkeypatch를 써 가드가 영역을
+    # 감싸는지 검사한다(R2 F4). 기대 메시지는 rel 렌더링이라 Path로 조립한다
+    # — 구현과 같은 방식으로 조립해 구분자 하드코딩을 피한다(R2 F2).
     root = make_repo(tmp_path)
     write_legacy_wiring(root)
     (root / ".claude" / "settings.local.json").write_text("{}", encoding="utf-8")
@@ -1081,9 +1081,8 @@ def test_unreadable_settings_is_a_violation_not_a_crash(tmp_path: Path) -> None:
     # 없음 = 모드 비트 미지원"이라는 미검증 가정까지 왔던 경로다(PR #93
     # R1-R2). probe는 root(000도 읽힘)와 비POSIX 플랫폼을 같은 사유로 자연
     # 포섭한다 — symlink probe(R1 F4)와 같은 고도.
-    # 000 잔재는 원복하지 않는다 — POSIX 삭제는 디렉토리 권한 소관이라 tmp
-    # 청소를 방해하지 않고, 아래 본 픽스처의 settings.json 000도 같은 상태로
-    # 남는다(R3: "청소 방해" 주장은 사실이 아닌 과잉 방어였다).
+    # 000 잔재는 원복하지 않는다(R3에서 "청소 방해" 주장이 사실이 아닌 과잉
+    # 방어로 판명된 경위 — POSIX 삭제는 디렉토리 권한 소관).
     probe = tmp_path / "mode-probe"
     probe.write_text("x", encoding="utf-8")
     probe.chmod(0o000)
@@ -1175,7 +1174,7 @@ def test_dotdot_deployed_to_is_not_swept(tmp_path: Path) -> None:
     )
     write_rule(root, "my-guard.md", body)
     violations = rule_violations(root)
-    # 경로 위반 + 패키지 부재만 — 저장소 밖 파일의 내용은 절대 검사되지 않는다.
+    # 경로 위반 + 패키지 부재만 — 밖 파일(outside_rogue)의 위반이 나오면 안 된다.
     assert len(violations) == 2
     assert not any("outside_rogue" in v for v in violations)
 
@@ -1214,10 +1213,10 @@ def test_sweep_flags_multi_module_command(tmp_path: Path) -> None:
 
 
 def test_checker_never_raises_on_malformed_inputs(tmp_path: Path) -> None:
-    """사망 부류 방어: 어떤 깨진 입력에도 check_rules는 예외 대신 위반을 낸다.
+    """사망 부류 방어의 퍼즈성 검사 — 깨진 입력 대표 케이스가 위반으로 나오는지.
 
     지점 단위 방어(ValueError → 고침 → PermissionError)가 반복 실패한 부류라
-    전역 변환 + 이 퍼즈성 테스트로 구조적으로 닫는다(#40 리뷰 2R).
+    전역 변환으로 돌아선 경위(#40 리뷰 2R).
     """
     cases = [
         # (규칙 본문, settings 내용 — None이면 파일 없음)
@@ -1247,8 +1246,8 @@ def test_checker_never_raises_on_malformed_inputs(tmp_path: Path) -> None:
             )
         # 위반이 나오되 전역 방어(internal error)로 넘어진 것이면 안 된다 —
         # isinstance(list) 단언은 전역 변환이 무조건 보장하는 동어반복이라
-        # 케이스 하나가 내부에서 죽어도 green이었다(#43). 내용은 각 시나리오
-        # 테스트가 핀하고, 여기서는 "깨끗한 위반으로 보고됐다"만 고정한다.
+        # 케이스 하나가 내부에서 죽어도 green이었다(#43). 여기서는 "깨끗한
+        # 위반으로 보고됐다"만 본다(위반 내용은 범위 밖).
         violations = check_rules(root)
         assert violations, f"case {i}: expected violations"
         assert not any("internal checker error" in v for v in violations), (
@@ -1361,7 +1360,7 @@ def test_skill_rule_without_reference(tmp_path: Path) -> None:
 
 
 def test_skill_nested_path_is_rejected(tmp_path: Path) -> None:
-    # #38: skill은 정확히 .claude/skills/<이름>/SKILL.md 깊이만 로드된다.
+    # #38 당시 확인된 Claude Code의 skill 로딩 위치 밖 — 죽은 배포로 거부.
     root = make_repo(tmp_path)
     write_rule(
         root,
@@ -1379,7 +1378,7 @@ def test_skill_nested_path_is_rejected(tmp_path: Path) -> None:
 
 def test_skill_shallow_path_is_rejected(tmp_path: Path) -> None:
     # 얕은 쪽 경계(.claude/skills/SKILL.md, 3파트)도 스킬 위치가 아니다 —
-    # parts[:2]+name 검사만으로는 지금 통과하는 실존 구멍(#38 4R 리뷰).
+    # parts[:2]+name 검사만으로는 통과하던 실존 구멍(#38 4R 리뷰).
     root = make_repo(tmp_path)
     write_rule(
         root,
@@ -1711,7 +1710,8 @@ def test_inventory_deferred_while_a_rule_is_violating(tmp_path: Path, body: str)
 
 def test_inventory_deferral_also_holds_unrelated_drift(tmp_path: Path) -> None:
     # 보류의 대가: 규칙이 깨진 동안에는 무관한 아티팩트 드리프트도 보고되지
-    # 않는다. 침묵이 아니라 보류 안내로 드러나고, 다음 실행에서 잡힌다.
+    # 않는다 — 침묵이 아니라 보류 안내로 드러난다. 규칙을 고친 뒤의 동작은
+    # test_inventory_runs_once_the_registry_is_clean에 있다.
     root = make_repo(tmp_path)
     write_rule(root, "broken.md", "---\nid: broken\n")
     make_infra_stack(root, "sandbox")
