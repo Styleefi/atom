@@ -104,7 +104,8 @@ OVERRIDE_TOKEN = "ATOM_DUP_REVIEWED=1"
 # 차단 sentinel 종료 코드. Claude Code의 차단 코드는 2지만 uv(자체 오류 2)와
 # python(예외 1, CLI 오류 2)이 같은 코드를 낼 수 있어, exec 배선에서는 도구
 # 실패가 차단으로 샜다(#31). 자연 발생 불가능한 42를 반환하고 settings.json의
-# 셸 래퍼가 42→2로 되매핑하며, 그 외 nonzero는 전부 1(비차단 경고)로 수렴한다.
+# 셸 래퍼가 42만 차단(2)으로 되매핑하고 그 외 nonzero는 1(비차단 경고)로
+# 수렴시키는 설계다(계약은 rules_checker의 test_hook_command_contract.py에 있다).
 EXIT_BLOCK = 42
 
 # shlex(punctuation_chars=True)가 별도 토큰으로 분리하는 셸 연산자.

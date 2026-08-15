@@ -4,9 +4,8 @@
 rules_checker의 정본 템플릿(HOOK_COMMAND_BLOCKING/NON_BLOCKING)을 실제
 /bin/sh로 실행해 종료 코드 되매핑 계약(#31)을 핀한다. uv를 PATH 스텁으로
 바꿔, 가드/uv의 각 종료 코드가 Claude Code에 도달하는 값(차단 2, 비차단
-경고 1, 통과 0)으로 수렴하는지 본다. test_real_repo_rules_all_pass가
-실저장소 settings.json ↔ 템플릿 일치를 보증하므로, 여기가 green이면
-실배선의 동작도 같다.
+경고 1, 통과 0)으로 수렴하는지 본다. 실저장소 settings.json ↔ 템플릿
+일치는 test_real_repo_rules_all_pass에 있다.
 
 주의: 스텁은 반드시 외부 실행 파일이어야 한다 — 셸 함수로 흉내 내면 함수
 안의 exit가 셸 전체를 종료시켜 래퍼 검증이 오탐이 된다. PATH는
@@ -71,8 +70,8 @@ def _run_hook(
     )
 
 
-# (가드/uv 종료 코드, Claude Code에 도달해야 하는 값). 42만 차단(2)으로
-# 되매핑되고, uv 자체 오류(2)·내부 경고(1)·시그널(130)은 전부 1로 수렴한다.
+# (가드/uv 종료 코드, Claude Code에 도달해야 하는 값). 차단형 설계: 42는
+# 차단(2)으로 되매핑, uv 자체 오류(2)·내부 경고(1)·시그널(130)은 1로 수렴.
 BLOCKING_REMAP = [(0, 0), (1, 1), (2, 1), (42, 2), (130, 1)]
 
 
@@ -111,7 +110,7 @@ def test_wrapper_passes_when_uv_is_absent(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
 
 
-# 비차단형: 어떤 종료 코드도 차단(2)이 될 수 없다 — 42조차 1로 수렴한다.
+# 비차단형 설계: 차단(2)을 만들지 않는다 — 표는 42 포함 대표 코드의 수렴을 본다.
 NON_BLOCKING_REMAP = [(0, 0), (1, 1), (2, 1), (42, 1)]
 
 
@@ -124,8 +123,8 @@ def test_non_blocking_wrapper_never_blocks(
 
 
 def test_non_blocking_wrapper_passes_stdout_through(tmp_path: Path) -> None:
-    # UserPromptSubmit은 exit 0의 stdout이 컨텍스트로 주입된다 — 통과 경로의
-    # stdout은 그대로 흘러야 한다.
+    # 훅 도입 당시 확인된 제품 동작(UserPromptSubmit은 exit 0의 stdout을
+    # 컨텍스트로 주입) — 통과 경로의 stdout은 그대로 흘러야 한다.
     result = _run_hook(tmp_path, NON_BLOCKING_COMMAND, "echo REMINDER\nexit 0")
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "REMINDER"
@@ -142,7 +141,8 @@ def test_non_blocking_wrapper_passes_stdout_through(tmp_path: Path) -> None:
 def test_blocking_template_remaps_the_guards_sentinel(module_name: str) -> None:
     # 가드 상수 ↔ 래퍼 템플릿의 실결합(리뷰 발견: 트리비얼 ==42 단정은 아무
     # 것도 묶지 못함). 값이 갈라지면 차단이 조용히 비차단 경고로 강등되므로,
-    # 템플릿 문자열이 각 가드의 EXIT_BLOCK을 되매핑 조건으로 쓰는지 대조한다.
+    # 템플릿 문자열이 나열된 가드들의 EXIT_BLOCK을 되매핑 조건으로 쓰는지
+    # 대조한다(목록은 수동 유지 — 새 가드는 여기 추가해야 커버된다).
     # skip은 "가드를 정합하게 제거한 자식 프로젝트"만을 위한 완화이므로 그
     # 모듈(또는 그 가드 패키지) 자체의 부재로 좁힌다 — importorskip은 가드
     # 내부의 깨진 import까지 삼켜 결합 검증을 침묵 skip시켰다(#43). 가드별

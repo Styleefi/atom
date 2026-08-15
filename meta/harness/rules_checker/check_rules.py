@@ -46,13 +46,14 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
   파생되므로, 규칙 위반이 하나라도 있으면 이 검사는 통째로 미루고 미룬 사실을
   위반으로 남긴다 — 깨진 레지스트리 위의 분류는 틀린 지시를 낳기 때문이다.
 
-경로는 실행 위치와 무관하게 이 파일의 고정 위치(meta/harness/rules_checker/)
-로부터 역산한 저장소 루트 기준으로 해석하므로 로컬과 CI에서 결과가 동일하다.
+경로는 실행 위치와 무관하게 이 파일의 고정 위치로부터 역산한 저장소 루트
+기준으로 해석한다(find_repo_root 참조).
 
 deployed-to 문법: 저장소 루트 기준 POSIX 상대 경로만 유효하며, 백슬래시나
 콜론을 담은 문자열 값은 거부된다(#94 — root를 탈출하는 Windows 재해석
-표기(드라이브 문자 C:/x, 백슬래시 .. 구분자)를 문법에서 봉쇄해 모든
-플랫폼에서 위반으로 만든다; 검증은 check_rule_file, PR #93 R3의 의미론 경계
+표기(드라이브 문자 C:/x, 백슬래시 .. 구분자)를 표기 단위 방어 대신 문법에서
+원천 거부하는 설계; 검증은 check_rule_file, 거부 동작은
+test_non_posix_deployed_to_is_rejected에 있다. PR #93 R3의 의미론 경계
 선언은 이로써 해제). 문법이 방어하지 않는 표기 둘(PR #95 R1-R2, 결과
 무보장): YAML 스칼라 해석이 문자열화 전에 콜론을 소거하는 표기(10:30 →
 정수 630), 그리고 콜론·백슬래시 없이 플랫폼별로 다르게 해석되는 이름
@@ -82,12 +83,13 @@ REQUIRED_FIELDS = ("id", "tier", "enforce", "deployed-to")
 
 # hook 커맨드 정본 템플릿(#31). settings JSON의 harness 훅 커맨드는 아래 두
 # 형태 중 하나와 바이트 단위로 일치해야 한다. 차단형: uv run을 if 조건으로
-# 감싸(훅 실행 셸이 set -e여도 동작 동일 — rc=$? 단독 패턴은 -e에서 uv 실패
-# 시점에 셸이 uv 코드로 종료해 누출이 재발한다) 가드의 sentinel 42만 차단(2)
-# 으로 되매핑하고, 그 외 nonzero(uv 자체 오류 2 포함)는 전부 1(비차단 경고)로
-# 수렴한다. 비차단형: 어떤 실패도 1로 수렴해 구조적으로 차단이 불가능하다.
+# 감싸(set -e 셸 대응 — rc=$? 단독 패턴은 -e에서 uv 실패 시점에 셸이 uv
+# 코드로 종료해 누출이 재발한 #31의 경위) 가드의 sentinel 42만 차단(2)으로
+# 되매핑하고, 그 외 nonzero(uv 자체 오류 2 포함)는 1(비차단 경고)로 수렴시키는
+# 설계다. 비차단형: 실패를 1로 수렴시켜 차단(2)을 만들지 않는 설계다.
 # {module} 치환은 str.format이 아니라 .replace를 쓴다 — 템플릿에 셸 ${VAR}
-# 표기가 들어와도 안전하도록. 래퍼의 실동작은 셸 계약 테스트가 /bin/sh로 핀.
+# 표기가 들어와도 안전하도록. 래퍼의 실제 종료 코드 되매핑 동작(set -e 포함)은
+# tests/test_hook_command_contract.py에 있다(/bin/sh 실행).
 HOOK_COMMAND_BLOCKING = (
     'if command -v uv >/dev/null 2>&1; then '
     'if uv run --directory "$CLAUDE_PROJECT_DIR/meta" python -m {module}; '
@@ -103,8 +105,9 @@ HOOK_COMMAND_NON_BLOCKING = (
 # 표기(python/python3/uv run)와 무관하게 변형 배선을 잡는다. `\s*`는 붙여쓰기
 # (`-mharness.x` — 유효한 인터프리터 호출)까지 커버. 점 포함 캡처로 하위모듈
 # 진입점(harness.a.b)도 온전히 뽑는다. 한계: 따옴표로 감싼 모듈명
-# (`-m "harness.x"`)은 미감지 — ruled hook이면 "not referenced" 위반으로
-# 표면화되고, unruled는 bash -c 간접 실행과 같은 기존 잔여 클래스.
+# (`-m "harness.x"`)은 미감지. ruled hook에서는 _references_module도 같은
+# 이유로 매치가 없어 "does not reference" 위반으로 넘어지고(fail-closed),
+# unruled는 bash -c 간접 실행과 같은 잔여 클래스다.
 _HOOK_MODULE_RE = re.compile(r"(?<!\S)-m\s*(harness\.\w+(?:\.\w+)*)")
 
 # 규칙 import 토큰의 형태. _import_lines가 활성 줄에 fullmatch로 적용한다 —
@@ -249,8 +252,9 @@ def _active_lines(text: str) -> list[str]:
 
     모델 밖(문서화된 한계 — #66/#75式 문법 확장 경쟁을 막기 위해 동결):
     인라인 코드 스팬, 인용구/리스트 속 펜스, 펜스 마커 길이 매칭. 들여쓰기
-    코드 블록은 import 검사에서는 _import_lines의 선행 공백 불허가 함께
-    닫지만, skill substring 검사에는 잔존한다.
+    코드 블록의 import 검사 쪽 처리는 _import_lines의 선행 공백 불허 소관
+    (test_active_import_scanner_corpus의 '들여쓰기 줄' 항목에 있다)이고,
+    skill substring 검사에는 잔존한다(문서화된 한계).
 
     Args:
         text: 대상 파일 전체 내용.
@@ -291,8 +295,8 @@ def _import_lines(text: str) -> set[str]:
 
     선행 공백 불허(rstrip만 허용) — 들여쓰기 코드 블록 속 import가 인정되는
     fail-open을 스캐너 확장 없이 닫는다. 무공백 연접(`...a.md@meta/...b.md`)
-    은 IMPORT_RE fullmatch를 통과하지만 융합 토큰이라 어떤 정확 import와도
-    불일치 — 검사가 위반 쪽으로 수렴한다.
+    은 IMPORT_RE fullmatch를 통과하는 융합 토큰 — 처리는
+    test_active_import_scanner_corpus의 '무공백 연접' 항목에 있다.
 
     Args:
         text: 대상 파일 전체 내용.
@@ -346,7 +350,7 @@ def _hook_commands(settings: dict) -> list[str]:
     """settings JSON의 hooks 구조에서 커맨드 문자열을 전부 뽑는다.
 
     구조가 어긋난 노드는 조용히 건너뛴다 — 이 함수는 수집기일 뿐이고,
-    그 결과 빠진 참조는 상위 검사가 "not referenced" 위반으로 표면화한다.
+    그 결과 빠진 참조는 상위 검사가 "does not reference" 위반으로 표면화한다.
 
     Args:
         settings: 파싱된 settings JSON 최상위 객체.
@@ -399,11 +403,12 @@ def _skill_path_shape_violations(rel: Path, deployed_to: str) -> list[str]:
     단일 지점에서 호출한다 — bad_path/missing-target 어느 조기 return도
     형태 위반을 가리지 못하게. 다른 곳에서 재호출하면 이중 보고가 된다.
 
-    깊이는 정확히 4파트(.claude/skills/<이름>/SKILL.md) — Claude Code가
-    skill로 인식하는 유일한 위치라 더 얕거나 깊은 SKILL.md는 죽은 배포다
-    (#38). Path parts 비교라 './' 접두 같은 동치 표기는 정규화되어 통과한다
-    — claude-md pin의 raw 문자열 비교와 의도적 비대칭(그쪽 표기는 여기서
-    기존 테스트가 정규화 수용을 핀하고 있다). PurePosixPath로 flavor를
+    깊이는 정확히 4파트(.claude/skills/<이름>/SKILL.md) — #38 당시 확인된
+    Claude Code의 skill 로딩 위치로, 그 밖의 SKILL.md는 죽은 배포로 본다.
+    Path parts 비교라 './' 접두 같은 동치 표기는 정규화되어 통과한다
+    — claude-md pin의 raw 문자열 비교와 의도적 비대칭(정규화 수용은
+    test_inventory_matches_skill_owner_by_normalized_path에 있다).
+    PurePosixPath로 flavor를
     고정한다(#95 R1 F2) — native flavor는 백슬래시 표기의 파트 분해가
     플랫폼마다 갈려 같은 저장소의 위반 집합이 달라진다(POSIX에서는 동작
     동일, 비POSIX 분기라 테스트 없음 — 명시 예외).
@@ -502,7 +507,7 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         # 문법 검사(#94): 백슬래시·콜론은 POSIX 스크린이 못 보는 Windows
         # 재해석 표기(드라이브 문자 C:/x, 백슬래시 구분자 ..\x — PR #93 리뷰
         # 루프가 세 층을 추격한 부류)의 원료다 — 표기 단위 방어 대신 문법에서
-        # 원천 거부해 모든 플랫폼에서 시끄러운 위반으로 만든다. bad_path에
+        # 원천 거부하는 설계다. bad_path에
         # 합류시켜 join 의존 검사만 억제한다(조기 return 없음).
         if bad_grammar:
             bad_path = True
@@ -619,9 +624,10 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         else:
             # 두 파일 요구의 근거 서술은 여기가 SSOT다(#38; 정리 경위는
             # PR #92 리뷰 스레드). __main__.py 부재는 `python -m` 진입점
-            # 부재 — 훅이 래퍼 아래에서 조용히 no-op이 된다(셸 실험으로
-            # 검증). __init__.py는 실행 요건이 아니라(namespace 패키지도
-            # -m으로 돌아가고 meta/harness 자체가 __init__.py 없이 돈다) 모든
+            # 부재 — 훅이 래퍼 아래에서 조용히 no-op이 된다(PR #92 리뷰
+            # 당시 셸 실험으로 확인). __init__.py는 실행 요건이 아니라
+            # (namespace 패키지도 -m으로 돌아가고 meta/harness 자체가
+            # __init__.py 없이 돈다) 모든
             # meta/harness 패키지를 regular package로 통일하는 메타층
             # 규약이다 — 인벤토리 분류(_expected_artifacts)나 pytest prepend
             # 모드 모듈 네이밍 같은 소비자들이 이 규약 위에 서 있다. 파일
@@ -645,7 +651,8 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
     # claude-md 그릇의 대상 고정(#38)은 raw 문자열 검사라 파일 존재·경로
     # 유효성과 무관하게 항상 여기서 수행한다 — 정규화 후 비교가 아니므로
     # './CLAUDE.md' 같은 동치 표기도 거부한다(skill 깊이 검사의 parts 비교와
-    # 의도적 비대칭: 그쪽은 기존 테스트가 정규화 수용을 핀하고 있다).
+    # 의도적 비대칭: 그쪽의 정규화 수용은
+    # test_inventory_matches_skill_owner_by_normalized_path에 있다).
     claude_md_pinned = True
     if enforce == "claude-md" and str(data["deployed-to"]) != "CLAUDE.md":
         claude_md_pinned = False
@@ -951,17 +958,16 @@ def check_hook_wiring(root: Path) -> list[str]:
     커맨드는 meta 소관 밖이므로 검사하지 않는다(자식 프로젝트의 자체 훅을
     과잉 규제하지 않기 위함).
 
-    한계: settings.local.json은 커밋되지 않으므로 CI에서는 검증 불가(로컬
-    실행에서만 잡힘). 읽기·파싱이 불가능한 규칙 파일이 선언한 비표준
-    deployed-to는 대상을 알 수 없어 그 파일이 고쳐질 때까지 스윕할 수 없다 —
-    해당 규칙은 per-rule 전역 방어가 internal error로 보고해 run이 red이므로
-    침묵 통과는 아니며, 인벤토리 보류와 같은 공표된 지연 패턴이다. 읽기 실패(OSError)·JSON 파싱 실패·비객체 대상은 규칙
-    유무와 무관하게 위반으로 소리낸다 — 규칙별 검사가 frontmatter 오류로
-    조기 종료하면 아무도 보고하지 않는 조합이 생기기 때문이며(최종 게이트
-    리뷰), 건강한 ruled 대상의 이중 보고는 수용된 패턴이다.
-    따옴표 감싼 모듈명(`-m "harness.x"`)은 미감지 —
-    ruled hook이면 "not referenced" 위반으로 표면화되고, unruled는
-    bash -c 간접 실행과 같은 기존 잔여 클래스.
+    한계: settings.local.json은 커밋되지 않는다 — CI 검증 범위 밖(문서화된
+    한계). 읽기·파싱이 불가능한 규칙 파일이 선언한 비표준 deployed-to는
+    대상을 알 수 없어 그 파일이 고쳐질 때까지 스윕할 수 없다 — 인벤토리
+    보류와 같은 공표된 지연 패턴이며, 그런 규칙 곁에서의 스윕 생존과 규칙 쪽
+    보고는 *_does_not_kill_the_sweep 계열 테스트에 있다. 읽기
+    실패(OSError)·JSON 파싱 실패·비객체 대상은 규칙 유무와 무관하게 위반으로
+    소리낸다 — 규칙별 검사가 frontmatter 오류로 조기 종료하면 아무도
+    보고하지 않는 조합이 생기기 때문이며(최종 게이트 리뷰), 건강한 ruled
+    대상의 이중 보고는 수용된 패턴이다. 따옴표 감싼 모듈명은 미감지
+    (_HOOK_MODULE_RE 주석 참조).
 
     Args:
         root: 저장소 루트.
@@ -982,10 +988,11 @@ def check_hook_wiring(root: Path) -> list[str]:
             # 규칙 파일 하나가 스윕 전체를 뭉개면 안 된다. 가드는 예외 "타입"이
             # 아니라 반복 "영역"을 감싼다 — OSError만(깨진 symlink), 다음엔
             # UnicodeDecodeError(비UTF-8), 다음엔 파싱 예외(YAML RecursionError)
-            # 로 같은 가림이 세 번 재발한 교훈. 문제의 규칙 파일 자체는
-            # per-rule 전역 방어가 internal error로 보고하고(run은 red), 그
-            # 파일이 선언한 비표준 deployed-to는 파일이 고쳐질 때까지 스윕
-            # 불가 — 인벤토리 보류와 같은 공표된 지연 패턴(docstring 참조).
+            # 로 같은 가림이 세 번 재발한 교훈. 문제의 규칙 파일 쪽 보고는
+            # per-rule 사망 부류 방어 소관(check_rules의 영역 가드,
+            # *_does_not_kill_the_sweep 계열 테스트에 있다)이고, 그 파일이
+            # 선언한 비표준 deployed-to는 파일이 고쳐질 때까지 스윕 불가 —
+            # 인벤토리 보류와 같은 공표된 지연 패턴(docstring 참조).
             continue
         if error or data is None:
             continue
@@ -996,10 +1003,12 @@ def check_hook_wiring(root: Path) -> list[str]:
                 # 조기 return이 스크린을 가리던 조합은 스크린 호이스트로 닫힌
                 # 경위. 파싱 실패 규칙은 이 스윕도 대상을 못 얻어 배제 자체가
                 # 없다). relative_to는 어휘적이라 ..를 못 거르므로(#40 리뷰
-                # 2R) 여기서 배제한다. 이 스크린을 다 지난 표기는 앵커·구분자
-                # 재해석의 원료(절대 표기·..·백슬래시·콜론)가 없어 어떤
-                # 플랫폼의 join 의미론에서도 root 아래에 남는다 — PR #93 R3의
-                # 어휘적 격리 분기는 문법 강화로 도달 불가가 되어 제거됨.
+                # 2R) 여기서 배제한다. 스크린 통과 표기의 root 격리는 PR #95
+                # 리뷰에서 R1 의뢰 반례 공격이 실패하며 확인된 설계 전제이고,
+                # 격리는 공유 술어 _deployed_to_screen이 전담한다 — 통과 후의
+                # 제2 격리 층은 없으므로 스크린 완화는 곧 격리 완화다(오너
+                # 지정 처분 개정, PR #100 R4). PR #93 R3의 어휘적 격리 분기는
+                # 문법 강화로 도달 불가가 되어 제거됨.
                 continue
             ruled.add(root / str(data["deployed-to"]))
 
@@ -1081,9 +1090,12 @@ def check_rules(root: Path) -> list[str]:
         return [f"rules directory not found: {rules_dir.relative_to(root)}"]
 
     # 사망 부류 방어(#40 리뷰 2R: ValueError를 고치자 PermissionError가 나왔다 —
-    # 지점 단위 방어는 이 부류를 못 닫는다). 어떤 예외든 일반 위반과 구별되는
-    # "internal checker error" 위반으로 변환한다 — 검증기는 절대 traceback으로
-    # 죽지 않고, run은 red로 유지되며, 다른 규칙의 판정은 보존된다.
+    # 지점 단위 방어는 이 부류를 못 닫는다). 예외를 일반 위반과 구별되는
+    # "internal checker error" 위반으로 변환해, traceback 사망 대신 red run과
+    # 다른 규칙의 판정 보존을 노리는 설계다 — 변환 발동은
+    # *_does_not_kill_the_sweep 계열에, 정상 처리되는 깨진 입력이 변환 없이
+    # 깨끗한 위반으로 남는 쪽은
+    # test_checker_never_raises_on_malformed_inputs에 있다.
     rule_violations: list[str] = []
     for rule_path in rule_files(root):
         try:
