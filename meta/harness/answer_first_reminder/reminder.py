@@ -3,8 +3,9 @@
 
 Claude Code의 UserPromptSubmit hook으로 실행되어 들어오는 소유자 메시지가
 질문 형태이면 리마인더 한 줄을 stdout으로 출력한다. UserPromptSubmit에서
-exit 0의 stdout은 모델 컨텍스트에 추가되므로, 이 출력이 answer-first 규칙
-(질문에는 답변이 이번 턴의 산출물)을 위반 시점에 결정론적으로 재공급한다.
+exit 0의 stdout이 모델 컨텍스트에 추가되는 것은 훅 도입 당시 확인된 제품
+동작으로, 이 출력이 answer-first 규칙(질문에는 답변이 이번 턴의 산출물)을
+위반 시점에 재공급한다.
 
 질문 휴리스틱 (경량 — 형태소 분석 아님):
 
@@ -28,8 +29,8 @@ exit 0의 stdout은 모델 컨텍스트에 추가되므로, 이 출력이 answer
 
 - 어떤 경로에서도 차단 코드(가드들의 sentinel 42)를 반환하지 않는다
   (프롬프트 차단 금지). 모든 실패는 fail-open — 미탐은 claude-md 현상
-  유지로 퇴화할 뿐이다. settings.json 래퍼(`|| exit 1`)도 구조적으로
-  차단이 불가능한 비차단형이다.
+  유지로 퇴화할 뿐이다. settings.json 래퍼(`|| exit 1`)도 차단(2)을 만들지
+  않는 비차단형이다(계약은 rules_checker의 test_hook_command_contract.py에 있다).
 - stdout은 모델 컨텍스트로 직행하는 주입 채널이므로 상수 REMINDER 외에는
   절대 쓰지 않는다(payload 내용 echo 금지 — 프롬프트 주입 증폭 방지).
 - stdin은 로케일 비의존 명시적 UTF-8로 읽는다(한국어 본문을 다루는 hook).
