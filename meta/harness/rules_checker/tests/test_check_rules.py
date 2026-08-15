@@ -54,7 +54,9 @@ def rule_violations(root: Path) -> list[str]:
     baseline 파일을 지우는 픽스처는 부재 위반이 따라붙는다. 규칙 검사 자체를
     다루는 테스트가 매번 그것까지 세면 불필요한 결합이 생기므로 걸러낸다 —
     보류 동작은 test_inventory_deferred_while_a_rule_is_violating 계열에,
-    부재 위반은 test_missing_template_is_reported 계열에 있다. 부재 필터는
+    부재 위반은 test_missing_template_is_reported·
+    test_missing_root_claude_md_is_reported·
+    test_both_sync_files_missing_are_reported에 있다. 부재 필터는
     부재 위반의 고유 문구로만
     거른다 — "does not exist" 류 범용 문구로 거르면 규칙 쪽 missing-target
     위반까지 걸러진다.
@@ -752,7 +754,7 @@ def test_sweep_ignores_harness_like_paths(tmp_path: Path) -> None:
 
 
 def test_ruled_hook_variant_spelling_gets_shape_violation(tmp_path: Path) -> None:
-    # ruled hook의 python3 변형은 오해 소지 있는 "not referenced"가 아니라
+    # ruled hook의 python3 변형은 오해 소지 있는 "does not reference"가 아니라
     # 정확한 형태 위반으로 잡힌다(감지 확대의 개선점 핀).
     root = make_repo(tmp_path)
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
@@ -1272,7 +1274,7 @@ def test_missing_blocking_does_not_mask_other_defects(tmp_path: Path) -> None:
 @pytest.mark.parametrize("payload", ["[]", "null"], ids=["array", "null"])
 def test_non_object_settings_is_rejected(tmp_path: Path, payload: str) -> None:
     # 파싱은 성공하지만 객체가 아닌 settings는 전용 메시지로 보고하고, 스윕도
-    # 예외 없이 함께 보고한다. array: "not referenced"로 오도하던 케이스(리뷰
+    # 예외 없이 함께 보고한다. array: "does not reference"로 오도하던 케이스(리뷰
     # 발견). null: parsed의 None 겸용 sentinel이 만든 침묵 통과 회귀(최종
     # 게이트 리뷰). 단언이 동일한 쌍이라 parametrize로 묶는다(#43 — 두 벌
     # 유지 시 한쪽만 고쳐지는 부분 편집 드리프트).

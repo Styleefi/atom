@@ -350,7 +350,7 @@ def _hook_commands(settings: dict) -> list[str]:
     """settings JSON의 hooks 구조에서 커맨드 문자열을 전부 뽑는다.
 
     구조가 어긋난 노드는 조용히 건너뛴다 — 이 함수는 수집기일 뿐이고,
-    그 결과 빠진 참조는 상위 검사가 "not referenced" 위반으로 표면화한다.
+    그 결과 빠진 참조는 상위 검사가 "does not reference" 위반으로 표면화한다.
 
     Args:
         settings: 파싱된 settings JSON 최상위 객체.
@@ -1091,9 +1091,10 @@ def check_rules(root: Path) -> list[str]:
     # 사망 부류 방어(#40 리뷰 2R: ValueError를 고치자 PermissionError가 나왔다 —
     # 지점 단위 방어는 이 부류를 못 닫는다). 예외를 일반 위반과 구별되는
     # "internal checker error" 위반으로 변환해, traceback 사망 대신 red run과
-    # 다른 규칙의 판정 보존을 노리는 설계다 — 방어 동작은
-    # test_checker_never_raises_on_malformed_inputs와
-    # *_does_not_kill_the_sweep 계열에 있다.
+    # 다른 규칙의 판정 보존을 노리는 설계다 — 변환 발동은
+    # *_does_not_kill_the_sweep 계열에, 정상 처리되는 깨진 입력이 변환 없이
+    # 깨끗한 위반으로 남는 쪽은
+    # test_checker_never_raises_on_malformed_inputs에 있다.
     rule_violations: list[str] = []
     for rule_path in rule_files(root):
         try:
