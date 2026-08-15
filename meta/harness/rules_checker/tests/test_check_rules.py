@@ -933,8 +933,7 @@ def test_broken_rule_plus_corrupt_settings_both_reported(tmp_path: Path) -> None
 def write_legacy_wiring(root: Path) -> None:
     """스윕이 잡아야 할 구식(exec) harness.legacy 배선을 settings에 심는다.
 
-    *_does_not_kill_the_sweep 계열의 공용 픽스처 — "깨진 규칙 파일 곁에서도
-    스윕의 배선 위반은 살아 있다"의 배선 절반을 담당한다(#43 복붙 제거).
+    #43에서 세 테스트의 복붙을 걷어내며 뽑아낸 공용 셋업이다.
     """
     legacy = (
         "if command -v uv >/dev/null 2>&1; then exec uv run --directory "
