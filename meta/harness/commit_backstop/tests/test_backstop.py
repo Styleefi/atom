@@ -295,7 +295,11 @@ def test_feature_branch_header_check(monkeypatch, capsys, tmp_path):
     assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
     err = capsys.readouterr().err
     assert "--amend" in err
-    assert "already on the branch" in err  # 이번 세션 작성분과 기존 커밋 구분 (#64)
+    # 지시의 하중은 rewrite 금지문과 HEAD 동일성 앵커에 걸린다 — 이 둘이 빠지면
+    # "전부 amend하라"는 #64 이전 의미로 되돌아간다 (#64, PR #114 round 1).
+    assert "do NOT rewrite" in err
+    assert "git rev-parse HEAD" in err
+    assert "git rev-list " in err  # 평가 구간 열거 명령
     assert sha[:12] in err
     assert bad_subject not in err  # 제목 원문 에코 금지 (프롬프트 주입 방지)
     _git(repo, "commit", "--amend", "--allow-empty", "-m", "fix: repaired header")

@@ -302,13 +302,28 @@ def _branch_report(branch: str, old: str, new: str, offending: list[str]) -> str
             f"     (fails because '{branch}' is checked out in another worktree? "
             f"run `git reset --keep {old}` in that worktree)",
             "  3. Continue on the rescue branch and merge via PR.",
-            "See the commit-discipline rule (meta/rules/commit-discipline.md).",
+            "See meta/rules/commit-backstop.md (this hook's claims, non-claims "
+            "and override) and meta/rules/commit-discipline.md (the rule).",
         ]
     )
 
 
-def _header_report(problems: list[tuple[str, str]]) -> str:
-    """헤더 위반 보고문 — 제목 원문은 에코하지 않는다(SHA + 사유만)."""
+def _header_report(problems: list[tuple[str, str]], old: str) -> str:
+    """헤더 위반 보고문 — 제목 원문은 에코하지 않는다(SHA + 사유만).
+
+    지시는 작성 시점을 판정하지 않는다. 어떤 git 술어도 "이 세션이 만든
+    커밋"을 건전하게 판정하지 못하므로(committer date는 rebase·cherry-pick이
+    갱신하고, `old` 조상 판정은 fast-forward checkout에서 뒤집힌다), 증명
+    가능한 유일한 안전 케이스 — 호출자가 방금 만든 HEAD — 에만 rewrite를
+    허용하고 나머지는 오너에게 넘긴다.
+
+    Args:
+        problems: (SHA, 위반 사유) 목록.
+        old: 직전 관찰 HEAD SHA — 평가 구간의 시작 (끝은 현재 HEAD).
+
+    Returns:
+        stderr에 실을 보고문.
+    """
     lines = [
         f"[commit-backstop] {len(problems)} new commit(s) violate the "
         "Conventional Commits header rule:"
@@ -318,13 +333,15 @@ def _header_report(problems: list[tuple[str, str]]) -> str:
     if len(problems) > REPORT_SHA_LIMIT:
         lines.append(f"  - ... ({len(problems)} total)")
     lines.append(
-        "Commits you authored in this session: fix the tip with "
-        "`git commit --amend`, rebase earlier ones before pushing. "
-        "Commits that were already on the branch (surfaced by a checkout, or "
-        "detected late from another directory): do NOT rewrite them — report "
-        "the SHAs to the owner and continue. "
-        "Unsure which is which? `git log -1 --format=%cI <sha>`. "
-        "See meta/rules/commit-discipline.md."
+        "If a listed commit is HEAD (`git rev-parse HEAD`) and you created it "
+        "in this session, fix it: `git commit --amend`. Otherwise — and "
+        "whenever you are unsure — do NOT rewrite it: a checkout, merge, "
+        "rebase, or cherry-pick can surface commits that predate this "
+        "command. Report the SHAs above and the total count to the owner and "
+        "continue (the evaluated range, conforming commits included: "
+        f"`git rev-list {old}..HEAD --no-merges --not --remotes`). "
+        "See meta/rules/commit-backstop.md (this hook's claims, non-claims "
+        "and override) and meta/rules/commit-discipline.md (the rule)."
     )
     return "\n".join(lines)
 
@@ -420,7 +437,7 @@ def main() -> int:
                         if problem is not None:
                             problems.append((sha, problem))
                     if problems:
-                        reports.append(_header_report(problems))
+                        reports.append(_header_report(problems, old))
 
     seen = dict(state["seen"])
     seen.update({key: new for key, (_, new) in moved.items()})
