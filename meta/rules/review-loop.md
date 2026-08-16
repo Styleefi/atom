@@ -38,7 +38,10 @@ loop, never the owner.
   one, #75, took five — rounds are driven by the inference surface touched
   and by prose-precision findings, not by size.) For a diff that changes no
   runtime behavior, prose-precision findings are above-bar only when they
-  would mislead a later session about behavior.
+  would mislead a later session about behavior. This behavior gate takes
+  precedence over the purpose-failure floor: a prose finding that would
+  not mislead a later session about behavior is below-bar even when it is
+  a failure of the PR's purpose.
 - Triage = matching: a verified finding is above-bar iff its failure
   scenario matches a declared class, subject to the accident test below.
   The bar applies at triage only — never narrow the reviewers' search
@@ -60,8 +63,10 @@ loop, never the owner.
   trigger-(a) comparisons use the corrected number. (Measured: PR #86
   round 4 nearly added guard code against CI-disabling conditionals — a
   state no accident produces.)
-- Raising the bar (adding a class) needs only a ledger entry; a serious
-  finding matching no class is handled by adding its class. On every raise,
+- Raising the bar (adding a class) needs only a ledger entry through
+  round 2; from round 3 on it requires owner approval. A serious finding
+  matching no class is handled by adding its class, under the same
+  approval requirement. On every raise,
   re-match the ledger's past triage records — findings that now match return
   to the above-bar lane (they join the fix backlog but never the divergence
   count). Lowering the bar requires owner approval. Uncertain matches
