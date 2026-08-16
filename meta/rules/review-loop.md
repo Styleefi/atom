@@ -37,13 +37,18 @@ loop, never the owner.
   (Measured: a +1128-line PR, #54, converged in one round while a +210-line
   one, #75, took five — rounds are driven by the inference surface touched
   and by prose-precision findings, not by size.) For a diff that changes
-  no runtime behavior (rule, skill, CLAUDE.md and CLAUDE.template.md text
-  specifies agent behavior, so a diff to it never qualifies),
-  prose-precision findings are above-bar only when they would mislead a
-  later session about behavior. For a diff that changes no runtime
-  behavior, this behavior gate takes precedence over the purpose-failure
-  floor: a prose finding that would not mislead a later session about
-  behavior is below-bar even when it is a failure of the PR's purpose.
+  no runtime behavior (text under meta/rules/ or .claude/skills/, plus
+  CLAUDE.md and CLAUDE.template.md, never qualifies), prose-precision
+  findings are above-bar only when they would mislead a later session
+  about behavior. For a diff that changes no runtime behavior, this
+  behavior gate takes precedence over the purpose-failure floor: a prose
+  finding that would not mislead a later session about behavior is
+  below-bar even when it is a failure of the PR's purpose. That vessel
+  list is closed and keyed by path; that it omits an instruction vessel
+  added later is outside this rule's defense — the PR introducing the
+  vessel extends the list (scope boundary accepted in PR #112). Later
+  findings of that omission close at triage on the Ledger section's
+  terms.
 - Triage = matching: a verified finding is above-bar iff its failure
   scenario matches a declared class, subject to the accident test below.
   The bar applies at triage only — never narrow the reviewers' search
