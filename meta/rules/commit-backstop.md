@@ -18,9 +18,10 @@ text or reflog inference:
   merge of a (pushed or unpushed) branch, cherry-pick, plumbing — is reported
   with ordered, absolute-SHA recovery steps.
 - New unpublished non-merge commits reachable from `HEAD` must satisfy the
-  Conventional Commits header; violations are reported with advice anchored
-  on the command that just ran — fix them if it created them, leave them to
-  the owner if it only moved `HEAD`. Merge commits are excluded
+  Conventional Commits header; violations are reported with advice that
+  prescribes only what it can verify — amend a listed commit when the command
+  that just ran created it and it is `HEAD`, otherwise leave history alone,
+  hand the SHAs to the owner and hold off pushing. Merge commits are excluded
   structurally (`--no-merges` filters by parent count before any subject is
   read); separately, three subject prefixes git generates (`Revert "`,
   `fixup! `, `squash! `) are exempt from the header check, matched by prefix

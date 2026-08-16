@@ -35,9 +35,9 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
       다시 보고된다.
     - 상태 쓰기가 실패하면 `seen`도 `checked`도 전진하지 못해 두 lane 모두
       매 호출마다 재보고된다 — 헤더 위반뿐 아니라 브랜치 위반도 그렇다(#115).
-    - 한 보고에 나열하는 SHA는 REPORT_SHA_LIMIT개까지지만 판정한 커밋은
-      전부 `checked`에 기록되므로, 잘려 나간 SHA는 다시 보고되지 않는다
-      (보고문이 주는 평가 구간 명령으로 직접 열거해야 한다).
+    - 위반 사유는 REPORT_SHA_LIMIT개까지만 붙인다. SHA는 전부 싣지만(잘라내면
+      `checked`에 기록된 나머지가 다시는 호명되지 않는다) 위반이 많은
+      브랜치에서는 그만큼 stderr가 길어진다.
     - remote-tracking ref를 만들지 않는 `git pull <URL>`은 오탐할 수 있다.
     - 로컬 브랜치가 비표준 원격명(예: origin/trunk)을 추적하는 구성은
       고려하지 않는다.
@@ -92,7 +92,9 @@ STATE_FILENAME = "atom-commit-backstop.json"
 # 헤더 검사 완료 커밋 기록 상한 (FIFO — 초과분은 오래된 것부터 버린다).
 CHECKED_CAP = 200
 
-# 위반 보고에 나열하는 SHA 상한 (stderr는 모델 컨텍스트에 주입되므로).
+# 위반 사유를 붙여 나열하는 상한 (stderr는 모델 컨텍스트에 주입되므로).
+# SHA 자체는 상한 없이 전부 싣는다 — 판정한 커밋은 모두 `checked`에 기록되어
+# 다시 호명되지 않으므로, 잘라내면 오너 보고가 영구히 불완전해진다.
 REPORT_SHA_LIMIT = 5
 
 # git이 자동 생성하는 제목 — 에이전트가 규격을 만족시킬 수 없거나(revert 타입
@@ -298,19 +300,43 @@ def _shortlist(shas: list[str]) -> str:
     return head
 
 
-def _branch_report(branch: str, old: str, new: str, offending: list[str]) -> str:
-    """보호 브랜치 위반 보고문 — 절대 SHA 기반의 순서화된 복구 지시."""
+def _branch_report(
+    branch: str, old: str, new: str, offending: list[str], has_remote_ref: bool
+) -> str:
+    """보호 브랜치 위반 보고문 — 절대 SHA 기반의 순서화된 복구 지시.
+
+    문서화된 오탐(원격 `<branch>` ref 부재)은 훅이 직접 알린다. 에이전트에게
+    확인 명령을 시키지 않는 이유는 published 여부를 답하는 로컬 프로브가
+    없기 때문이다 — `git branch -r`은 로컬 remote-tracking ref만 보여주므로
+    single-branch 클론에서 진짜 위반을 정당한 전진으로 오판하게 만든다.
+
+    Args:
+        branch: 위반이 난 보호 브랜치명.
+        old: 직전 관찰 tip (되돌릴 지점).
+        new: 현재 tip (보존할 지점).
+        offending: 원격에 없는 커밋 SHA 목록.
+        has_remote_ref: 이 브랜치의 원격 ref가 로컬에 존재하는지.
+
+    Returns:
+        stderr에 실을 보고문.
+    """
+    gate: list[str] = []
+    if not has_remote_ref:
+        gate = [
+            f"NOTE: no remote '{branch}' ref exists here, so nothing could be "
+            "excluded and every advance looks like a violation. If this branch "
+            "has simply never been pushed, or this remote's default branch has "
+            "another name, the advance was legitimate — do NOT run the steps "
+            "below. Stop, give the owner these SHAs, and do not push until "
+            f"they decide. If instead this is a single-branch or pruned clone, "
+            f"fetch '{branch}' and re-check before acting.",
+        ]
     return "\n".join(
         [
             f"[commit-backstop] {len(offending)} commit(s) not present on any "
             f"remote '{branch}' landed on local '{branch}': {_shortlist(offending)}",
-            "FIRST rule out this hook's known false positives — run "
-            f"`git branch -r`. If no remote '{branch}' is listed (nothing pushed "
-            "yet, or the remote's default branch has another name), or the "
-            "command that just ran was `git pull <URL>`, then this advance was "
-            "legitimate: do NOT run the steps below. Tell the owner, and "
-            "prefix the next advancing command with ATOM_COMMIT_OVERRIDE=1.",
-            "Otherwise recover with EXACTLY these steps, in this order:",
+            *gate,
+            "Recover with EXACTLY these steps, in this order:",
             "  1. Preserve the work FIRST (skipping this step loses the commits):",
             f"     on '{branch}' now? -> git checkout -b <type/short-description>",
             f"     otherwise         -> git branch <type/short-description> {new}",
@@ -355,12 +381,11 @@ def _header_report(problems: list[tuple[str, str]]) -> str:
         rest = " ".join(sha[:12] for sha, _ in problems[REPORT_SHA_LIMIT:])
         lines.append(f"  - also ({len(problems)} total): {rest}")
     lines.append(
-        "Did the Bash command that just ran create these commits? You issued "
-        "it — read it. If it did, they are unpushed and yours to fix (not "
-        "mid-rebase or mid-merge): `git commit --amend` for HEAD, "
-        "`git rebase -i <sha>~1` for an earlier one. If it only moved HEAD "
-        "(checkout, merge, rebase, cherry-pick, pull), these commits predate "
-        "it — do NOT rewrite them; give the owner the SHAs and leave them. "
+        "Did the Bash command that just ran create a listed commit, and is "
+        "that commit HEAD (`git rev-parse HEAD`)? You issued the command — "
+        "read it. If both hold, fix it: `git commit --amend`. In every other "
+        "case do NOT rewrite history: give the owner these SHAs in your next "
+        "reply, and do not push this branch or open a PR until they decide. "
         "That command already ran and was not undone; do not re-run it. "
         "See meta/rules/commit-backstop.md (claims, non-claims, and the "
         "ATOM_COMMIT_OVERRIDE=1 escape) and meta/rules/commit-discipline.md."
@@ -419,7 +444,8 @@ def main() -> int:
     if not remotes:
         return 0
 
-    reports: list[str] = []
+    branch_reports: list[str] = []
+    header: str | None = None
     warnings: list[str] = []
     newly_checked: list[str] = []
     if not override:
@@ -440,7 +466,10 @@ def main() -> int:
                     "is unreachable or git failed - this advance was NOT checked"
                 )
             elif offending:
-                reports.append(_branch_report(branch, old, new, offending))
+                has_ref = any(ref.endswith(f"/{branch}") for ref in exclusions)
+                branch_reports.append(
+                    _branch_report(branch, old, new, offending, has_ref)
+                )
         if head_key in moved and validate_subject is not None:
             old, new = moved[head_key]
             if old is not None:
@@ -459,22 +488,25 @@ def main() -> int:
                         if problem is not None:
                             problems.append((sha, problem))
                     if problems:
-                        reports.append(_header_report(problems))
+                        header = _header_report(problems)
 
     seen = dict(state["seen"])
     seen.update({key: new for key, (_, new) in moved.items()})
     checked = (state["checked"] + newly_checked)[-CHECKED_CAP:]
     _store_state(state_path, {"seen": seen, "checked": checked})
 
-    if reports:
-        if len(reports) > 1:
+    reports = list(branch_reports)
+    if header is not None:
+        if branch_reports:
             # 두 보고가 같은 커밋을 가리킬 수 있다. amend를 먼저 하면 브랜치
             # 보고가 인쇄한 절대 SHA가 stale이 되어 1단계 보존이 빗나간다.
-            reports.insert(
-                1,
+            reports.append(
                 "Do the protected-branch steps above BEFORE any amend — "
-                "rewriting now invalidates the SHAs they name.",
+                "rewriting now invalidates the SHAs they name."
             )
+        reports.append(header)
+
+    if reports:
         print("\n".join(reports), file=sys.stderr)
         return EXIT_BLOCK
     if warnings:
