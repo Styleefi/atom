@@ -56,15 +56,20 @@ or pruned clones, `git pull <URL>`, a differently named default branch —
 `git remote show <remote>` prints it as "HEAD branch"). Whether a reported
 commit is actually published is decidable with one fetch:
 
-    git fetch <remote> <branch>        # works in a --single-branch clone too
+    git fetch <remote> <remote-branch>   # the remote's "HEAD branch" (see
+                                         # above), which may differ from
+                                         # `<branch>`; works in a
+                                         # --single-branch clone too
     git merge-base --is-ancestor <sha> FETCH_HEAD
 
-Exit 0: the commit is already on the remote's `<branch>` — the report was the
-hook's local blind spot, nothing needs recovering, and prefixing the next
-advancing command with `ATOM_COMMIT_OVERRIDE=1` silences the repeat. Exit 1:
-the commit is not published there — a real advance for the owner to judge,
-however the clone is configured. A branch that was simply never pushed is the
-case the hook exists to catch, not an exemption from it.
+A fetch that fails settles nothing — neither verdict below applies until it
+succeeds. Run the second command once per listed SHA. Exit 0: that commit is
+already on the remote's `<remote-branch>`. Exit 1: that commit is not
+published there, however the clone is configured. The report was the hook's
+local blind spot — nothing needs recovering — only when every listed SHA
+exits 0; one exit 1 anywhere is a real advance for the owner to judge, even
+when every other listed SHA is published. A branch that was simply never
+pushed is the case the hook exists to catch, not an exemption from it.
 
 Otherwise, using the SHAs from the report:
 
