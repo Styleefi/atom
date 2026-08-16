@@ -108,9 +108,7 @@ def test_direct_commit_on_main_blocks_with_absolute_sha_facts(
     assert "HEAD~" not in err
     assert "Do NOT rewrite or move 'main' yourself" in err
     assert "do not push until they decide" in err
-    # 절차는 규칙 파일이 보유한다 — stderr에 이력 수술 명령이 실리면 그 문장이
-    # 저장소 상태 전제를 지고, 문서화된 오탐에서 정당한 전진을 되감는다
-    # (PR #114 rounds 1-4에서 반복 실측).
+    # 절차는 규칙 파일이 보유한다 — 근거는 _branch_report docstring.
     assert "git branch -f" not in err
     assert "meta/rules/commit-backstop.md" in err
 
@@ -118,9 +116,8 @@ def test_direct_commit_on_main_blocks_with_absolute_sha_facts(
 def test_unpushed_branch_report_states_facts_without_surgery(
     monkeypatch, capsys, tmp_path
 ):
-    # 원격 main ref가 없으면 제외 집합이 비어 모든 전진이 위반으로 보인다
-    # (문서화된 오탐). 보고문이 절차를 싣지 않으므로 최악의 결과는 불필요한
-    # 오너 보고 1회이며, 정당한 전진이 되감기지 않는다.
+    # 원격 main ref가 없으면 보고가 난다. 보고는 사실만 싣고 절차는 싣지
+    # 않는다 — 근거는 모듈 비주장 목록.
     repo = _make_repo(tmp_path)
     _commit(repo, "chore: init")
     assert _run(monkeypatch, repo) == 0  # 최초 관찰
@@ -128,16 +125,15 @@ def test_unpushed_branch_report_states_facts_without_surgery(
     assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
     err = capsys.readouterr().err
     assert "git branch -f" not in err
-    assert "No remote 'main' exists here" in err  # 오탐 가능성을 오너에게 전달
+    assert "No remote 'main' exists here" in err  # 사실 전달 — 판정 아님
     assert "do not push until they decide" in err
 
 
 def test_at_most_one_history_rewrite_instruction_per_report(
     monkeypatch, capsys, tmp_path
 ):
-    # 한 stderr 블록에 이력을 고치라는 지시가 둘이면 순서를 산문으로 정해야
-    # 하고, 그 문장이 다시 결함이 된다 (라운드 3의 순서 지침 → 라운드 4의
-    # 최상위 발견). 합성 규칙은 코드가 강제한다.
+    # 동반 발화 시 헤더 레인은 라우팅만 한다 — 근거는 _header_report
+    # docstring. 합성 규칙은 코드가 강제한다.
     repo = _baseline(monkeypatch, tmp_path)
     _commit(repo, "totally wrong subject on main")  # 두 lane 동시 발화
     assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
@@ -728,10 +724,10 @@ def test_branch_report_lists_every_offending_sha(monkeypatch):
     for sha in shas:
         assert sha[:12] in text  # 절단 없음 — 잘린 SHA는 다시 호명되지 않는다
     assert "git branch -f" not in text  # 절차는 규칙 파일 소관
-    # 원격 ref 부재는 사실로만 알리고 정당성은 판정하지 않는다 — 그 상태의
-    # 원인 중 부트스트랩은 이 모듈이 의도적으로 적발하는 대상이라, 정당할 수
-    # 있다고 말하면 진짜 위반이 노이즈로 라벨링된다 (PR #114 rounds 5, 7).
-    assert "nothing could be excluded" not in text  # ref가 있으면 싣지 않는다
+    # 원격 ref 부재는 사실로만 알린다 — 정당성도, 무엇이 제외됐는지도 주장하지
+    # 않는다. 근거는 _branch_report docstring (PR #114 rounds 5, 7, 8).
+    assert "No remote 'main' exists here" not in text  # ref가 있으면 싣지 않는다
     absent = backstop._branch_report("main", "a" * 40, "b" * 40, shas, False)
-    assert "nothing could be excluded" in absent
+    assert "No remote 'main' exists here" in absent
     assert "legitimate" not in absent  # 정당성 주장 금지
+    assert "excluded" not in absent  # 제외 여부 주장 금지

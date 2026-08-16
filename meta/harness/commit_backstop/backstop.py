@@ -46,11 +46,13 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     - remote-tracking ref를 만들지 않는 `git pull <URL>`은 오탐할 수 있다.
     - 로컬 브랜치가 비표준 원격명(예: origin/trunk)을 추적하는 구성은
       고려하지 않는다.
-    - 위 세 오탐(원격 ref 부재·URL pull·비표준 원격명)은 훅이 자기 수단으로
-      가려낼 수 없다 — 로컬에서 published 여부를 답하는 조회가 없기 때문이다.
-      선언된 범위 경계다(PR #114 라운드 4 오너 결정). 대신 브랜치 보고는
-      복구 절차를 싣지 않고 사실과 오너 라우팅만 내보내므로, 오탐의 최악
-      결과는 불필요한 보고 한 번이지 정당한 전진의 되감기가 아니다.
+    - 위 두 구성(URL pull·비표준 원격명)과 원격 ref 부재는 같은 한계의 세
+      얼굴이다. 훅은 로컬에 존재하는 원격 main/master ref만 제외 집합으로
+      쓰므로, published 커밋이 그 밖에 있으면 보고가 난다. 훅 자신은 이를
+      가려낼 수 없다 — 선언된 범위 경계다(PR #114 라운드 4 오너 결정).
+      published 여부 판별은 복구 절차의 fetch 확인이 맡고(규칙 파일), 브랜치
+      보고는 사실과 오너 라우팅만 내보내므로 최악 결과는 불필요한 보고
+      한 번이다.
     - merge 커밋은 부모 수로 걸러져(`--no-merges`) 제목을 읽지 않는다.
       이와 별개로 git 자동 생성 제목 3종(`Revert "`, `fixup! `, `squash! `)은
       접두사 매칭으로 헤더 검사에서 면제한다 — 누가 썼는지는 보지 않는다.
@@ -309,19 +311,18 @@ def _branch_report(
 
     복구 절차(rescue 브랜치 → `branch -f` → PR)는 여기서 지시하지 않고
     commit-backstop 규칙 파일이 보유한다. 절차를 stderr에 실으면 그 문장이
-    저장소 상태에 대한 전제를 지게 되고, 문서화된 오탐(원격 ref 부재 등)에서
-    정당한 전진을 되감으라는 지시가 된다 — PR #114 라운드 1-4에서 반복 실측.
+    저장소 상태에 대한 전제를 지게 되고, 훅의 로컬 시야가 불완전한 구성(원격
+    ref 부재 등)에서 정당한 전진을 되감으라는 지시가 된다 — PR #114
+    라운드 1-4에서 반복 실측.
     보호 브랜치 이력 수술은 plan-deviation 원칙상 오너 결정이기도 하다.
 
     SHA는 상한 없이 전부 싣는다 — 판정한 커밋은 전부 `seen`에 반영되어 다시
     호명되지 않으므로, 잘라내면 오너 보고가 영구히 불완전해진다.
 
-    원격 ref 부재는 사실로만 알린다 — 정당성 판정은 하지 않는다. 그 상태의
-    원인 중 부트스트랩(아직 push 안 함)은 이 모듈이 의도적으로 적발하는
-    대상이라(비주장 목록 참조), 정당할 수 있다고 말하면 진짜 위반을 노이즈로
-    라벨링하게 된다. ref가 존재하면 이 사실 자체가 성립하지 않으므로 싣지
-    않는다. 문서화된 나머지 오탐(`git pull <URL>`, 비표준 원격명)은 ref가
-    있어도 성립할 수 있고 이 안내의 대상이 아니다.
+    원격 ref 부재는 사실로만 알린다 — 정당성도, 무엇이 제외됐는지도 주장하지
+    않는다. 이 상태가 곧 오탐이라는 뜻이 아니며(부트스트랩은 이 모듈이
+    의도적으로 적발하는 대상이다), 판별은 오너가 규칙 파일의 fetch 확인으로
+    한다. ref가 존재하면 이 사실 자체가 성립하지 않으므로 싣지 않는다.
 
     Args:
         branch: 위반이 난 보호 브랜치명.
@@ -337,8 +338,7 @@ def _branch_report(
         ""
         if has_remote_ref
         else (
-            f" No remote '{branch}' exists here, so nothing could be excluded "
-            "and every advance is reported; include that when you report."
+            f" No remote '{branch}' exists here; include that when you report."
         )
     )
     return "\n".join(
@@ -369,10 +369,10 @@ def _header_report(problems: list[tuple[str, str]], prescribe: bool = True) -> s
     상한을 넘은 위반도 SHA만은 전부 싣는다 — 잘라내면 `checked`에 기록된
     나머지가 다시는 호명되지 않아 오너 보고가 불완전해진다.
 
-    `prescribe=False`는 같은 실행에서 브랜치 보고가 함께 나갈 때 쓴다. 한
-    stderr 블록에 이력을 고치라는 지시가 둘이면 어느 쪽을 먼저 할지 산문으로
-    정해야 하고, 그 문장이 다시 결함이 된다(라운드 3의 순서 지침 → 라운드 4의
-    최상위 발견). 그래서 이 경우 헤더 레인은 라우팅만 한다.
+    `prescribe=False`는 같은 실행에서 브랜치 보고가 함께 나갈 때 쓴다. 훅은
+    amend 대상이 브랜치 위반과 얽혀 있는지(보호 브랜치 tip인지, 방금 라우팅한
+    SHA인지) 판별하지 않는다. 판별하지 못하면 지시하지 않는다는 이 레인의
+    원칙 그대로, 동반 발화 시 라우팅만 한다.
 
     Args:
         problems: (SHA, 위반 사유) 목록.
@@ -510,9 +510,8 @@ def main() -> int:
                         if problem is not None:
                             problems.append((sha, problem))
                     if problems:
-                        # 브랜치 보고가 동반되면 이력 수정 지시는 그쪽 하나로
-                        # 통일한다 — 한 블록에 둘이면 순서를 산문으로 정해야
-                        # 하고 그 문장이 다시 결함이 된다.
+                        # 동반 발화 시 헤더 레인은 라우팅만 한다 — 근거는
+                        # _header_report docstring.
                         header = _header_report(problems, not branch_reports)
 
     seen = dict(state["seen"])

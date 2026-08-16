@@ -26,8 +26,9 @@ text or reflog inference:
   prescribes only what it can verify — amend a listed commit when the command
   that just ran created it and it is `HEAD`, otherwise leave history alone,
   hand the SHAs to the owner and hold off pushing. When a protected-branch
-  report accompanies it the amend clause is dropped and this lane routes only,
-  so one stderr block never carries two history-rewriting instructions.
+  report accompanies it the amend clause is dropped and this lane routes only —
+  the hook does not check whether the amend target is entangled with the branch
+  violation, and it does not prescribe what it cannot verify.
   Merge commits are excluded
   structurally (`--no-merges` filters by parent count before any subject is
   read); separately, three subject prefixes git generates (`Revert "`,
@@ -48,16 +49,22 @@ protection.
 
 ## Recovering a protected branch (owner decides; the agent does not)
 
-First rule out the false positives, because rewinding a legitimate advance
-destroys work. Three make the advance legitimate: the remote's default branch
-has another name, the clone is `--single-branch` or was pruned so no remote ref
-is present locally, or the advance came from `git pull <URL>`. When one
-applies, nothing needs recovering — prefix the next advancing command with
-`ATOM_COMMIT_OVERRIDE=1` if the reports are noise.
+First decide whether the report was noise. The hook compares only against
+remote `main`/`master` refs that exist locally, so its view is incomplete when
+none is present or the project publishes under another name (`--single-branch`
+or pruned clones, `git pull <URL>`, a differently named default branch —
+`git remote show <remote>` prints it as "HEAD branch"). Whether a reported
+commit is actually published is decidable with one fetch:
 
-A branch that has simply never been pushed is not in that set: the hook
-detects that state deliberately (see the module's non-claims), so commits that
-landed on it still need the owner's judgement.
+    git fetch <remote> <branch>        # works in a --single-branch clone too
+    git merge-base --is-ancestor <sha> FETCH_HEAD
+
+Exit 0: the commit is already on the remote's `<branch>` — the report was the
+hook's local blind spot, nothing needs recovering, and prefixing the next
+advancing command with `ATOM_COMMIT_OVERRIDE=1` silences the repeat. Exit 1:
+the commit is not published there — a real advance for the owner to judge,
+however the clone is configured. A branch that was simply never pushed is the
+case the hook exists to catch, not an exemption from it.
 
 Otherwise, using the SHAs from the report:
 
