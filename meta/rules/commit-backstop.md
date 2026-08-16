@@ -16,7 +16,11 @@ text or reflog inference:
 - A protected branch (`main`/`master`) may only advance by commits that already
   exist on a remote `main`/`master`. Any other advance — direct commit, local
   merge of a (pushed or unpushed) branch, cherry-pick, plumbing — is reported
-  with ordered, absolute-SHA recovery steps.
+  with both tips and every offending SHA, and routed to the owner. The report
+  prescribes no surgery: recovery lives in this rule (below), because a
+  procedure printed into an agent's context carries assumptions about the
+  repository that the hook cannot check, and rewinding a protected branch is
+  the owner's call under the plan-deviation rule.
 - New unpublished non-merge commits reachable from `HEAD` must satisfy the
   Conventional Commits header; violations are reported with advice that
   prescribes only what it can verify — amend a listed commit when the command
@@ -38,3 +42,23 @@ that one call while still recording tips. Known non-claims (commit+push in a
 single command, out-of-cwd repositories, pre-first-observation history) are
 listed in the module docstring — that layer belongs to server-side branch
 protection.
+
+## Recovering a protected branch (owner decides; the agent does not)
+
+First rule out the false positives, because in each of them the advance is
+legitimate and rewinding destroys work: the branch was never pushed, the
+remote's default branch has another name, the clone is `--single-branch` or
+was pruned so no remote ref is present locally, or the advance came from
+`git pull <URL>`. When one applies, nothing needs recovering — prefix the next
+advancing command with `ATOM_COMMIT_OVERRIDE=1` if the reports are noise.
+
+Otherwise, using the SHAs from the report:
+
+1. Preserve the work first — skipping this loses the commits. On the branch
+   now: `git checkout -b <type/short-description>`. Otherwise:
+   `git branch <type/short-description> <current tip>`.
+2. `git branch -f <branch> <previous tip>`. If that fails with `cannot force
+   update ... used by worktree at <path>`, and `<path>` is the current
+   directory, step 1 was skipped — go back to it; if `<path>` is another
+   worktree, run `git reset --keep <previous tip>` there.
+3. Continue on the rescue branch and merge via PR.

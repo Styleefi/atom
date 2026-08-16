@@ -94,37 +94,57 @@ def _state_path(repo) -> str:
 # --- 보호 브랜치 판정 --------------------------------------------------------
 
 
-def test_direct_commit_on_main_blocks_with_absolute_sha_recovery(
+def test_direct_commit_on_main_blocks_with_absolute_sha_facts(
     monkeypatch, capsys, tmp_path
 ):
     repo = _baseline(monkeypatch, tmp_path)
     old = _git(repo, "rev-parse", "main")
     _commit(repo, "feat: direct on main")
+    new = _git(repo, "rev-parse", "main")
     assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
     err = capsys.readouterr().err
-    assert old in err  # 절대 SHA 복구 지시
+    assert old in err and new in err  # 절대 SHA — 오너가 복구에 쓸 사실
     assert "HEAD~" not in err
-    assert "Preserve the work FIRST" in err
-    assert "git branch -f main" in err
-    assert "NOTE:" not in err  # 원격 main이 있으므로 오탐 게이트는 뜨지 않는다
+    assert "Do NOT rewrite or move 'main' yourself" in err
+    assert "do not push until they decide" in err
+    # 절차는 규칙 파일이 보유한다 — stderr에 이력 수술 명령이 실리면 그 문장이
+    # 저장소 상태 전제를 지고, 문서화된 오탐에서 정당한 전진을 되감는다
+    # (PR #114 rounds 1-4에서 반복 실측).
+    assert "git branch -f" not in err
+    assert "meta/rules/commit-backstop.md" in err
 
 
-def test_unpushed_branch_report_gates_the_destructive_steps(
+def test_unpushed_branch_report_states_facts_without_surgery(
     monkeypatch, capsys, tmp_path
 ):
     # 원격 main ref가 없으면 제외 집합이 비어 모든 전진이 위반으로 보인다
-    # (문서화된 오탐). 복구 절차를 그대로 실행하면 정당한 전진을 되감으므로,
-    # 훅이 그 사실을 직접 알리고 멈추게 해야 한다 (PR #114 round 3).
+    # (문서화된 오탐). 보고문이 절차를 싣지 않으므로 최악의 결과는 불필요한
+    # 오너 보고 1회이며, 정당한 전진이 되감기지 않는다.
     repo = _make_repo(tmp_path)
     _commit(repo, "chore: init")
     assert _run(monkeypatch, repo) == 0  # 최초 관찰
     _commit(repo, "feat: still unpushed")
     assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
     err = capsys.readouterr().err
-    assert "no remote 'main' ref exists here" in err
-    assert "do NOT run the steps below" in err
+    assert "git branch -f" not in err
+    assert "no remote counterpart here" in err  # 오탐 가능성을 오너에게 전달
     assert "do not push until they decide" in err
-    assert "git branch -r" not in err  # published 여부를 답하지 못하는 프로브
+
+
+def test_at_most_one_history_rewrite_instruction_per_report(
+    monkeypatch, capsys, tmp_path
+):
+    # 한 stderr 블록에 이력을 고치라는 지시가 둘이면 순서를 산문으로 정해야
+    # 하고, 그 문장이 다시 결함이 된다 (라운드 3의 순서 지침 → 라운드 4의
+    # 최상위 발견). 합성 규칙은 코드가 강제한다.
+    repo = _baseline(monkeypatch, tmp_path)
+    _commit(repo, "totally wrong subject on main")  # 두 lane 동시 발화
+    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
+    err = capsys.readouterr().err
+    assert err.count("[commit-backstop]") == 2
+    assert "--amend" not in err  # 헤더 lane은 라우팅만
+    assert "git branch -f" not in err
+    assert "already routes this to the owner" in err
 
 
 def test_same_violation_reported_once(monkeypatch, capsys, tmp_path):
@@ -218,8 +238,7 @@ def test_recovery_flow_silences_backstop(monkeypatch, capsys, tmp_path):
     old = _git(repo, "rev-parse", "main")
     _commit(repo, "feat: direct on main")
     assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
-    err = capsys.readouterr().err
-    assert "1." in err and "2." in err and "3." in err
+    assert old in capsys.readouterr().err  # 오너가 되돌릴 지점을 보고문에서 얻는다
     _git(repo, "checkout", "-q", "-b", "feat/rescue")
     _git(repo, "branch", "-f", "main", old)
     assert _run(monkeypatch, repo) == 0
@@ -276,8 +295,8 @@ def test_master_repo_uses_parameterized_branch_name(monkeypatch, capsys, tmp_pat
     _commit(repo, "feat: direct on master")
     assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
     err = capsys.readouterr().err
-    assert "git branch -f master" in err
-    assert "git branch -f main" not in err
+    assert "'master' moved" in err
+    assert "'main'" not in err
 
 
 def test_multiple_commits_reported_once_with_count(monkeypatch, capsys, tmp_path):
@@ -287,7 +306,7 @@ def test_multiple_commits_reported_once_with_count(monkeypatch, capsys, tmp_path
     assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
     err = capsys.readouterr().err
     assert "3 commit(s)" in err
-    assert err.count("Recover with EXACTLY") == 1
+    assert err.count("[commit-backstop]") == 1  # 한 브랜치 = 한 보고문
 
 
 def test_commit_and_push_in_one_command_is_documented_limitation(
@@ -495,13 +514,9 @@ def test_dual_violation_reports_once_with_both_reasons(monkeypatch, capsys, tmp_
     _commit(repo, "totally wrong subject on main")
     assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
     err = capsys.readouterr().err
-    assert "Recover with EXACTLY" in err  # 브랜치 위반
+    assert "landed on local 'main'" in err  # 브랜치 위반
     assert "Conventional Commits" in err  # 헤더 위반
     assert err.count("[commit-backstop]") == 2  # 보고문 2절, 출력·exit는 1회
-    # 순서 지침은 헤더 보고 바로 앞에 와야 한다 — amend를 먼저 하면 브랜치
-    # 보고의 절대 SHA가 stale이 된다 (PR #114 rounds 2-3).
-    note = err.index("BEFORE any amend")
-    assert err.index("Recover with EXACTLY") < note < err.index("Conventional Commits")
 
 
 def test_unicode_subject_does_not_crash(monkeypatch, capsys, tmp_path):
@@ -688,8 +703,11 @@ def test_moved_refs_pure_logic():
     }
 
 
-def test_shortlist_caps_report(monkeypatch):
-    shas = [f"{i:040d}" for i in range(8)]
-    text = backstop._shortlist(shas)
-    assert "(8 total)" in text
-    assert text.count(",") == backstop.REPORT_SHA_LIMIT  # 5개 + 총계 표기
+def test_branch_report_lists_every_offending_sha(monkeypatch):
+    # 앞 12자가 서로 달라야 절단을 실제로 감지한다.
+    shas = [f"{i:x}" * 40 for i in range(1, 9)]
+    text = backstop._branch_report("main", "a" * 40, "b" * 40, shas)
+    assert "8 commit(s)" in text
+    for sha in shas:
+        assert sha[:12] in text  # 절단 없음 — 잘린 SHA는 다시 호명되지 않는다
+    assert "git branch -f" not in text  # 절차는 규칙 파일 소관
