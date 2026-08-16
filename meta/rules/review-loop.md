@@ -37,13 +37,13 @@ loop, never the owner.
   (Measured: a +1128-line PR, #54, converged in one round while a +210-line
   one, #75, took five — rounds are driven by the inference surface touched
   and by prose-precision findings, not by size.) For a diff that changes
-  no runtime behavior (rule and skill text specifies agent behavior, so a
-  diff to it never qualifies), prose-precision findings are above-bar
-  only when they would mislead a later session about behavior. For a diff
-  that changes no runtime behavior, this behavior gate takes precedence
-  over the purpose-failure floor: a prose finding that would not mislead
-  a later session about behavior is below-bar even when it is a failure
-  of the PR's purpose.
+  no runtime behavior (rule, skill, CLAUDE.md and CLAUDE.template.md text
+  specifies agent behavior, so a diff to it never qualifies),
+  prose-precision findings are above-bar only when they would mislead a
+  later session about behavior. For a diff that changes no runtime
+  behavior, this behavior gate takes precedence over the purpose-failure
+  floor: a prose finding that would not mislead a later session about
+  behavior is below-bar even when it is a failure of the PR's purpose.
 - Triage = matching: a verified finding is above-bar iff its failure
   scenario matches a declared class, subject to the accident test below.
   The bar applies at triage only — never narrow the reviewers' search
@@ -66,7 +66,7 @@ loop, never the owner.
   round 4 nearly added guard code against CI-disabling conditionals — a
   state no accident produces.)
 - Raising the bar (adding a class) needs only a ledger entry through the
-  second review pass; from the third on it requires owner approval. A
+  second completed pass; from the third on it requires owner approval. A
   serious finding matching no class is handled by adding its class, under
   the same approval requirement; a raise pending owner decision blocks
   the exit observation as an unresolved case. On every raise,
@@ -194,8 +194,8 @@ Exactly two endings:
 1. **Observed exit** — never declared. A pass scoped per the Rounds
    section — so every fix commit has been covered by a completed pass — run
    with the procedure recorded in the ledger, finds zero above-bar findings,
-   with no unresolved borderline case and no above-bar backlog (including
-   findings returned by a bar raise). The observation is
+   with no unresolved borderline or pending-decision case and no above-bar
+   backlog (including findings returned by a bar raise). The observation is
    valid only if the reviewed HEAD is still the PR's HEAD when the pass
    completes — any new commit, whoever pushed it, invalidates the
    observation (not the pass) and requires a new pass. Below-bar findings
