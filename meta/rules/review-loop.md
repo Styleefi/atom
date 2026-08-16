@@ -38,10 +38,11 @@ loop, never the owner.
   one, #75, took five — rounds are driven by the inference surface touched
   and by prose-precision findings, not by size.) For a diff that changes no
   runtime behavior, prose-precision findings are above-bar only when they
-  would mislead a later session about behavior. This behavior gate takes
-  precedence over the purpose-failure floor: a prose finding that would
-  not mislead a later session about behavior is below-bar even when it is
-  a failure of the PR's purpose.
+  would mislead a later session about behavior. For a diff that changes no
+  runtime behavior, this behavior gate takes precedence over the
+  purpose-failure floor: a prose finding that would not mislead a later
+  session about behavior is below-bar even when it is a failure of the
+  PR's purpose.
 - Triage = matching: a verified finding is above-bar iff its failure
   scenario matches a declared class, subject to the accident test below.
   The bar applies at triage only — never narrow the reviewers' search
