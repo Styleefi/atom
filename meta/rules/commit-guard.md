@@ -17,9 +17,15 @@ invocations from command text before execution and
   whitelist, no uppercase start, no trailing period, subject ≤ 50 chars).
 
 Its claim is deliberately narrow (#52): text inference cannot decide shell
-semantics, so its known detection gaps (#30 #44 #49 #50 #51 classes) are
-**frozen, not fixed** — exact detection after execution is the commit-backstop
-rule's job. All failure paths are fail-open (never block unrelated Bash), and
+semantics, so its known detection gaps are **frozen, not fixed** — exact
+detection after execution is the commit-backstop rule's job, and only
+within that hook's own non-claims (its module docstring is the SSOT for
+them). All seven issues of the family tabled in #52 (#30 #44 #45 #47 #49
+#50 #51) closed with it: six left their gap frozen for the backstop to
+catch afterwards — #47 for the shared branch ref only, as #64 scoped it —
+while #45 had its cause, the regex fallback, deleted, and the detection gap
+that deletion opened is absorbed the same way. All
+failure paths are fail-open (never block unrelated Bash), and
 every block message includes the `ATOM_COMMIT_OVERRIDE=1` re-run escape for
 deliberate exceptions. Non-mechanical guidance (semantic units, branch naming,
 PR-only merges, no pushes to main) lives in the commit-discipline rule.

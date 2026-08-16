@@ -9,9 +9,14 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     - 보호 브랜치(main/master)는 원격 main/master에 이미 존재하는 커밋으로만
       전진할 수 있다. `<직전>..<현재>` 중 원격 main/master에 없는 커밋이 있으면
       경로 불문(직접 commit, 로컬 merge, cherry-pick, plumbing) 위반으로 보고한다.
+      보고는 사실(양쪽 tip + 위반 SHA 전부)과 오너 라우팅뿐이며 복구 절차는
+      싣지 않는다 — 절차는 commit-backstop 규칙 파일이 보유한다.
     - HEAD에 새로 도달한 미공개(non-merge) 커밋의 제목은 Conventional Commits를
-      따라야 한다. 위반은 amend 지시와 함께 보고한다.
-    - 같은 위반은 한 번만 보고한다(평가한 tip이 곧 기록 tip).
+      따라야 한다. 위반은 처리 지시와 함께 보고한다(브랜치 보고가 동반되면
+      이력 수정 지시는 한 블록에 하나만 남기고 라우팅으로 대체한다).
+    - 같은 위반은 보통 한 번만 보고한다 — 브랜치 위반은 기록 tip으로,
+      헤더 위반은 `checked` SHA 목록으로 중복을 제거한다. 재보고가 일어나는
+      경로는 아래 비주장 목록에 있다.
 
 주장하지 않는 것 (v1 설계상 수용한 한계):
     - remote가 없는 저장소는 전체 스킵한다(PR이 불가능한 스크래치/로컬 전용
@@ -24,11 +29,33 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     - payload cwd 밖 저장소(`git -C`, 서브모듈→부모)는 cwd가 그 저장소로
       돌아온 뒤에야 지연 적발된다.
     - ref를 처음 관찰한 시점 이전의 커밋은 판정하지 않는다(기록만).
+    - 오래된 미push 커밋이 HEAD로 들어오면(checkout·merge·rebase·cherry-pick
+      불문) 그 커밋이 헤더 보고를 유발한다 — 이 명령이 만든 커밋이 아니어도.
+      수용한 트레이드오프다(#52, PR #54: checked dedup으로 ts 필터 대체).
+      훅은 작성 시점을 판정하지 않는다 — 보고문이 호출자에게 "방금 실행된
+      명령이 이 커밋을 만들었는가 + 그 커밋이 HEAD인가"를 묻고, 둘 다
+      성립할 때만 수정을 허용한다.
+    - 헤더 위반의 1회성은 `checked`(SHA 목록)에 의존하므로 CHECKED_CAP을
+      넘겨 밀려나거나 rebase·amend로 같은 논리적 커밋이 새 SHA를 얻으면
+      다시 보고된다.
+    - 상태 쓰기가 실패하면 `seen`도 `checked`도 전진하지 못해 두 lane 모두
+      매 호출마다 재보고된다 — 헤더 위반뿐 아니라 브랜치 위반도 그렇다(#115).
+    - 위반 사유는 REPORT_SHA_LIMIT개까지만 붙인다. SHA는 전부 싣지만(잘라내면
+      `checked`에 기록된 나머지가 다시는 호명되지 않는다) 위반이 많은
+      브랜치에서는 그만큼 stderr가 길어진다.
     - remote-tracking ref를 만들지 않는 `git pull <URL>`은 오탐할 수 있다.
     - 로컬 브랜치가 비표준 원격명(예: origin/trunk)을 추적하는 구성은
       고려하지 않는다.
-    - merge 커밋과 git 자동 생성 제목(`Revert "`, `fixup! `, `squash! `)은
-      헤더 검사에서 면제한다.
+    - 위 두 구성(URL pull·비표준 원격명)과 원격 ref 부재는 같은 한계의 세
+      얼굴이다. 훅은 로컬에 존재하는 원격 main/master ref만 제외 집합으로
+      쓰므로, published 커밋이 그 밖에 있으면 보고가 난다. 훅 자신은 이를
+      가려낼 수 없다 — 선언된 범위 경계다(PR #114 라운드 4 오너 결정).
+      published 여부 판별은 복구 절차의 fetch 확인이 맡고(규칙 파일), 브랜치
+      보고는 사실과 오너 라우팅만 내보내므로 최악 결과는 불필요한 보고
+      한 번이다.
+    - merge 커밋은 부모 수로 걸러져(`--no-merges`) 제목을 읽지 않는다.
+      이와 별개로 git 자동 생성 제목 3종(`Revert "`, `fixup! `, `squash! `)은
+      접두사 매칭으로 헤더 검사에서 면제한다 — 누가 썼는지는 보지 않는다.
 
 보고 채널:
     stderr는 exit 42(래퍼가 2로 되매핑)일 때만 모델 컨텍스트에 주입된다.
@@ -77,7 +104,9 @@ STATE_FILENAME = "atom-commit-backstop.json"
 # 헤더 검사 완료 커밋 기록 상한 (FIFO — 초과분은 오래된 것부터 버린다).
 CHECKED_CAP = 200
 
-# 위반 보고에 나열하는 SHA 상한 (stderr는 모델 컨텍스트에 주입되므로).
+# 위반 사유를 붙여 나열하는 상한 (stderr는 모델 컨텍스트에 주입되므로).
+# SHA 자체는 상한 없이 전부 싣는다 — 판정한 커밋은 모두 `checked`에 기록되어
+# 다시 호명되지 않으므로, 잘라내면 오너 보고가 영구히 불완전해진다.
 REPORT_SHA_LIMIT = 5
 
 # git이 자동 생성하는 제목 — 에이전트가 규격을 만족시킬 수 없거나(revert 타입
@@ -275,48 +304,113 @@ def _new_head_commits(
     return commits
 
 
-def _shortlist(shas: list[str]) -> str:
-    """보고용 SHA 나열 (상한 REPORT_SHA_LIMIT + 총 개수)."""
-    head = ", ".join(sha[:12] for sha in shas[:REPORT_SHA_LIMIT])
-    if len(shas) > REPORT_SHA_LIMIT:
-        return f"{head}, ... ({len(shas)} total)"
-    return head
+def _branch_report(
+    branch: str, old: str, new: str, offending: list[str], has_remote_ref: bool
+) -> str:
+    """보호 브랜치 위반 보고문 — 사실 진술과 오너 라우팅뿐이다.
 
+    복구 절차(rescue 브랜치 → `branch -f` → PR)는 여기서 지시하지 않고
+    commit-backstop 규칙 파일이 보유한다. 절차를 stderr에 실으면 그 문장이
+    저장소 상태에 대한 전제를 지게 되고, 훅의 로컬 시야가 불완전한 구성(원격
+    ref 부재 등)에서 정당한 전진을 되감으라는 지시가 된다 — PR #114
+    라운드 1-4에서 반복 실측.
+    보호 브랜치 이력 수술은 plan-deviation 원칙상 오너 결정이기도 하다.
 
-def _branch_report(branch: str, old: str, new: str, offending: list[str]) -> str:
-    """보호 브랜치 위반 보고문 — 절대 SHA 기반의 순서화된 복구 지시."""
+    SHA는 상한 없이 전부 싣는다 — 판정한 커밋은 전부 `seen`에 반영되어 다시
+    호명되지 않으므로, 잘라내면 오너 보고가 영구히 불완전해진다.
+
+    원격 ref 부재는 사실로만 알린다 — 정당성도, 무엇이 제외됐는지도 주장하지
+    않는다. 이 상태가 곧 오탐이라는 뜻이 아니며(부트스트랩은 이 모듈이
+    의도적으로 적발하는 대상이다), 판별은 오너가 규칙 파일의 fetch 확인으로
+    한다. ref가 존재하면 이 사실 자체가 성립하지 않으므로 싣지 않는다.
+
+    Args:
+        branch: 위반이 난 보호 브랜치명.
+        old: 직전 관찰 tip.
+        new: 현재 tip.
+        offending: 원격에 없는 커밋 SHA 목록.
+        has_remote_ref: 이 브랜치의 원격 ref가 로컬에 존재하는지.
+
+    Returns:
+        stderr에 실을 보고문.
+    """
+    caveat = (
+        ""
+        if has_remote_ref
+        else (
+            f" No remote '{branch}' exists here; include that when you report."
+        )
+    )
     return "\n".join(
         [
             f"[commit-backstop] {len(offending)} commit(s) not present on any "
-            f"remote '{branch}' landed on local '{branch}': {_shortlist(offending)}",
-            "Recover with EXACTLY these steps, in this order:",
-            "  1. Preserve the work FIRST (skipping this step loses the commits):",
-            f"     on '{branch}' now? -> git checkout -b <type/short-description>",
-            f"     otherwise         -> git branch <type/short-description> {new}",
-            f"  2. git branch -f {branch} {old}",
-            f"     (fails because '{branch}' is checked out in another worktree? "
-            f"run `git reset --keep {old}` in that worktree)",
-            "  3. Continue on the rescue branch and merge via PR.",
-            "See the commit-discipline rule (meta/rules/commit-discipline.md). "
-            f"Deliberate exception? re-run prefixed with: {OVERRIDE_TOKEN}",
+            f"remote '{branch}' landed on local '{branch}': "
+            f"{' '.join(sha[:12] for sha in offending)}",
+            f"  '{branch}' moved {old} -> {new}",
+            f"Do NOT rewrite or move '{branch}' yourself. Give the owner the "
+            "SHAs above in your next reply, and do not push until they "
+            f"decide.{caveat} Recovery steps, if the owner asks for them, are "
+            "in meta/rules/commit-backstop.md (which also carries this hook's "
+            f"non-claims and the {OVERRIDE_TOKEN} escape).",
         ]
     )
 
 
-def _header_report(problems: list[tuple[str, str]]) -> str:
-    """헤더 위반 보고문 — 제목 원문은 에코하지 않는다(SHA + 사유만)."""
+def _header_report(problems: list[tuple[str, str]], prescribe: bool = True) -> str:
+    """헤더 위반 보고문 — 제목 원문은 에코하지 않는다(SHA + 사유만).
+
+    지시는 작성 시점을 훅이 판정하지 않는다. 어떤 git 술어도 "이 커밋을
+    누가 언제 만들었나"를 건전하게 답하지 못한다 — committer date는
+    rebase·cherry-pick이 갱신하고, `old` 조상 판정은 fast-forward checkout에서
+    뒤집힌다. 대신 호출자가 확실히 아는 사실 하나에 기댄다. 방금 실행된 Bash
+    명령은 호출자가 직접 낸 것이므로, 그 명령이 커밋을 만들었는지 아니면
+    HEAD만 옮겼는지는 읽으면 안다. 판정이 서지 않으면 재작성을 금지한다.
+
+    상한을 넘은 위반도 SHA만은 전부 싣는다 — 잘라내면 `checked`에 기록된
+    나머지가 다시는 호명되지 않아 오너 보고가 불완전해진다.
+
+    `prescribe=False`는 같은 실행에서 브랜치 보고가 함께 나갈 때 쓴다. 훅은
+    amend 대상이 브랜치 위반과 얽혀 있는지(보호 브랜치 tip인지, 방금 라우팅한
+    SHA인지) 판별하지 않는다. 판별하지 못하면 지시하지 않는다는 이 레인의
+    원칙 그대로, 동반 발화 시 라우팅만 한다.
+
+    Args:
+        problems: (SHA, 위반 사유) 목록.
+        prescribe: 수정 지시를 실을지. 브랜치 보고와 동반될 때 False.
+
+    Returns:
+        stderr에 실을 보고문.
+    """
     lines = [
-        f"[commit-backstop] {len(problems)} new commit(s) violate the "
-        "Conventional Commits header rule:"
+        f"[commit-backstop] {len(problems)} commit(s) newly reachable from HEAD "
+        "violate the Conventional Commits header rule — they may predate this "
+        "command:"
     ]
     for sha, problem in problems[:REPORT_SHA_LIMIT]:
         lines.append(f"  - {sha[:12]}: {problem}")
     if len(problems) > REPORT_SHA_LIMIT:
-        lines.append(f"  - ... ({len(problems)} total)")
+        rest = " ".join(sha[:12] for sha, _ in problems[REPORT_SHA_LIMIT:])
+        lines.append(f"  - also ({len(problems)} total): {rest}")
+    if prescribe:
+        lines.append(
+            "A listed commit is yours to fix only if the Bash command that "
+            "just ran created it and it is HEAD (`git rev-parse HEAD`) — you "
+            "issued that command, so read it. Fix that one with "
+            "`git commit --amend`. Every other listed SHA stays as it is, "
+            "including one this command created that is no longer HEAD: do "
+            "NOT rewrite history — give the owner those SHAs in your next "
+            "reply, and do not push this branch or open a PR until they decide."
+        )
+    else:
+        lines.append(
+            "Do NOT rewrite these yourself — the protected-branch report above "
+            "already routes this to the owner; include these SHAs in the same "
+            "report."
+        )
     lines.append(
-        "Fix the latest commit with `git commit --amend`; rewrite older ones "
-        "before pushing. See meta/rules/commit-discipline.md. "
-        f"Deliberate exception? re-run prefixed with: {OVERRIDE_TOKEN}"
+        "That command already ran and was not undone; do not re-run it. See "
+        f"meta/rules/commit-backstop.md (claims, non-claims, and the "
+        f"{OVERRIDE_TOKEN} escape) and meta/rules/commit-discipline.md."
     )
     return "\n".join(lines)
 
@@ -372,7 +466,8 @@ def main() -> int:
     if not remotes:
         return 0
 
-    reports: list[str] = []
+    branch_reports: list[str] = []
+    header: str | None = None
     warnings: list[str] = []
     newly_checked: list[str] = []
     if not override:
@@ -393,7 +488,10 @@ def main() -> int:
                     "is unreachable or git failed - this advance was NOT checked"
                 )
             elif offending:
-                reports.append(_branch_report(branch, old, new, offending))
+                has_ref = any(ref.endswith(f"/{branch}") for ref in exclusions)
+                branch_reports.append(
+                    _branch_report(branch, old, new, offending, has_ref)
+                )
         if head_key in moved and validate_subject is not None:
             old, new = moved[head_key]
             if old is not None:
@@ -412,12 +510,18 @@ def main() -> int:
                         if problem is not None:
                             problems.append((sha, problem))
                     if problems:
-                        reports.append(_header_report(problems))
+                        # 동반 발화 시 헤더 레인은 라우팅만 한다 — 근거는
+                        # _header_report docstring.
+                        header = _header_report(problems, not branch_reports)
 
     seen = dict(state["seen"])
     seen.update({key: new for key, (_, new) in moved.items()})
     checked = (state["checked"] + newly_checked)[-CHECKED_CAP:]
     _store_state(state_path, {"seen": seen, "checked": checked})
+
+    reports = list(branch_reports)
+    if header is not None:
+        reports.append(header)
 
     if reports:
         print("\n".join(reports), file=sys.stderr)
