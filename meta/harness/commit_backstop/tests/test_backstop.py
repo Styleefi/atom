@@ -106,6 +106,12 @@ def test_direct_commit_on_main_blocks_with_absolute_sha_recovery(
     assert "HEAD~" not in err
     assert "Preserve the work FIRST" in err
     assert "git branch -f main" in err
+    # 파괴적 단계 앞에는 오탐 게이트가, 그 안에는 인라인 탈출구가 있어야 한다 —
+    # 문서화된 오탐(원격 main 부재, `git pull <URL>`, 비표준 원격명)에서 이
+    # 절차를 그대로 실행하면 정당한 전진을 되감는다 (PR #114 round 2).
+    assert "git branch -r" in err
+    assert "do NOT run the steps below" in err
+    assert backstop.OVERRIDE_TOKEN in err
 
 
 def test_same_violation_reported_once(monkeypatch, capsys, tmp_path):
@@ -268,7 +274,7 @@ def test_multiple_commits_reported_once_with_count(monkeypatch, capsys, tmp_path
     assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
     err = capsys.readouterr().err
     assert "3 commit(s)" in err
-    assert err.count("Recover with EXACTLY") == 1
+    assert err.count("recover with EXACTLY") == 1
 
 
 def test_commit_and_push_in_one_command_is_documented_limitation(
@@ -295,11 +301,11 @@ def test_feature_branch_header_check(monkeypatch, capsys, tmp_path):
     assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
     err = capsys.readouterr().err
     assert "--amend" in err
-    # 지시의 하중은 rewrite 금지문과 HEAD 동일성 앵커에 걸린다 — 이 둘이 빠지면
-    # "전부 amend하라"는 #64 이전 의미로 되돌아간다 (#64, PR #114 round 1).
+    # 지시의 하중은 rewrite 금지문과, 호출자가 확실히 아는 앵커("방금 실행된
+    # 명령")에 걸린다 — 둘이 빠지면 "전부 amend하라"는 #64 이전 의미로
+    # 되돌아간다 (#64, PR #114 rounds 1-2).
     assert "do NOT rewrite" in err
-    assert "git rev-parse HEAD" in err
-    assert "git rev-list " in err  # 평가 구간 열거 명령
+    assert "the Bash command that just ran" in err
     assert sha[:12] in err
     assert bad_subject not in err  # 제목 원문 에코 금지 (프롬프트 주입 방지)
     _git(repo, "commit", "--amend", "--allow-empty", "-m", "fix: repaired header")
@@ -350,6 +356,22 @@ def test_merge_commit_subject_is_exempt(monkeypatch, capsys, tmp_path):
     assert capsys.readouterr().err == ""
 
 
+def test_violations_past_the_reason_limit_still_list_every_sha(
+    monkeypatch, capsys, tmp_path
+):
+    # 사유는 REPORT_SHA_LIMIT개까지만 붙이되 SHA는 전부 실어야 한다 — 판정된
+    # 커밋은 모두 `checked`에 들어가 다시는 호명되지 않으므로, 잘라내면 오너
+    # 보고가 영구히 불완전해진다 (PR #114 round 2).
+    repo = _baseline(monkeypatch, tmp_path)
+    _git(repo, "checkout", "-q", "-b", "feat/x")
+    shas = [_commit(repo, f"Bad number {i}.") for i in range(backstop.REPORT_SHA_LIMIT + 2)]
+    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
+    err = capsys.readouterr().err
+    for sha in shas:
+        assert sha[:12] in err
+    assert f"({len(shas)} total)" in err
+
+
 def test_custom_subject_merge_commit_is_exempt(monkeypatch, capsys, tmp_path):
     # merge 면제는 제목 접두사가 아니라 부모 수(--no-merges)로 이뤄진다. 기본
     # 제목("Merge ...")만 검증하면 접두사 구현으로 바꿔도 통과하므로, 규격을
@@ -380,7 +402,8 @@ def test_merge_tip_is_not_the_advised_amend_target(monkeypatch, capsys, tmp_path
     err = capsys.readouterr().err
     assert bad[:12] in err
     assert merge_sha[:12] not in err  # HEAD는 위반 목록 밖 — amend 대상이 아니다
-    assert "git rev-parse HEAD" in err
+    # 이 명령이 만든 커밋이므로 지시는 고치는 쪽이어야 한다 (tip이 아니어도).
+    assert "git rebase -i" in err
 
 
 def test_checkout_of_unobserved_branch_reports_preexisting_commits(
@@ -402,7 +425,11 @@ def test_checkout_of_unobserved_branch_reports_preexisting_commits(
     err = capsys.readouterr().err
     assert stale[:12] in err
     assert "do NOT rewrite" in err  # 남의 커밋 재작성 금지가 이 경로의 하중
+    # 되돌아오는 이동을 훅이 관찰해야 `seen`이 옮겨가고, 다음 복귀가 실제로
+    # `checked` dedup 경로를 탄다. 관찰을 빼면 `moved`가 비어 조기 반환하므로
+    # 아래 단언이 dedup을 전혀 검증하지 못한다 (PR #114 round 2).
     _git(repo, "checkout", "-q", "feat/current")
+    assert _run(monkeypatch, repo) == 0
     _git(repo, "checkout", "-q", "old/feat")
     assert _run(monkeypatch, repo) == 0  # checked dedup
 
@@ -457,7 +484,7 @@ def test_dual_violation_reports_once_with_both_reasons(monkeypatch, capsys, tmp_
     _commit(repo, "totally wrong subject on main")
     assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
     err = capsys.readouterr().err
-    assert "Recover with EXACTLY" in err  # 브랜치 위반
+    assert "recover with EXACTLY" in err  # 브랜치 위반
     assert "Conventional Commits" in err  # 헤더 위반
     assert err.count("[commit-backstop]") == 2  # 보고문 2절, 출력·exit는 1회
 
