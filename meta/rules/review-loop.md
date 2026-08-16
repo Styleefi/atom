@@ -65,8 +65,9 @@ loop, never the owner.
   trigger-(a) comparisons use the corrected number. (Measured: PR #86
   round 4 nearly added guard code against CI-disabling conditionals — a
   state no accident produces.)
-- Raising the bar (adding a class) needs only a ledger entry through the
-  second completed pass; from the third on it requires owner approval. A
+- Raising the bar (adding a class) needs only a ledger entry through
+  round 2 (an interrupted pass does not consume a round); from round 3 on
+  it requires owner approval. A
   serious finding matching no class is handled by adding its class, under
   the same approval requirement; a raise pending owner decision blocks
   the exit observation as an unresolved case. On every raise,
