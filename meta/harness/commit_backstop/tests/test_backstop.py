@@ -350,6 +350,78 @@ def test_merge_commit_subject_is_exempt(monkeypatch, capsys, tmp_path):
     assert capsys.readouterr().err == ""
 
 
+def test_custom_subject_merge_commit_is_exempt(monkeypatch, capsys, tmp_path):
+    # merge 면제는 제목 접두사가 아니라 부모 수(--no-merges)로 이뤄진다. 기본
+    # 제목("Merge ...")만 검증하면 접두사 구현으로 바꿔도 통과하므로, 규격을
+    # 어긴 커스텀 제목으로 메커니즘을 고정한다 (#64 finding 1, PR #114 round 1).
+    repo = _baseline(monkeypatch, tmp_path)
+    _git(repo, "checkout", "-q", "-b", "feat/side")
+    _commit(repo, "feat: side work")
+    _git(repo, "checkout", "-q", "-b", "feat/x", "main")
+    _commit(repo, "feat: local work")
+    assert _run(monkeypatch, repo) == 0
+    _git(repo, "merge", "-q", "--no-ff", "-m", "THIS Merge subject breaks.", "feat/side")
+    assert _run(monkeypatch, repo) == 0
+    assert capsys.readouterr().err == ""
+
+
+def test_merge_tip_is_not_the_advised_amend_target(monkeypatch, capsys, tmp_path):
+    # tip이 merge면 보고 목록에 없다 — 위치("the tip") 대신 동일성을 앵커로
+    # 삼아야 하는 이유이자, 그 지시가 엉뚱한 커밋을 가리키지 않는다는 고정.
+    repo = _baseline(monkeypatch, tmp_path)
+    _git(repo, "checkout", "-q", "-b", "feat/side")
+    _commit(repo, "feat: side work")
+    _git(repo, "checkout", "-q", "-b", "feat/x", "main")
+    assert _run(monkeypatch, repo) == 0
+    bad = _commit(repo, "Bad header here.")
+    _git(repo, "merge", "-q", "--no-ff", "-m", "feat: merge side", "feat/side")
+    merge_sha = _git(repo, "rev-parse", "HEAD")
+    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
+    err = capsys.readouterr().err
+    assert bad[:12] in err
+    assert merge_sha[:12] not in err  # HEAD는 위반 목록 밖 — amend 대상이 아니다
+    assert "git rev-parse HEAD" in err
+
+
+def test_checkout_of_unobserved_branch_reports_preexisting_commits(
+    monkeypatch, capsys, tmp_path
+):
+    # 문서화된 한계: hook이 한 번도 보지 못한 오래된 브랜치를 checkout하면 그
+    # 브랜치의 기존 비규격 커밋이 보고된다 — 이 명령이 만들지 않았어도.
+    repo = _baseline(monkeypatch, tmp_path)
+    _git(repo, "checkout", "-q", "-b", "old/feat")
+    stale = _commit(repo, "Legacy header.")  # hook 미실행 구간
+    # HEAD가 old/feat에서 갈라진 다른 브랜치에 있도록 만든다 — 되돌아오는
+    # 이동이 fast-forward가 아니어야 "재부상"이 진짜로 검증된다.
+    _git(repo, "checkout", "-q", "-b", "feat/current", "main")
+    _commit(repo, "feat: current work")
+    assert _run(monkeypatch, repo) == 0
+    capsys.readouterr()
+    _git(repo, "checkout", "-q", "old/feat")
+    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
+    err = capsys.readouterr().err
+    assert stale[:12] in err
+    assert "do NOT rewrite" in err  # 남의 커밋 재작성 금지가 이 경로의 하중
+    _git(repo, "checkout", "-q", "feat/current")
+    _git(repo, "checkout", "-q", "old/feat")
+    assert _run(monkeypatch, repo) == 0  # checked dedup
+
+
+def test_amend_to_another_bad_header_is_reported_again(monkeypatch, capsys, tmp_path):
+    # dedup 키가 SHA이므로 amend·rebase가 새 SHA를 만들면 다시 보고된다 —
+    # "한 번만 보고한다"가 논리적 커밋 단위로는 성립하지 않는 세 번째 경로.
+    repo = _baseline(monkeypatch, tmp_path)
+    _git(repo, "checkout", "-q", "-b", "feat/x")
+    first = _commit(repo, "Still bad.")
+    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
+    assert first[:12] in capsys.readouterr().err
+    _git(repo, "commit", "--amend", "--allow-empty", "-m", "Also bad.")
+    second = _git(repo, "rev-parse", "HEAD")
+    assert second != first
+    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
+    assert second[:12] in capsys.readouterr().err
+
+
 def test_git_generated_subjects_are_exempt(monkeypatch, capsys, tmp_path):
     repo = _baseline(monkeypatch, tmp_path)
     _git(repo, "checkout", "-q", "-b", "feat/x")
