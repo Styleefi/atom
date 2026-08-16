@@ -302,7 +302,9 @@ def _new_head_commits(
     return commits
 
 
-def _branch_report(branch: str, old: str, new: str, offending: list[str]) -> str:
+def _branch_report(
+    branch: str, old: str, new: str, offending: list[str], has_remote_ref: bool
+) -> str:
     """보호 브랜치 위반 보고문 — 사실 진술과 오너 라우팅뿐이다.
 
     복구 절차(rescue 브랜치 → `branch -f` → PR)는 여기서 지시하지 않고
@@ -314,15 +316,29 @@ def _branch_report(branch: str, old: str, new: str, offending: list[str]) -> str
     SHA는 상한 없이 전부 싣는다 — 판정한 커밋은 전부 `seen`에 반영되어 다시
     호명되지 않으므로, 잘라내면 오너 보고가 영구히 불완전해진다.
 
+    오탐 가능성 안내는 훅이 그것을 배제하지 못했을 때만 싣는다. 원격
+    `<branch>` ref가 존재하면 그 변명은 거짓이므로, 진짜 위반을 오너에게
+    올리는 에이전트에게 빠져나갈 구실을 쥐여주게 된다.
+
     Args:
         branch: 위반이 난 보호 브랜치명.
         old: 직전 관찰 tip.
         new: 현재 tip.
         offending: 원격에 없는 커밋 SHA 목록.
+        has_remote_ref: 이 브랜치의 원격 ref가 로컬에 존재하는지.
 
     Returns:
         stderr에 실을 보고문.
     """
+    caveat = (
+        ""
+        if has_remote_ref
+        else (
+            f" No remote '{branch}' exists here — never pushed, a differently "
+            "named default branch, or a single-branch clone — so this advance "
+            "may be legitimate; say so when you report."
+        )
+    )
     return "\n".join(
         [
             f"[commit-backstop] {len(offending)} commit(s) not present on any "
@@ -330,13 +346,10 @@ def _branch_report(branch: str, old: str, new: str, offending: list[str]) -> str
             f"{' '.join(sha[:12] for sha in offending)}",
             f"  '{branch}' moved {old} -> {new}",
             f"Do NOT rewrite or move '{branch}' yourself. Give the owner the "
-            "SHAs above in your next reply, and do not push until they decide. "
-            f"If '{branch}' has no remote counterpart here — never pushed, a "
-            "differently named default branch, or a single-branch clone — this "
-            "advance may be legitimate; say so when you report. Recovery steps, "
-            "if the owner asks for them, are in meta/rules/commit-backstop.md "
-            f"(which also carries this hook's non-claims and the "
-            f"{OVERRIDE_TOKEN} escape).",
+            "SHAs above in your next reply, and do not push until they "
+            f"decide.{caveat} Recovery steps, if the owner asks for them, are "
+            "in meta/rules/commit-backstop.md (which also carries this hook's "
+            f"non-claims and the {OVERRIDE_TOKEN} escape).",
         ]
     )
 
@@ -378,12 +391,13 @@ def _header_report(problems: list[tuple[str, str]], prescribe: bool = True) -> s
         lines.append(f"  - also ({len(problems)} total): {rest}")
     if prescribe:
         lines.append(
-            "Did the Bash command that just ran create a listed commit, and is "
-            "that commit HEAD (`git rev-parse HEAD`)? You issued the command — "
-            "read it. If both hold, fix it: `git commit --amend`. In every "
-            "other case do NOT rewrite history: give the owner these SHAs in "
-            "your next reply, and do not push this branch or open a PR until "
-            "they decide."
+            "A listed commit is yours to fix only if the Bash command that "
+            "just ran created it and it is HEAD (`git rev-parse HEAD`) — you "
+            "issued that command, so read it. Fix that one with "
+            "`git commit --amend`. Every other listed SHA stays as it is, "
+            "including one this command created that is no longer HEAD: do "
+            "NOT rewrite history — give the owner those SHAs in your next "
+            "reply, and do not push this branch or open a PR until they decide."
         )
     else:
         lines.append(
@@ -472,7 +486,10 @@ def main() -> int:
                     "is unreachable or git failed - this advance was NOT checked"
                 )
             elif offending:
-                branch_reports.append(_branch_report(branch, old, new, offending))
+                has_ref = any(ref.endswith(f"/{branch}") for ref in exclusions)
+                branch_reports.append(
+                    _branch_report(branch, old, new, offending, has_ref)
+                )
         if head_key in moved and validate_subject is not None:
             old, new = moved[head_key]
             if old is not None:

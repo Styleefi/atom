@@ -4,7 +4,8 @@
 commit_guard 테스트와 달리 git을 mock하지 않는다 — 판정이 그래프 연산이므로
 tmp_path에 실제 저장소(+bare remote)를 만들어 결정성 있게 검증한다. 설계
 불변식 — 오탐 금지(정당한 동기화·merge/자동생성 제목), 실패는 전부 통과
-방향, 1회 보고(dedup), 절대 SHA 복구 지시 — 를 케이스로 고정한다.
+방향, 통상 1회 보고(재보고 경로는 모듈 비주장 목록), 절대 SHA 사실 보고와
+오너 라우팅(복구 절차는 규칙 파일 소관) — 를 케이스로 고정한다.
 """
 
 from __future__ import annotations
@@ -127,7 +128,7 @@ def test_unpushed_branch_report_states_facts_without_surgery(
     assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
     err = capsys.readouterr().err
     assert "git branch -f" not in err
-    assert "no remote counterpart here" in err  # 오탐 가능성을 오너에게 전달
+    assert "No remote 'main' exists here" in err  # 오탐 가능성을 오너에게 전달
     assert "do not push until they decide" in err
 
 
@@ -386,6 +387,22 @@ def test_merge_commit_subject_is_exempt(monkeypatch, capsys, tmp_path):
     _git(repo, "merge", "-q", "--no-ff", "origin/main")
     assert _run(monkeypatch, repo) == 0
     assert capsys.readouterr().err == ""
+
+
+def test_two_bad_commits_from_one_command_route_the_non_head_one(
+    monkeypatch, capsys, tmp_path
+):
+    # 한 명령이 비규격 커밋을 둘 만들면 HEAD가 아닌 쪽이 두 분기 사이로
+    # 빠져나가 고쳐지지도 라우팅되지도 않았다 — `checked`에 들어가 다시는
+    # 호명되지 않으므로 조용히 push된다 (PR #114 round 5).
+    repo = _baseline(monkeypatch, tmp_path)
+    _git(repo, "checkout", "-q", "-b", "feat/x")
+    first = _commit(repo, "Bad one.")
+    second = _commit(repo, "Bad two.")
+    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
+    err = capsys.readouterr().err
+    assert first[:12] in err and second[:12] in err
+    assert "no longer HEAD" in err  # 비-HEAD 분기가 명시적으로 라우팅된다
 
 
 def test_violations_past_the_reason_limit_still_list_every_sha(
@@ -706,8 +723,14 @@ def test_moved_refs_pure_logic():
 def test_branch_report_lists_every_offending_sha(monkeypatch):
     # 앞 12자가 서로 달라야 절단을 실제로 감지한다.
     shas = [f"{i:x}" * 40 for i in range(1, 9)]
-    text = backstop._branch_report("main", "a" * 40, "b" * 40, shas)
+    text = backstop._branch_report("main", "a" * 40, "b" * 40, shas, True)
     assert "8 commit(s)" in text
     for sha in shas:
         assert sha[:12] in text  # 절단 없음 — 잘린 SHA는 다시 호명되지 않는다
     assert "git branch -f" not in text  # 절차는 규칙 파일 소관
+    # 원격 ref가 있으면 오탐 변명을 싣지 않는다 — 진짜 위반을 올리는
+    # 에이전트에게 빠져나갈 구실이 된다 (PR #114 round 5).
+    assert "may be legitimate" not in text
+    assert "may be legitimate" in backstop._branch_report(
+        "main", "a" * 40, "b" * 40, shas, False
+    )
