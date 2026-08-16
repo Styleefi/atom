@@ -26,8 +26,10 @@ text or reflog inference:
   `fixup! `, `squash! `) are exempt from the header check, matched by prefix
   regardless of who wrote them.
 
-Each violation is reported once (the evaluated tip becomes the recorded tip in
-`<git-common-dir>/atom-commit-backstop.json`). Reports carry SHAs and reasons
+Each violation is normally reported once — a protected-branch advance by its
+recorded tip, a header violation by the `checked` SHA list, both kept in
+`<git-common-dir>/atom-commit-backstop.json`; the module docstring's non-claims
+list the paths where a report repeats. Reports carry SHAs and reasons
 only — commit subjects are never echoed (prompt-injection surface). All
 failure paths are fail-open; repositories without a remote are skipped
 entirely. `ATOM_COMMIT_OVERRIDE=1` in the command suppresses evaluation for

@@ -11,7 +11,9 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
       경로 불문(직접 commit, 로컬 merge, cherry-pick, plumbing) 위반으로 보고한다.
     - HEAD에 새로 도달한 미공개(non-merge) 커밋의 제목은 Conventional Commits를
       따라야 한다. 위반은 수정 지시와 함께 보고한다.
-    - 같은 위반은 한 번만 보고한다(평가한 tip이 곧 기록 tip).
+    - 같은 위반은 보통 한 번만 보고한다 — 브랜치 위반은 기록 tip으로,
+      헤더 위반은 `checked` SHA 목록으로 중복을 제거한다. 재보고가 일어나는
+      경로는 아래 비주장 목록에 있다.
 
 주장하지 않는 것 (v1 설계상 수용한 한계):
     - remote가 없는 저장소는 전체 스킵한다(PR이 불가능한 스크래치/로컬 전용
@@ -24,16 +26,22 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     - payload cwd 밖 저장소(`git -C`, 서브모듈→부모)는 cwd가 그 저장소로
       돌아온 뒤에야 지연 적발된다.
     - ref를 처음 관찰한 시점 이전의 커밋은 판정하지 않는다(기록만).
-    - 오래된 미push 브랜치를 checkout하면 그 브랜치에 이미 있던 비규격
-      커밋이 헤더 보고를 유발한다 — 이 명령이 만든 커밋이 아니어도.
-      수용한 트레이드오프이며(#52, PR #54: checked dedup으로 ts 필터 대체)
-      보통은 `checked` 목록이 재방문 시 중복 제거하지만, CHECKED_CAP을
-      넘겨 밀려나거나 상태 쓰기가 실패하면 다시 보고될 수 있다.
+    - 오래된 미push 커밋이 HEAD로 들어오면(checkout·merge·rebase·cherry-pick
+      불문) 그 커밋이 헤더 보고를 유발한다 — 이 명령이 만든 커밋이 아니어도.
+      수용한 트레이드오프다(#52, PR #54: checked dedup으로 ts 필터 대체).
+      보고문은 작성 시점을 판정하지 않고 HEAD 동일성만 근거로 삼는다.
+    - 헤더 위반의 1회성은 `checked`(SHA 목록)에만 의존하므로 세 경로로
+      다시 보고된다. CHECKED_CAP을 넘겨 밀려났을 때, 상태 쓰기가 실패했을
+      때, 그리고 rebase·amend로 같은 논리적 커밋이 새 SHA를 얻었을 때.
+    - 한 보고에 나열하는 SHA는 REPORT_SHA_LIMIT개까지지만 판정한 커밋은
+      전부 `checked`에 기록되므로, 잘려 나간 SHA는 다시 보고되지 않는다
+      (보고문이 주는 평가 구간 명령으로 직접 열거해야 한다).
     - remote-tracking ref를 만들지 않는 `git pull <URL>`은 오탐할 수 있다.
     - 로컬 브랜치가 비표준 원격명(예: origin/trunk)을 추적하는 구성은
       고려하지 않는다.
-    - merge 커밋과 git 자동 생성 제목(`Revert "`, `fixup! `, `squash! `)은
-      헤더 검사에서 면제한다.
+    - merge 커밋은 부모 수로 걸러져(`--no-merges`) 제목을 읽지 않는다.
+      이와 별개로 git 자동 생성 제목 3종(`Revert "`, `fixup! `, `squash! `)은
+      접두사 매칭으로 헤더 검사에서 면제한다 — 누가 썼는지는 보지 않는다.
 
 보고 채널:
     stderr는 exit 42(래퍼가 2로 되매핑)일 때만 모델 컨텍스트에 주입된다.
