@@ -10,7 +10,7 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
       전진할 수 있다. `<직전>..<현재>` 중 원격 main/master에 없는 커밋이 있으면
       경로 불문(직접 commit, 로컬 merge, cherry-pick, plumbing) 위반으로 보고한다.
     - HEAD에 새로 도달한 미공개(non-merge) 커밋의 제목은 Conventional Commits를
-      따라야 한다. 위반은 amend 지시와 함께 보고한다.
+      따라야 한다. 위반은 수정 지시와 함께 보고한다.
     - 같은 위반은 한 번만 보고한다(평가한 tip이 곧 기록 tip).
 
 주장하지 않는 것 (v1 설계상 수용한 한계):
@@ -24,6 +24,11 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     - payload cwd 밖 저장소(`git -C`, 서브모듈→부모)는 cwd가 그 저장소로
       돌아온 뒤에야 지연 적발된다.
     - ref를 처음 관찰한 시점 이전의 커밋은 판정하지 않는다(기록만).
+    - 오래된 미push 브랜치를 checkout하면 그 브랜치에 이미 있던 비규격
+      커밋이 헤더 보고를 유발한다 — 이 명령이 만든 커밋이 아니어도.
+      수용한 트레이드오프이며(#52, PR #54: checked dedup으로 ts 필터 대체)
+      보통은 `checked` 목록이 재방문 시 중복 제거하지만, CHECKED_CAP을
+      넘겨 밀려나거나 상태 쓰기가 실패하면 다시 보고될 수 있다.
     - remote-tracking ref를 만들지 않는 `git pull <URL>`은 오탐할 수 있다.
     - 로컬 브랜치가 비표준 원격명(예: origin/trunk)을 추적하는 구성은
       고려하지 않는다.
@@ -297,8 +302,7 @@ def _branch_report(branch: str, old: str, new: str, offending: list[str]) -> str
             f"     (fails because '{branch}' is checked out in another worktree? "
             f"run `git reset --keep {old}` in that worktree)",
             "  3. Continue on the rescue branch and merge via PR.",
-            "See the commit-discipline rule (meta/rules/commit-discipline.md). "
-            f"Deliberate exception? re-run prefixed with: {OVERRIDE_TOKEN}",
+            "See the commit-discipline rule (meta/rules/commit-discipline.md).",
         ]
     )
 
@@ -314,9 +318,13 @@ def _header_report(problems: list[tuple[str, str]]) -> str:
     if len(problems) > REPORT_SHA_LIMIT:
         lines.append(f"  - ... ({len(problems)} total)")
     lines.append(
-        "Fix the latest commit with `git commit --amend`; rewrite older ones "
-        "before pushing. See meta/rules/commit-discipline.md. "
-        f"Deliberate exception? re-run prefixed with: {OVERRIDE_TOKEN}"
+        "Commits you authored in this session: fix the tip with "
+        "`git commit --amend`, rebase earlier ones before pushing. "
+        "Commits that were already on the branch (surfaced by a checkout, or "
+        "detected late from another directory): do NOT rewrite them — report "
+        "the SHAs to the owner and continue. "
+        "Unsure which is which? `git log -1 --format=%cI <sha>`. "
+        "See meta/rules/commit-discipline.md."
     )
     return "\n".join(lines)
 
