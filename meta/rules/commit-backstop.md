@@ -25,7 +25,10 @@ text or reflog inference:
   Conventional Commits header; violations are reported with advice that
   prescribes only what it can verify — amend a listed commit when the command
   that just ran created it and it is `HEAD`, otherwise leave history alone,
-  hand the SHAs to the owner and hold off pushing. Merge commits are excluded
+  hand the SHAs to the owner and hold off pushing. When a protected-branch
+  report accompanies it the amend clause is dropped and this lane routes only,
+  so one stderr block never carries two history-rewriting instructions.
+  Merge commits are excluded
   structurally (`--no-merges` filters by parent count before any subject is
   read); separately, three subject prefixes git generates (`Revert "`,
   `fixup! `, `squash! `) are exempt from the header check, matched by prefix
@@ -45,12 +48,16 @@ protection.
 
 ## Recovering a protected branch (owner decides; the agent does not)
 
-First rule out the false positives, because in each of them the advance is
-legitimate and rewinding destroys work: the branch was never pushed, the
-remote's default branch has another name, the clone is `--single-branch` or
-was pruned so no remote ref is present locally, or the advance came from
-`git pull <URL>`. When one applies, nothing needs recovering — prefix the next
-advancing command with `ATOM_COMMIT_OVERRIDE=1` if the reports are noise.
+First rule out the false positives, because rewinding a legitimate advance
+destroys work. Three make the advance legitimate: the remote's default branch
+has another name, the clone is `--single-branch` or was pruned so no remote ref
+is present locally, or the advance came from `git pull <URL>`. When one
+applies, nothing needs recovering — prefix the next advancing command with
+`ATOM_COMMIT_OVERRIDE=1` if the reports are noise.
+
+A branch that has simply never been pushed is not in that set: the hook
+detects that state deliberately (see the module's non-claims), so commits that
+landed on it still need the owner's judgement.
 
 Otherwise, using the SHAs from the report:
 
@@ -60,5 +67,7 @@ Otherwise, using the SHAs from the report:
 2. `git branch -f <branch> <previous tip>`. If that fails with `cannot force
    update ... used by worktree at <path>`, and `<path>` is the current
    directory, step 1 was skipped — go back to it; if `<path>` is another
-   worktree, run `git reset --keep <previous tip>` there.
-3. Continue on the rescue branch and merge via PR.
+   worktree, run `git reset --keep <previous tip>` there. Older git says
+   `Cannot force update the current branch.` for that first case.
+3. `git switch <type/short-description>` unless step 1 already left you there,
+   then continue on the rescue branch and merge via PR.

@@ -316,11 +316,12 @@ def _branch_report(
     SHA는 상한 없이 전부 싣는다 — 판정한 커밋은 전부 `seen`에 반영되어 다시
     호명되지 않으므로, 잘라내면 오너 보고가 영구히 불완전해진다.
 
-    오탐 가능성 안내는 원격 ref 부재 오탐 하나만 다루며, 훅이 그것을 배제하지
-    못했을 때만 싣는다. ref가 존재하면 그 시나리오만은 거짓이므로, 싣는 것은
-    위반을 오너에게 올리는 에이전트에게 빠져나갈 구실을 쥐여주는 일이 된다.
-    문서화된 나머지 오탐(`git pull <URL>`, 비표준 원격명)은 ref가 있어도
-    성립할 수 있고 이 안내의 대상이 아니다 — 비주장 목록의 범위 경계 참조.
+    원격 ref 부재는 사실로만 알린다 — 정당성 판정은 하지 않는다. 그 상태의
+    원인 중 부트스트랩(아직 push 안 함)은 이 모듈이 의도적으로 적발하는
+    대상이라(비주장 목록 참조), 정당할 수 있다고 말하면 진짜 위반을 노이즈로
+    라벨링하게 된다. ref가 존재하면 이 사실 자체가 성립하지 않으므로 싣지
+    않는다. 문서화된 나머지 오탐(`git pull <URL>`, 비표준 원격명)은 ref가
+    있어도 성립할 수 있고 이 안내의 대상이 아니다.
 
     Args:
         branch: 위반이 난 보호 브랜치명.
@@ -336,9 +337,8 @@ def _branch_report(
         ""
         if has_remote_ref
         else (
-            f" No remote '{branch}' exists here — never pushed, a differently "
-            "named default branch, or a single-branch clone — so this advance "
-            "may be legitimate; say so when you report."
+            f" No remote '{branch}' exists here, so nothing could be excluded "
+            "and every advance is reported; include that when you report."
         )
     )
     return "\n".join(
