@@ -18,11 +18,13 @@ invocations from command text before execution and
 
 Its claim is deliberately narrow (#52): text inference cannot decide shell
 semantics, so its known detection gaps are **frozen, not fixed** — exact
-detection after execution is the commit-backstop rule's job. Of the
-seven-issue family tabled in #52 (#30 #44 #45 #47 #49 #50 #51), six
-(#30 #44 #47 #49 #50 #51) remain as frozen gaps, all equally the backstop's
-to catch after execution; the seventh, #45, was closed by deleting the regex
-fallback that caused it (its detection gap absorbed by the backstop). All
+detection after execution is the commit-backstop rule's job, and only
+within that hook's own non-claims (its module docstring is the SSOT for
+them). All seven issues of the family tabled in #52 (#30 #44 #45 #47 #49
+#50 #51) closed with it: six left their gap frozen for the backstop to
+catch afterwards — #47 for the shared branch ref only, as #64 scoped it —
+while #45 had its cause, the regex fallback, deleted, and the detection gap
+that deletion opened is absorbed the same way. All
 failure paths are fail-open (never block unrelated Bash), and
 every block message includes the `ATOM_COMMIT_OVERRIDE=1` re-run escape for
 deliberate exceptions. Non-mechanical guidance (semantic units, branch naming,
