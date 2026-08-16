@@ -17,9 +17,13 @@ invocations from command text before execution and
   whitelist, no uppercase start, no trailing period, subject ≤ 50 chars).
 
 Its claim is deliberately narrow (#52): text inference cannot decide shell
-semantics, so its known detection gaps (#30 #44 #49 #50 #51 classes) are
-**frozen, not fixed** — exact detection after execution is the commit-backstop
-rule's job. All failure paths are fail-open (never block unrelated Bash), and
+semantics, so its known detection gaps are **frozen, not fixed** — exact
+detection after execution is the commit-backstop rule's job. Of the
+seven-issue family tabled in #52 (#30 #44 #45 #47 #49 #50 #51), six
+(#30 #44 #47 #49 #50 #51) remain as frozen gaps, all equally the backstop's
+to catch after execution; the seventh, #45, was closed by deleting the regex
+fallback that caused it (its detection gap absorbed by the backstop). All
+failure paths are fail-open (never block unrelated Bash), and
 every block message includes the `ATOM_COMMIT_OVERRIDE=1` re-run escape for
 deliberate exceptions. Non-mechanical guidance (semantic units, branch naming,
 PR-only merges, no pushes to main) lives in the commit-discipline rule.
