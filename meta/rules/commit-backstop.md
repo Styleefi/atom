@@ -18,9 +18,12 @@ text or reflog inference:
   merge of a (pushed or unpushed) branch, cherry-pick, plumbing — is reported
   with ordered, absolute-SHA recovery steps.
 - New unpublished non-merge commits reachable from `HEAD` must satisfy the
-  Conventional Commits header; violations are reported with an amend
-  instruction. Git-generated subjects (`Merge`, `Revert "`, `fixup! `,
-  `squash! `) are exempt.
+  Conventional Commits header; violations are reported with fix steps that
+  distinguish commits authored in this session from pre-existing ones.
+  Merge commits are excluded structurally (`--no-merges` filters by parent
+  count before any subject is read); separately, three git-generated subject
+  prefixes (`Revert "`, `fixup! `, `squash! `) are exempt from the header
+  check.
 
 Each violation is reported once (the evaluated tip becomes the recorded tip in
 `<git-common-dir>/atom-commit-backstop.json`). Reports carry SHAs and reasons
