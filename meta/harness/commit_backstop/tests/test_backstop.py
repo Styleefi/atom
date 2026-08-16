@@ -728,8 +728,9 @@ def test_branch_report_lists_every_offending_sha(monkeypatch):
     for sha in shas:
         assert sha[:12] in text  # 절단 없음 — 잘린 SHA는 다시 호명되지 않는다
     assert "git branch -f" not in text  # 절차는 규칙 파일 소관
-    # 원격 ref가 있으면 오탐 변명을 싣지 않는다 — 진짜 위반을 올리는
-    # 에이전트에게 빠져나갈 구실이 된다 (PR #114 round 5).
+    # 원격 ref가 있으면 ref-부재 오탐 안내를 싣지 않는다 — 그 시나리오만은
+    # 거짓이라 위반을 올리는 에이전트에게 빠져나갈 구실이 된다 (PR #114
+    # round 5; 다른 두 오탐은 ref 존재와 무관 — 모듈 비주장 참조).
     assert "may be legitimate" not in text
     assert "may be legitimate" in backstop._branch_report(
         "main", "a" * 40, "b" * 40, shas, False
