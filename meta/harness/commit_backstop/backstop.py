@@ -54,7 +54,8 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     - 위반 없이 상태 쓰기만 실패하면 침묵한다. 매 호출 알리면 항시 노이즈가
       되므로 판정이 억제된 순간에만 알린다.
     - 상태 파일이 있는데 쓸 수 있는 기준선을 못 내주면(읽기 실패·손상) `_load_state`가
-      최초 실행을 돌려주므로, 그동안 훅은 적발하지 않는다. stderr로 알리고, 원장에는
+      최초 실행을 돌려주므로, 그동안 훅은 적발하지 않고 그 구간은 이후에도
+      판정되지 않는다. stderr로 알리고, 원장에는
       상태를 다시 쓰는 데 성공한 호출에서만 남긴다. 다시 쓰지 못하는 동안은 중복
       제거가 불가능해 같은 줄이 쌓이므로 원장에 쓰지 않는다 — 선언된 경계다
       (#119 오너 결정).
@@ -96,7 +97,7 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     `.git`을 못 쓰게 되는 실패에서도 살아남는 흔적이다. `degraded`의 사유 어휘는
     DEGRADED_REASONS가 보유하며 두 갈래로 나뉜다 — 판정을 내고도 집행하지 못한
     경우와, 평가 자체를 수행하지 못해 판정이 없는 경우. 뒤쪽을 억제된 위반으로
-    세면 관측하려는 수치가 부풀려진다(사유별 서술은 규칙 파일이 보유한다).
+    세면 관측하려는 수치가 부풀려진다.
     원장의 `block`·`override` 줄은 **Bash 명령 원문을 그대로 담는다**(위 비에코
     방침은 stderr 채널에 대한 것이다). `degraded` 줄은 명령을 싣지 않는다.
 
@@ -685,7 +686,7 @@ def main() -> int:
         # 다시 쓰는 데 성공해 반복이 묶일 때만 남긴다.
         warnings.append(
             f"[commit-backstop] {state_path} exists but yielded no usable "
-            "baseline - nothing was judged on this call"
+            "baseline - nothing was judged, and the rebuild does not revisit it"
         )
         if persisted:
             _log(
