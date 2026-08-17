@@ -56,10 +56,16 @@ While a verdict is held the model sees nothing, so a push that lands in that
 window puts the commits on the remote and dissolves the verdict — the same
 layer the commit+push non-claim already delegates to server-side protection.
 
-Every block, override pass and held verdict appends one line to the user-level
-ledger at `${XDG_STATE_HOME:-~/.local/state}/atom/guard-blocklog.jsonl` (#76).
-For the held verdicts that ledger is the point: it lives outside the git
-directory, so it is the one trace that survives the very failure it records.
+Every block, override pass, held verdict and skipped evaluation appends a line
+to the user-level ledger at
+`${XDG_STATE_HOME:-~/.local/state}/atom/guard-blocklog.jsonl` (#76). The last
+two share `event: "degraded"` and are told apart by `reason`:
+`state-unwritable` is a verdict that was produced and not enforced, while
+`branch-eval-failed` and `head-eval-failed` mean no verdict was reached at all —
+counting those as suppressed violations inflates exactly the number this
+recording exists to observe. For the held verdicts the ledger is the point: it
+lives outside the git directory, so it is the one trace that survives the very
+failure it records.
 Recording is **best-effort** — write failures are swallowed fail-open, so the
 absence of a line is not evidence that nothing happened. The ledger stores raw
 command text, which includes commit messages: whatever reads it treats the

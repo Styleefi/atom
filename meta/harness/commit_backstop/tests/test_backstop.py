@@ -886,6 +886,7 @@ def test_ledger_records_evaluation_failures_in_both_lanes(
     monkeypatch.setattr(backstop.subprocess, "run", flaky)
     assert _run(monkeypatch, repo) == 1
     entries = _ledger_entries(tmp_path)
+    assert len(entries) == 2  # 한 호출이 한 줄이라는 뜻이 아니다 — lane마다 남는다
     assert {e["reason"] for e in entries} == {
         "branch-eval-failed",
         "head-eval-failed",
