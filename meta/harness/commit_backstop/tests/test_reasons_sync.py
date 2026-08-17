@@ -26,8 +26,19 @@ RULE_PATH = (
 def test_rule_degraded_reasons_match_the_constant() -> None:
     """규칙 파일의 사유 열거가 DEGRADED_REASONS와 집합으로 일치해야 한다."""
     text = RULE_PATH.read_text(encoding="utf-8")
-    matches = re.findall(r"`degraded` reasons: ([^.]+)\.", text)
+    matches = re.findall(r"`degraded` reasons:\s*([^.]+)\.", text)
     # 문구 개편으로 행이 사라지거나 늘면 공허 통과 대신 여기서 실패한다.
     assert len(matches) == 1, f"'`degraded` reasons:' 행이 정확히 1개여야 함: {len(matches)}개"
     parsed = {token.strip().strip("`") for token in matches[0].split(",")}
     assert parsed == set(backstop.DEGRADED_REASONS)
+
+
+def test_module_docstring_does_not_copy_the_reason_names() -> None:
+    """모듈 docstring은 사유 이름을 복제하지 않는다.
+
+    어휘의 사본은 상수와 규칙 파일 둘뿐이고 둘은 위 테스트가 결속한다. 세 번째
+    사본이 생기면 결속 밖에서 조용히 낡으므로, 복제를 관례가 아니라 여기서 막는다.
+    """
+    doc = backstop.__doc__ or ""
+    for reason in backstop.DEGRADED_REASONS:
+        assert reason not in doc, f"docstring이 사유 이름을 복제한다: {reason}"

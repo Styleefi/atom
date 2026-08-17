@@ -52,14 +52,16 @@ hook does not enforce: the verdict is held on the log channel (exit 1, not
 injected) instead of blocking, and fires normally once the file becomes
 writable again. Enforcing without the ability to deduplicate would repeat the
 same report on every following Bash call, including unrelated ones (#115).
-While a verdict is held the model sees nothing, so pushing the branch that
-carries the commits dissolves the verdict permanently. For a protected-branch
-verdict that is the layer server-side branch protection covers, as the
-commit+push non-claim already delegates (approved plan, 2026-08-17). For a
-header verdict it is not: holding it across the push would mean remembering it,
-and the memory that failed is the state file itself, while no server-side layer
-checks Conventional Commits headers. That one is a boundary declared and
-accepted in PR #118 rather than a defect to repair.
+While a verdict is held the model sees nothing, so a push can dissolve it
+permanently — which push depends on the lane. A protected-branch verdict is
+excluded only by remote `main`/`master`, so it takes a push there, and that is
+the layer server-side branch protection covers, as the commit+push non-claim
+already delegates (approved plan, 2026-08-17). A header verdict is excluded by
+`--not --remotes`, so pushing the branch that carries the commits dissolves it.
+Holding that one across the push would mean remembering it, and the memory that
+failed is the state file itself, while no server-side layer checks Conventional
+Commits headers — a boundary declared and accepted in PR #118 rather than a
+defect to repair.
 
 Blocks, override passes and degraded outcomes are appended to the user-level
 ledger at `${XDG_STATE_HOME:-~/.local/state}/atom/guard-blocklog.jsonl` (#76).
