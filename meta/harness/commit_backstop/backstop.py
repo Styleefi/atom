@@ -50,6 +50,9 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     - 상태 파일을 **읽을 수 없으면**(경로가 디렉터리 등) `_load_state`가 최초
       실행을 돌려주므로 훅은 영구히 기록만 하고 아무것도 적발하지 않는다. 이
       퇴화는 조용하며 이 모듈이 해결하지 않는다.
+    - 평가에 실패한 구간(git 오류·timeout, 직전 tip 소멸)은 두 lane 모두 tip을
+      그대로 전진시키므로 다시 검사되지 않는다. 경고만 남는다 — 붙들고 재시도하면
+      영구 실패에서 매 호출 같은 실패를 반복해 훅이 세션을 마비시킨다.
     - 위반 사유는 REPORT_SHA_LIMIT개까지만 붙인다. SHA는 전부 싣지만(잘라내면
       `checked`에 기록된 나머지가 다시는 호명되지 않는다) 위반이 많은
       브랜치에서는 그만큼 stderr가 길어진다.
@@ -564,6 +567,14 @@ def main() -> int:
                         # 동반 발화 시 헤더 레인은 라우팅만 한다 — 근거는
                         # _header_report docstring.
                         header = _header_report(problems, not branch_reports)
+                else:
+                    # 브랜치 레인과 같은 형식으로 알린다. 이 레인만 침묵하면
+                    # 검사되지 않은 전진이 아무 흔적도 남기지 않는다.
+                    warnings.append(
+                        "[commit-backstop] HEAD advanced but the previous tip "
+                        "is unreachable or git failed - the header check was "
+                        "NOT run for this advance"
+                    )
 
     seen = dict(state["seen"])
     seen.update({key: new for key, (_, new) in moved.items()})

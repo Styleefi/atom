@@ -686,6 +686,23 @@ def test_rev_list_timeout_warns_log_only(monkeypatch, capsys, tmp_path):
     assert "NOT checked" in capsys.readouterr().err
 
 
+def test_head_evaluation_failure_warns_log_only(monkeypatch, capsys, tmp_path):
+    repo = _baseline(monkeypatch, tmp_path)
+    _git(repo, "checkout", "-q", "-b", "feat/x")
+    _commit(repo, "Bad header.")
+    real_run = subprocess.run
+
+    def flaky(argv, **kwargs):
+        # `--no-merges`는 _new_head_commits에만 있다 — 헤더 레인만 실패시킨다.
+        if "--no-merges" in argv:
+            raise subprocess.TimeoutExpired(argv, backstop.GIT_TIMEOUT_SECONDS)
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(backstop.subprocess, "run", flaky)
+    assert _run(monkeypatch, repo) == 1
+    assert "header check was NOT run" in capsys.readouterr().err
+
+
 def test_git_remote_failure_fails_open(monkeypatch, capsys, tmp_path):
     repo = _baseline(monkeypatch, tmp_path)
     _commit(repo, "feat: on main")
