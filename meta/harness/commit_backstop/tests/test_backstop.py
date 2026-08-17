@@ -67,15 +67,27 @@ def _make_repo(tmp_path, name="repo", branch="main", with_remote=True):
     return repo
 
 
-def _run(monkeypatch, repo, command="true") -> int:
+def _run(monkeypatch, repo, command="true", session_id=None) -> int:
     """PostToolUse payload를 stdin으로 넣고 main()을 실행한다."""
     payload = {
         "tool_name": "Bash",
         "tool_input": {"command": command},
         "cwd": str(repo),
     }
+    if session_id is not None:
+        payload["session_id"] = session_id
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
     return backstop.main()
+
+
+def _ledger_entries(tmp_path) -> list[dict]:
+    """격리된 원장(conftest가 tmp_path로 돌린다)의 줄을 파싱한다."""
+    path = tmp_path / "state" / "atom" / "guard-blocklog.jsonl"
+    if not path.exists():
+        return []
+    return [
+        json.loads(line) for line in path.read_text().splitlines() if line.strip()
+    ]
 
 
 def _baseline(monkeypatch, tmp_path, **kwargs):
@@ -90,6 +102,36 @@ def _baseline(monkeypatch, tmp_path, **kwargs):
 
 def _state_path(repo) -> str:
     return os.path.join(str(repo), ".git", backstop.STATE_FILENAME)
+
+
+def _read_state(repo) -> dict:
+    """상태 파일을 읽어 돌려준다."""
+    with open(_state_path(repo), encoding="utf-8") as fp:
+        return json.load(fp)
+
+
+def _write_state(repo, state: dict) -> None:
+    """상태 파일을 덮어쓴다 (평가 실패 유도용)."""
+    with open(_state_path(repo), "w", encoding="utf-8") as fp:
+        json.dump(state, fp)
+
+
+class _BreakReplace:
+    """`os.replace`를 토글로 실패시킨다 — 지속 실패와 복구를 한 테스트에 담는다.
+
+    `monkeypatch.undo()`는 그 시점까지의 모든 setattr를 함께 되돌리므로 중간
+    복구에 쓸 수 없다. `_store_state`는 `OSError`만 잡으므로 그 하위 타입을
+    던진다 — 다른 예외면 `main()` 밖으로 새어 의도한 경로를 태우지 못한다.
+    """
+
+    def __init__(self) -> None:
+        self.broken = True
+        self._real = os.replace
+
+    def __call__(self, src, dst, **kwargs):
+        if self.broken:
+            raise PermissionError(13, "state write blocked by test")
+        return self._real(src, dst, **kwargs)
 
 
 # --- 보호 브랜치 판정 --------------------------------------------------------
@@ -656,11 +698,265 @@ def test_rev_list_timeout_warns_log_only(monkeypatch, capsys, tmp_path):
     assert "NOT checked" in capsys.readouterr().err
 
 
+def test_head_evaluation_failure_warns_log_only(monkeypatch, capsys, tmp_path):
+    repo = _baseline(monkeypatch, tmp_path)
+    _git(repo, "checkout", "-q", "-b", "feat/x")
+    _commit(repo, "Bad header.")
+    real_run = subprocess.run
+
+    def flaky(argv, **kwargs):
+        # `--no-merges`는 _new_head_commits에만 있다 — 헤더 레인만 실패시킨다.
+        if "--no-merges" in argv:
+            raise subprocess.TimeoutExpired(argv, backstop.GIT_TIMEOUT_SECONDS)
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(backstop.subprocess, "run", flaky)
+    assert _run(monkeypatch, repo) == 1
+    assert "header check was NOT run" in capsys.readouterr().err
+
+
 def test_git_remote_failure_fails_open(monkeypatch, capsys, tmp_path):
     repo = _baseline(monkeypatch, tmp_path)
     _commit(repo, "feat: on main")
     monkeypatch.setattr(backstop, "_remote_names", lambda cwd: None)
     assert _run(monkeypatch, repo) == 1  # 스킵 (비차단)
+
+
+# --- 지속 실패 시 강등 (#115) -------------------------------------------------
+
+
+def test_failed_state_write_downgrades_and_never_repeats_into_the_model(
+    monkeypatch, capsys, tmp_path
+):
+    # #115가 재현한 것은 단발이 아니라 반복이다 — run 1/2/3이 전부 42였다.
+    repo = _baseline(monkeypatch, tmp_path)
+    before = _read_state(repo)
+    _commit(repo, "feat: on main")
+    monkeypatch.setattr(backstop.os, "replace", _BreakReplace())
+    outputs = []
+    for _ in range(3):
+        assert _run(monkeypatch, repo) == 1  # 42가 아니다 — 집행하지 않는다
+        outputs.append(capsys.readouterr().err)
+    assert all("state could not be persisted" in err for err in outputs)
+    assert all("not present on any remote 'main'" in err for err in outputs)
+    assert len(set(outputs)) == 1  # 판정은 그대로, 채널만 강등
+    assert _read_state(repo)["seen"] == before["seen"]  # 워터마크 불변
+
+
+def test_verdict_fires_at_exit_block_once_persistence_recovers(
+    monkeypatch, capsys, tmp_path
+):
+    repo = _baseline(monkeypatch, tmp_path)
+    breaker = _BreakReplace()
+    monkeypatch.setattr(backstop.os, "replace", breaker)
+    sha = _commit(repo, "feat: on main")
+    assert _run(monkeypatch, repo) == 1
+    capsys.readouterr()
+    breaker.broken = False
+    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK  # 계류하던 판정이 발화
+    err = capsys.readouterr().err
+    assert sha[:12] in err
+    assert "state could not be persisted" not in err
+    assert _run(monkeypatch, repo) == 0  # 이제 1회 보고가 보증된다
+
+
+def test_degraded_output_carries_both_the_report_and_the_warning(
+    monkeypatch, capsys, tmp_path
+):
+    repo = _baseline(monkeypatch, tmp_path)
+    _git(repo, "branch", "master")  # 두 번째 보호 브랜치
+    assert _run(monkeypatch, repo) == 0  # master 최초 관찰
+    state = _read_state(repo)
+    state["seen"]["refs/heads/master"] = "0" * 40  # 평가 실패를 유도
+    _write_state(repo, state)
+    _git(repo, "checkout", "-q", "master")
+    _commit(repo, "feat: moves master")
+    _git(repo, "checkout", "-q", "main")
+    _commit(repo, "feat: on main")
+    monkeypatch.setattr(backstop.os, "replace", _BreakReplace())
+    assert _run(monkeypatch, repo) == 1
+    err = capsys.readouterr().err
+    assert "state could not be persisted" in err
+    assert "not present on any remote 'main'" in err  # 보고
+    assert "NOT checked" in err  # 경고가 보고에 삼켜지지 않는다
+
+
+def test_failed_state_write_without_a_verdict_stays_silent(
+    monkeypatch, capsys, tmp_path
+):
+    repo = _baseline(monkeypatch, tmp_path)
+    _git(repo, "checkout", "-q", "-b", "feat/x")
+    _commit(repo, "feat: fine everywhere")
+    monkeypatch.setattr(backstop.os, "replace", _BreakReplace())
+    assert _run(monkeypatch, repo) == 0  # 매 호출 알리면 항시 노이즈가 된다
+    assert capsys.readouterr().err == ""
+
+
+def test_failed_state_write_never_swallows_a_standalone_warning(
+    monkeypatch, capsys, tmp_path
+):
+    repo = _baseline(monkeypatch, tmp_path)
+    state = _read_state(repo)
+    state["seen"]["refs/heads/main"] = "0" * 40
+    _write_state(repo, state)
+    _commit(repo, "feat: moves main")
+    monkeypatch.setattr(backstop.os, "replace", _BreakReplace())
+    assert _run(monkeypatch, repo) == 1
+    err = capsys.readouterr().err
+    assert "NOT checked" in err  # 강등이 현행 경고를 삼키면 안 된다
+    assert "state could not be persisted" not in err  # 보고가 없으면 고지도 없다
+
+
+def test_override_under_a_failed_state_write_stays_silent(
+    monkeypatch, capsys, tmp_path
+):
+    repo = _baseline(monkeypatch, tmp_path)
+    _commit(repo, "feat: deliberate exception")
+    monkeypatch.setattr(backstop.os, "replace", _BreakReplace())
+    assert _run(monkeypatch, repo, command="ATOM_COMMIT_OVERRIDE=1 git commit") == 0
+    assert capsys.readouterr().err == ""
+
+
+# --- 원장 기록 (#76 확장) -----------------------------------------------------
+#
+# `_log`는 예외를 삼키므로 호출부 키워드 오타가 조용한 무기록이 된다. 호출부
+# 5곳을 각각 태우는 아래 테스트들은 선택이 아니라 그 설계의 필수 조건이다.
+
+
+def test_ledger_records_a_protected_branch_block(monkeypatch, capsys, tmp_path):
+    repo = _baseline(monkeypatch, tmp_path)
+    _commit(repo, "feat: on main")
+    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
+    entries = _ledger_entries(tmp_path)
+    assert len(entries) == 1
+    assert entries[0]["event"] == "block"
+    assert entries[0]["harness"] == "commit-backstop"
+    assert entries[0]["reason"] == "protected-branch"
+
+
+def test_ledger_records_a_header_block(monkeypatch, capsys, tmp_path):
+    repo = _baseline(monkeypatch, tmp_path)
+    _git(repo, "checkout", "-q", "-b", "feat/x")
+    _commit(repo, "Bad header.")
+    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
+    assert _ledger_entries(tmp_path)[0]["reason"] == "header"
+
+
+def test_ledger_marks_a_block_that_fired_both_lanes(monkeypatch, capsys, tmp_path):
+    repo = _baseline(monkeypatch, tmp_path)
+    _commit(repo, "totally wrong subject on main")  # 두 lane 동시 발화
+    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
+    assert _ledger_entries(tmp_path)[0]["reason"] == "protected-branch+header"
+
+
+def test_ledger_records_an_override(monkeypatch, capsys, tmp_path):
+    repo = _baseline(monkeypatch, tmp_path)
+    _commit(repo, "feat: deliberate exception")
+    assert _run(monkeypatch, repo, command="ATOM_COMMIT_OVERRIDE=1 git commit") == 0
+    entry = _ledger_entries(tmp_path)[0]
+    assert entry["event"] == "override"
+    assert entry["reason"] is None
+
+
+def test_ledger_records_a_suppressed_verdict_without_the_command(
+    monkeypatch, capsys, tmp_path
+):
+    repo = _baseline(monkeypatch, tmp_path)
+    _commit(repo, "feat: on main")
+    monkeypatch.setattr(backstop.os, "replace", _BreakReplace())
+    assert _run(monkeypatch, repo, command="cat <<'EOF' > big.py") == 1
+    entry = _ledger_entries(tmp_path)[0]
+    assert entry["event"] == "degraded"
+    assert entry["reason"] == "state-unwritable"
+    assert entry["command"] is None  # 훅 자신의 상태를 서술하는 이벤트다
+
+
+def test_ledger_records_evaluation_failures_in_both_lanes(
+    monkeypatch, capsys, tmp_path
+):
+    repo = _baseline(monkeypatch, tmp_path)
+    _commit(repo, "feat: on main")
+    real_run = subprocess.run
+
+    def flaky(argv, **kwargs):
+        if "rev-list" in argv:  # 두 lane의 평가를 함께 실패시킨다
+            raise subprocess.TimeoutExpired(argv, backstop.GIT_TIMEOUT_SECONDS)
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(backstop.subprocess, "run", flaky)
+    assert _run(monkeypatch, repo) == 1
+    entries = _ledger_entries(tmp_path)
+    assert len(entries) == 2  # 한 호출이 한 줄이라는 뜻이 아니다 — lane마다 남는다
+    assert {e["reason"] for e in entries} == {
+        "branch-eval-failed",
+        "head-eval-failed",
+    }
+    assert all(e["event"] == "degraded" for e in entries)
+    assert all(e["command"] is None for e in entries)
+
+
+def test_ledger_keeps_the_warning_that_stderr_drops(monkeypatch, capsys, tmp_path):
+    repo = _baseline(monkeypatch, tmp_path)
+    _git(repo, "branch", "master")
+    assert _run(monkeypatch, repo) == 0  # master 최초 관찰
+    state = _read_state(repo)
+    state["seen"]["refs/heads/master"] = "0" * 40
+    _write_state(repo, state)
+    _git(repo, "checkout", "-q", "master")
+    _commit(repo, "feat: moves master")
+    _git(repo, "checkout", "-q", "main")
+    _commit(repo, "feat: on main")
+    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
+    assert "NOT checked" not in capsys.readouterr().err  # stderr에서는 버려진다
+    events = [(e["event"], e["reason"]) for e in _ledger_entries(tmp_path)]
+    assert ("block", "protected-branch") in events
+    assert ("degraded", "branch-eval-failed") in events  # 흔적은 원장에 남는다
+
+
+def test_ledger_stays_empty_on_pass_and_fail_open_paths(
+    monkeypatch, capsys, tmp_path
+):
+    repo = _baseline(monkeypatch, tmp_path)
+    _git(repo, "checkout", "-q", "-b", "feat/x")
+    _commit(repo, "feat: nothing wrong here")
+    assert _run(monkeypatch, repo) == 0
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert _run(monkeypatch, empty) == 0
+    monkeypatch.setattr(sys, "stdin", io.StringIO("not json"))
+    assert backstop.main() == 1
+    assert _ledger_entries(tmp_path) == []
+
+
+def test_ledger_carries_session_id_and_cwd(monkeypatch, capsys, tmp_path):
+    repo = _baseline(monkeypatch, tmp_path)
+    _commit(repo, "feat: on main")
+    assert _run(monkeypatch, repo, session_id="sess-42") == backstop.EXIT_BLOCK
+    entry = _ledger_entries(tmp_path)[0]
+    assert entry["session_id"] == "sess-42"
+    assert entry["cwd"] == str(repo)
+
+
+def test_ledger_session_id_is_null_when_absent(monkeypatch, capsys, tmp_path):
+    repo = _baseline(monkeypatch, tmp_path)
+    _commit(repo, "feat: on main")
+    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
+    assert _ledger_entries(tmp_path)[0]["session_id"] is None
+
+
+def test_ledger_failure_never_downgrades_a_block(monkeypatch, capsys, tmp_path):
+    # _log의 존재 이유. record_block이 던지면(시그니처 드리프트 등) 예외가
+    # main() 밖으로 나가 run()이 1을 반환하고 차단이 통과로 뒤집힌다.
+    from harness.blocklog import blocklog as blocklog_module
+
+    def boom(**kwargs):
+        raise TypeError("signature drift")
+
+    monkeypatch.setattr(blocklog_module, "record_block", boom)
+    repo = _baseline(monkeypatch, tmp_path)
+    _commit(repo, "feat: on main")
+    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
+    assert _ledger_entries(tmp_path) == []
 
 
 # --- 프롤로그·환경 fail-open --------------------------------------------------

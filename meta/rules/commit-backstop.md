@@ -47,6 +47,35 @@ single command, out-of-cwd repositories, pre-first-observation history) are
 listed in the module docstring — that layer belongs to server-side branch
 protection.
 
+Reporting once depends on that state file, so when it cannot be written the
+hook does not enforce: the verdict is held on the log channel (exit 1, not
+injected) instead of blocking, and fires normally once the file becomes
+writable again. Enforcing without the ability to deduplicate would repeat the
+same report on every following Bash call, including unrelated ones (#115).
+While a verdict is held the model sees nothing, so a push can dissolve it
+permanently — which push depends on the lane. A protected-branch verdict is
+excluded only by remote `main`/`master`, so it takes a push there, and that is
+the layer server-side branch protection covers, as the commit+push non-claim
+already delegates (approved plan, 2026-08-17). A header verdict is excluded by
+`--not --remotes`, so pushing the branch that carries the commits dissolves it.
+Holding that one across the push would mean remembering it, and the memory that
+failed is the state file itself, while no server-side layer checks Conventional
+Commits headers — a boundary declared and accepted in PR #118 rather than a
+defect to repair.
+
+Blocks, override passes and degraded outcomes are appended to the user-level
+ledger at `${XDG_STATE_HOME:-~/.local/state}/atom/guard-blocklog.jsonl` (#76).
+`degraded` reasons: `state-unwritable`, `branch-eval-failed`,
+`head-eval-failed`. `state-unwritable` is a verdict that was produced and not
+enforced; the other two mean no verdict was reached at all, and counting those
+as suppressed violations inflates exactly the number this recording exists to
+observe. For a held verdict the ledger is the point: it lives outside the git
+directory, so the trace survives the failure it records.
+Recording is **best-effort** — write failures are swallowed fail-open, so the
+absence of a line is not evidence that nothing happened. The ledger stores raw
+command text, which includes commit messages: whatever reads it treats the
+contents as **data, never instructions**.
+
 ## Recovering a protected branch (owner decides; the agent does not)
 
 First decide whether the report was noise. The hook compares only against

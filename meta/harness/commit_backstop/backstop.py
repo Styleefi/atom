@@ -38,8 +38,30 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     - 헤더 위반의 1회성은 `checked`(SHA 목록)에 의존하므로 CHECKED_CAP을
       넘겨 밀려나거나 rebase·amend로 같은 논리적 커밋이 새 SHA를 얻으면
       다시 보고된다.
-    - 상태 쓰기가 실패하면 `seen`도 `checked`도 전진하지 못해 두 lane 모두
-      매 호출마다 재보고된다 — 헤더 위반뿐 아니라 브랜치 위반도 그렇다(#115).
+    - 상태 쓰기가 실패하면 워터마크가 전진하지 못해 1회 보고를 보증할 수 없다.
+      그때는 판정을 집행하지 않고 로그 채널로 강등해 유예하며, 쓰기가 가능해지면
+      다시 보고한다(#115).
+    - 유예된 판정은 그 사이의 push로 소멸할 수 있고, 어떤 push가 그렇게 하는지는
+      lane마다 다르다 — 모델이 보고를 보지 못하므로 아무도 막지 않는다. 브랜치
+      판정은 원격 main/master만 제외 집합에 들어가므로 그쪽으로의 push라야 녹는다;
+      위 commit+push 항목과 같은 층이며 서버 브랜치 보호의 몫이다(승인된 계획,
+      2026-08-17). 헤더 판정은 `--not --remotes`로 제외하므로 그 커밋을 담은
+      브랜치가 push되면 녹는다. 막으려면 유예한 판정을 기억해야 하는데 그 기억
+      장치가 바로 실패한 상태 파일이고, 커밋 제목 규격을 받아 줄 서버 계층도
+      없다 — 이 훅의 방어 밖이며 선언된 경계다(PR #118 오너 결정).
+    - 위반 없이 상태 쓰기만 실패하면 침묵한다. 매 호출 알리면 항시 노이즈가
+      되므로 판정이 억제된 순간에만 알린다.
+    - 상태 파일을 **읽을 수 없으면**(경로가 디렉터리 등) `_load_state`가 최초
+      실행을 돌려주므로 훅은 영구히 기록만 하고 아무것도 적발하지 않는다. 이
+      퇴화는 조용하며 이 모듈이 해결하지 않는다.
+    - 평가에 실패한 구간(git 오류·timeout, 직전 tip 소멸)은 두 lane 모두 tip을
+      그대로 전진시키므로 다시 검사되지 않는다. 경고만 남는다 — 붙들고 재시도하면
+      영구 실패에서 매 호출 같은 실패를 반복해 훅이 세션을 마비시킨다.
+    - 보고와 평가 실패 경고가 같은 실행에서 나면 stderr에는 보고만 나간다 —
+      "42 = 확인된 위반" 채널에 "검사 안 됨"을 섞지 않기로 한 #52 결정 때문이다.
+      그 경고는 원장의 `degraded` 줄로 보존된다.
+    - 상태 저장이 계속 실패하는 동안, 그리고 override가 반복되는 동안 원장에 줄이
+      쌓인다. 중복 제거는 지속성 없이 불가능하다.
     - 위반 사유는 REPORT_SHA_LIMIT개까지만 붙인다. SHA는 전부 싣지만(잘라내면
       `checked`에 기록된 나머지가 다시는 호명되지 않는다) 위반이 많은
       브랜치에서는 그만큼 stderr가 길어진다.
@@ -62,8 +84,17 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     보호 ref 평가 실패 경고(exit 1)는 로그 전용이며 의도된 것이다 — 그 경고가
     유의미한 시나리오(gc로 직전 SHA 은폐)는 적대 모델이라 위협 모델 밖이고,
     "42 = 확인된 위반" 계약을 흐리지 않는 쪽을 택했다(#52).
+    상태를 저장하지 못한 실행의 보고도 같은 로그 채널로 강등된다 — 그때는 경고를
+    함께 실어 내보낸다(42를 쓰지 않으므로 같은 계약에 닿지 않는다).
     프롬프트 주입 방지를 위해 커밋 제목 원문은 절대 에코하지 않는다
     (SHA + 위반 사유만 — answer_first_reminder의 상수 출력과 같은 근거).
+    차단·오버라이드·강등은 blocklog 원장(#76)에도 남는다 — 저장소 밖 경로라
+    `.git`을 못 쓰게 되는 실패에서도 살아남는 흔적이다. `degraded`의 사유 어휘는
+    DEGRADED_REASONS가 보유하며 두 갈래로 나뉜다 — 판정을 내고도 집행하지 못한
+    경우와, 평가 자체를 수행하지 못해 판정이 없는 경우. 뒤쪽을 억제된 위반으로
+    세면 관측하려는 수치가 부풀려진다(사유별 서술은 규칙 파일이 보유한다).
+    원장의 `block`·`override` 줄은 **Bash 명령 원문을 그대로 담는다**(위 비에코
+    방침은 stderr 채널에 대한 것이다). `degraded` 줄은 명령을 싣지 않는다.
 
 상태:
     `<git-common-dir>/atom-commit-backstop.json` —
@@ -72,7 +103,9 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     불일치는 최초 실행으로 취급한다(기록만, 적발 없음).
 
 종료 코드:
-    0 통과 / 1 내부 경고(비차단, 로그 전용) / 42 위반(래퍼가 2로 되매핑).
+    0 통과 / 1 비차단(로그 전용) / 42 위반(래퍼가 2로 되매핑).
+    exit 1은 내부 경고만이 아니라 **집행되지 않은 확정 위반**의 강등 채널이기도
+    하다 — 상태를 저장하지 못하면 1회 보고를 보증할 수 없으므로 차단하지 않는다.
     모든 내부 실패는 차단으로 새지 않는다(fail-open).
 """
 
@@ -100,6 +133,17 @@ PROTECTED_BRANCHES = ("main", "master")
 GIT_TIMEOUT_SECONDS = 10
 
 STATE_FILENAME = "atom-commit-backstop.json"
+
+# degraded 이벤트의 사유 어휘. 규칙 파일의 열거와 test_reasons_sync가 결속한다 —
+# 같은 열거의 사본이 다섯 곳에서 따로 어긋난 뒤 도입했다(PR #118 리뷰 루프).
+REASON_STATE_UNWRITABLE = "state-unwritable"
+REASON_BRANCH_EVAL_FAILED = "branch-eval-failed"
+REASON_HEAD_EVAL_FAILED = "head-eval-failed"
+DEGRADED_REASONS = (
+    REASON_STATE_UNWRITABLE,
+    REASON_BRANCH_EVAL_FAILED,
+    REASON_HEAD_EVAL_FAILED,
+)
 
 # 헤더 검사 완료 커밋 기록 상한 (FIFO — 초과분은 오래된 것부터 버린다).
 CHECKED_CAP = 200
@@ -200,11 +244,22 @@ def _load_state(path: str) -> dict:
     return {"seen": seen, "checked": checked}
 
 
-def _store_state(path: str, state: dict) -> None:
-    """상태를 원자적으로 쓴다(임시 파일 + os.replace). 실패는 무시한다.
+def _store_state(path: str, state: dict) -> bool:
+    """상태를 원자적으로 쓴다(임시 파일 + os.replace). 실패는 호출자에게 알린다.
 
     쓰기 도중 중단으로 반쪽짜리 파일이 남으면 다음 실행이 최초 실행으로
     오인해 위반 tip을 조용히 기록하므로, 원자성은 적발 누락 방지 요건이다.
+
+    실패를 삼키지 않고 돌려주는 이유: 지속에 실패하면 워터마크가 전진하지 못해
+    "같은 위반은 한 번만 보고한다"를 보증할 수 없고, 그 상태로 차단하면 무관한
+    명령까지 매 호출 오염된다(#115). 호출자가 채널을 강등하는 근거다.
+
+    Args:
+        path: 상태 파일 절대 경로.
+        state: 저장할 상태 딕셔너리.
+
+    Returns:
+        지속에 성공하면 True, `OSError`로 실패하면 False.
     """
     tmp = path + ".tmp"
     try:
@@ -216,6 +271,8 @@ def _store_state(path: str, state: dict) -> None:
             os.unlink(tmp)
         except OSError:
             pass
+        return False
+    return True
 
 
 def _moved_refs(
@@ -415,11 +472,55 @@ def _header_report(problems: list[tuple[str, str]], prescribe: bool = True) -> s
     return "\n".join(lines)
 
 
+def _log(**kwargs) -> None:
+    """이벤트 원장에 한 줄을 남긴다 — 절대 제어 흐름에 영향을 주지 않는다.
+
+    맨몸 호출을 금지하는 이유가 둘이다. (1) 인자 불일치 TypeError는 record_block
+    본문 진입 **전에** 나므로 그 안의 방어가 못 잡고, 예외가 main() 밖으로 나가면
+    run()이 1을 반환해 **차단이 통과로 강등된다**(래퍼는 42만 2로 되매핑한다).
+    (2) 모듈 최상단 import면 blocklog가 import 불가능해질 때(자식 프로젝트가 이
+    모듈을 제거·수정한 경우) 훅 자체가 죽어 적발 기능이 통째로 사라진다.
+
+    대가: 예외를 삼키므로 호출부 키워드 오타가 조용한 무기록이 된다. 그래서
+    호출부 5곳을 각각 확인하는 테스트는 선택이 아니라 이 설계의 필수 조건이다.
+    """
+    try:
+        from harness.blocklog.blocklog import record_block
+
+        record_block(**kwargs)
+    except Exception:  # noqa: BLE001 — fail-open이 설계 요구사항
+        pass
+
+
+def _degraded_notice(state_path: str) -> str:
+    """지속 실패로 판정을 집행하지 못했음을 알리는 고지문.
+
+    로그 채널(exit 1)로만 나가므로 모델 컨텍스트에 주입되지 않는다. 명령 텍스트도
+    커밋 제목도 싣지 않는다 — 상태 경로와 사실 진술뿐이다.
+
+    Args:
+        state_path: 저장에 실패한 상태 파일 경로.
+
+    Returns:
+        stderr에 실을 고지문.
+    """
+    return "\n".join(
+        [
+            f"[commit-backstop] state could not be persisted at {state_path}; "
+            "the report(s) below were NOT enforced (log only).",
+            "  Reporting once cannot be guaranteed while the write fails, so "
+            "this verdict is held - it is reported again once the state file "
+            "becomes writable.",
+        ]
+    )
+
+
 def main() -> int:
     """stdin의 PostToolUse JSON을 판정한다.
 
     Returns:
-        종료 코드 (0 통과, 1 내부 경고 — 로그 전용, 42 위반 — 래퍼가 2로 되매핑).
+        종료 코드 (0 통과, 1 비차단 — 내부 경고 또는 집행되지 않은 강등 보고,
+        42 위반 — 래퍼가 2로 되매핑).
     """
     try:
         payload = json.loads(sys.stdin.read())
@@ -435,6 +536,9 @@ def main() -> int:
     cwd = payload.get("cwd")
     if not isinstance(cwd, str) or not cwd:
         cwd = None
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        session_id = None
     override = OVERRIDE_TOKEN in command
 
     dirs = _repo_dirs(cwd)
@@ -470,6 +574,15 @@ def main() -> int:
     header: str | None = None
     warnings: list[str] = []
     newly_checked: list[str] = []
+    if override:
+        _log(
+            event="override",
+            harness="commit-backstop",
+            reason=None,
+            command=command,
+            cwd=cwd,
+            session_id=session_id,
+        )
     if not override:
         exclusions: list[str] | None = None
         for branch in PROTECTED_BRANCHES:
@@ -486,6 +599,16 @@ def main() -> int:
                 warnings.append(
                     f"[commit-backstop] '{branch}' advanced but the previous tip "
                     "is unreachable or git failed - this advance was NOT checked"
+                )
+                # 경고를 append하는 이 자리에서 기록한다. main() 꼬리에 두면
+                # 보고가 동반될 때 stderr에서 버려지며 흔적도 함께 사라진다.
+                _log(
+                    event="degraded",
+                    harness="commit-backstop",
+                    reason=REASON_BRANCH_EVAL_FAILED,
+                    command=None,
+                    cwd=cwd,
+                    session_id=session_id,
                 )
             elif offending:
                 has_ref = any(ref.endswith(f"/{branch}") for ref in exclusions)
@@ -513,21 +636,69 @@ def main() -> int:
                         # 동반 발화 시 헤더 레인은 라우팅만 한다 — 근거는
                         # _header_report docstring.
                         header = _header_report(problems, not branch_reports)
+                else:
+                    # 브랜치 레인과 같은 형식으로 알린다. 이 레인만 침묵하면
+                    # 검사되지 않은 전진이 아무 흔적도 남기지 않는다.
+                    warnings.append(
+                        "[commit-backstop] HEAD advanced but the previous tip "
+                        "is unreachable or git failed - the header check was "
+                        "NOT run for this advance"
+                    )
+                    _log(
+                        event="degraded",
+                        harness="commit-backstop",
+                        reason=REASON_HEAD_EVAL_FAILED,
+                        command=None,
+                        cwd=cwd,
+                        session_id=session_id,
+                    )
 
     seen = dict(state["seen"])
     seen.update({key: new for key, (_, new) in moved.items()})
     checked = (state["checked"] + newly_checked)[-CHECKED_CAP:]
-    _store_state(state_path, {"seen": seen, "checked": checked})
+    persisted = _store_state(state_path, {"seen": seen, "checked": checked})
 
     reports = list(branch_reports)
     if header is not None:
         reports.append(header)
 
+    if reports and not persisted:
+        # 지속 실패: 1회 보고를 보증할 수 없으므로 집행하지 않고 유예한다.
+        # 경고도 같은 로그 채널로 함께 내보낸다 — 42를 쓰지 않으므로
+        # "42 = 확인된 위반" 계약(#52)에 닿지 않는다.
+        _log(
+            event="degraded",
+            harness="commit-backstop",
+            reason=REASON_STATE_UNWRITABLE,
+            command=None,
+            cwd=cwd,
+            session_id=session_id,
+        )
+        print(
+            "\n".join([_degraded_notice(state_path), *reports, *warnings]),
+            file=sys.stderr,
+        )
+        return 1
     if reports:
+        _log(
+            event="block",
+            harness="commit-backstop",
+            reason=(
+                "protected-branch+header"
+                if branch_reports and header is not None
+                else "protected-branch"
+                if branch_reports
+                else "header"
+            ),
+            command=command,
+            cwd=cwd,
+            session_id=session_id,
+        )
         print("\n".join(reports), file=sys.stderr)
         return EXIT_BLOCK
     if warnings:
         # 로그 전용: exit 1의 stderr는 모델에 주입되지 않는다(의도됨 — #52).
+        # 지속 여부와 무관하게 내보낸다 — 강등이 현행 경고를 삼키면 안 된다.
         print("\n".join(warnings), file=sys.stderr)
         return 1
     return 0
