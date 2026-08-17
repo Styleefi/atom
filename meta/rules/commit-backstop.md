@@ -53,8 +53,19 @@ injected) instead of blocking, and fires normally once the file becomes
 writable again. Enforcing without the ability to deduplicate would repeat the
 same report on every following Bash call, including unrelated ones (#115).
 While a verdict is held the model sees nothing, so a push that lands in that
-window puts the commits on the remote and dissolves the verdict — the same
-layer the commit+push non-claim already delegates to server-side protection.
+window puts the commits on the remote and dissolves the verdict permanently.
+How wide that window is differs by lane. A protected-branch verdict is excluded
+only by remote `main`/`master`, so dissolving it takes a push to `main` — itself
+the violation being reported, and the layer server-side branch protection
+covers. A header verdict is excluded by `--not --remotes`, so **any** remote ref
+dissolves it: pushing a feature branch, the workflow this repo requires, and no
+server-side layer checks Conventional Commits headers. Holding a verdict across
+that push would mean remembering it, and the memory that failed is the state
+file itself — so this one is outside what the hook defends, a boundary declared
+and accepted in PR #118 rather than a defect to repair. Either way the window
+only opens where `.git` is writable and the state file is not: where `.git`
+itself cannot be written the remote-tracking ref does not update either, and the
+verdict survives.
 
 Every block, override pass, held verdict and skipped evaluation appends a line
 to the user-level ledger at
