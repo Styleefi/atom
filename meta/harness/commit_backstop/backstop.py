@@ -686,7 +686,7 @@ def main() -> int:
         # 다시 쓰는 데 성공해 반복이 묶일 때만 남긴다.
         warnings.append(
             f"[commit-backstop] {state_path} exists but yielded no usable "
-            "baseline - nothing was judged, and the rebuild does not revisit it"
+            "baseline - nothing was judged, and this gap is not revisited"
         )
         if persisted:
             _log(

@@ -24,7 +24,7 @@ RULE_PATH = (
 
 
 def test_rule_degraded_reasons_match_the_constant() -> None:
-    """규칙 파일의 사유 열거가 DEGRADED_REASONS와 집합으로 일치해야 한다."""
+    """규칙 파일의 사유 열거가 DEGRADED_REASONS와 순서까지 일치해야 한다."""
     text = RULE_PATH.read_text(encoding="utf-8")
     matches = re.findall(r"`degraded` reasons:\s*([^.]+)\.", text)
     # 문구 개편으로 행이 사라지거나 늘면 공허 통과 대신 여기서 실패한다.
@@ -33,6 +33,10 @@ def test_rule_degraded_reasons_match_the_constant() -> None:
     # 집합만 맞추면 재정렬이 그 설명을 조용히 뒤집는다.
     parsed = [token.strip().strip("`") for token in matches[0].split(",")]
     assert parsed == list(backstop.DEGRADED_REASONS)
+    # 위 단언은 두 순서를 서로 묶을 뿐이다. 규칙 파일이 "The first is…"로
+    # 위치를 지칭하므로 첫 자리가 무엇인지도 고정한다 — 상수와 규칙을 함께
+    # 재정렬하면 위 단언은 통과하고 산문만 조용히 뒤집힌다.
+    assert backstop.DEGRADED_REASONS[0] == backstop.REASON_STATE_UNWRITABLE
 
 
 def test_reason_names_appear_once_in_the_source() -> None:
