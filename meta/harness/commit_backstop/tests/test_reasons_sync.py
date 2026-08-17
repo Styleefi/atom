@@ -43,4 +43,7 @@ def test_reason_names_appear_once_in_the_source() -> None:
     """
     source = Path(backstop.__file__).read_text(encoding="utf-8")
     for reason in backstop.DEGRADED_REASONS:
-        assert source.count(reason) == 1, f"사유 이름이 복제됐다: {reason}"
+        # 토큰 경계를 요구한다 — 부분 문자열로 세면 `state-corrupt-schema` 같은
+        # 미래의 사유가 `state-corrupt`의 복제로 오탐된다.
+        hits = re.findall(rf"(?<![\w-]){re.escape(reason)}(?![\w-])", source)
+        assert len(hits) == 1, f"사유 이름이 복제됐다: {reason}"

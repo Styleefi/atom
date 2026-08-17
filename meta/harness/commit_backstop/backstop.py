@@ -55,7 +55,7 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
       되므로 판정이 억제된 순간에만 알린다.
     - 상태 파일이 있는데 쓸 수 있는 기준선을 못 내주면(읽기 실패·손상) `_load_state`가
       최초 실행을 돌려주므로, 그동안 훅은 기록만 하고 적발하지 않는다 — 마지막으로
-      기록된 tip 이후의 전진이 판정되지 않는다. stderr로는 매 호출 알리고, 원장에는
+      기록된 tip 이후의 전진이 판정되지 않는다. stderr로 알리고, 원장에는
       상태를 다시 쓰는 데 성공한 호출에서만 남긴다. 다시 쓰지 못하는 동안은 중복
       제거가 불가능해 같은 줄이 쌓이므로 원장에 쓰지 않는다 — 선언된 경계다
       (#119 오너 결정).
@@ -104,8 +104,8 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
 상태:
     `<git-common-dir>/atom-commit-backstop.json` —
     `{"seen": {ref: sha, ...}, "checked": [sha, ...]}`. HEAD는 worktree별
-    `HEAD@<git-dir>` 키. 쓰기는 임시 파일 + os.replace로 원자적. 읽지 못하거나
-    스키마가 어긋나면 빈 상태로 대체하고 그 사실을 알린다 — 비주장 목록 참고.
+    `HEAD@<git-dir>` 키. 읽지 못하거나 스키마가 어긋나면 빈 상태로 대체하고 그
+    사실을 알린다 — 비주장 목록 참고.
 
 종료 코드:
     0 통과 / 1 비차단(로그 전용) / 42 위반(래퍼가 2로 되매핑).
@@ -265,8 +265,8 @@ def _load_state(path: str) -> tuple[dict, str | None]:
 def _store_state(path: str, state: dict) -> bool:
     """상태를 원자적으로 쓴다(임시 파일 + os.replace). 실패는 호출자에게 알린다.
 
-    쓰기 도중 중단으로 반쪽짜리 파일이 남으면 다음 실행이 최초 실행으로
-    오인해 위반 tip을 조용히 기록하므로, 원자성은 적발 누락 방지 요건이다.
+    쓰기 도중 중단으로 반쪽짜리 파일이 남으면 다음 실행이 기준선을 잃으므로,
+    원자성은 그 상실을 막는 요건이다.
 
     원자성은 단일 프로세스 기준이다. 임시 파일 이름이 고정(`path + ".tmp"`)이라
     훅 프로세스가 병렬로 겹치면 서로의 임시 파일에 쓰고, 상태가 손상되거나 한쪽의
@@ -685,7 +685,7 @@ def main() -> int:
         # 채널마다 비용이 다르다. stderr는 휘발성이라 `git remote` 실패와 같은 층에서
         # 매 호출 알리고, 원장은 누적되므로 다시 쓰는 데 성공해 반복이 묶일 때만 남긴다.
         warnings.append(
-            "[commit-backstop] the state file exists but yielded no usable "
+            f"[commit-backstop] {state_path} exists but yielded no usable "
             "baseline - advances since the last recorded tip were NOT checked"
         )
         if persisted:
