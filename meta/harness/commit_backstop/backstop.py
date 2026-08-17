@@ -38,8 +38,18 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     - 헤더 위반의 1회성은 `checked`(SHA 목록)에 의존하므로 CHECKED_CAP을
       넘겨 밀려나거나 rebase·amend로 같은 논리적 커밋이 새 SHA를 얻으면
       다시 보고된다.
-    - 상태 쓰기가 실패하면 `seen`도 `checked`도 전진하지 못해 두 lane 모두
-      매 호출마다 재보고된다 — 헤더 위반뿐 아니라 브랜치 위반도 그렇다(#115).
+    - 상태 쓰기가 실패하면 워터마크가 전진하지 못해 1회 보고를 보증할 수 없다.
+      그때는 판정을 집행하지 않고 로그 채널로 강등해 유예하며, 쓰기가 가능해지면
+      다시 보고한다(#115). 유예 중에는 모델이 보고를 보지 못하므로 그 사이
+      `git push`가 성공하면 커밋이 원격 main에 올라가 판정이 소멸한다 — push는
+      로컬 remote-tracking ref 갱신(= `.git` 쓰기)을 요구하므로 이 창은 `.git`은
+      쓸 수 있고 상태 파일만 못 쓰는 구성에서만 열린다. 위 commit+push 항목과
+      같은 층이며 서버 브랜치 보호의 몫이다.
+    - 위반 없이 상태 쓰기만 실패하면 침묵한다. 매 호출 알리면 항시 노이즈가
+      되므로 판정이 억제된 순간에만 알린다.
+    - 상태 파일을 **읽을 수 없으면**(경로가 디렉터리 등) `_load_state`가 최초
+      실행을 돌려주므로 훅은 영구히 기록만 하고 아무것도 적발하지 않는다. 이
+      퇴화는 조용하며 이 모듈이 해결하지 않는다.
     - 위반 사유는 REPORT_SHA_LIMIT개까지만 붙인다. SHA는 전부 싣지만(잘라내면
       `checked`에 기록된 나머지가 다시는 호명되지 않는다) 위반이 많은
       브랜치에서는 그만큼 stderr가 길어진다.
@@ -62,6 +72,8 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     보호 ref 평가 실패 경고(exit 1)는 로그 전용이며 의도된 것이다 — 그 경고가
     유의미한 시나리오(gc로 직전 SHA 은폐)는 적대 모델이라 위협 모델 밖이고,
     "42 = 확인된 위반" 계약을 흐리지 않는 쪽을 택했다(#52).
+    상태를 저장하지 못한 실행의 보고도 같은 로그 채널로 강등된다 — 그때는 경고를
+    함께 실어 내보낸다(42를 쓰지 않으므로 같은 계약에 닿지 않는다).
     프롬프트 주입 방지를 위해 커밋 제목 원문은 절대 에코하지 않는다
     (SHA + 위반 사유만 — answer_first_reminder의 상수 출력과 같은 근거).
 
@@ -72,7 +84,9 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     불일치는 최초 실행으로 취급한다(기록만, 적발 없음).
 
 종료 코드:
-    0 통과 / 1 내부 경고(비차단, 로그 전용) / 42 위반(래퍼가 2로 되매핑).
+    0 통과 / 1 비차단(로그 전용) / 42 위반(래퍼가 2로 되매핑).
+    exit 1은 내부 경고만이 아니라 **집행되지 않은 확정 위반**의 강등 채널이기도
+    하다 — 상태를 저장하지 못하면 1회 보고를 보증할 수 없으므로 차단하지 않는다.
     모든 내부 실패는 차단으로 새지 않는다(fail-open).
 """
 
@@ -200,11 +214,22 @@ def _load_state(path: str) -> dict:
     return {"seen": seen, "checked": checked}
 
 
-def _store_state(path: str, state: dict) -> None:
-    """상태를 원자적으로 쓴다(임시 파일 + os.replace). 실패는 무시한다.
+def _store_state(path: str, state: dict) -> bool:
+    """상태를 원자적으로 쓴다(임시 파일 + os.replace). 실패는 호출자에게 알린다.
 
     쓰기 도중 중단으로 반쪽짜리 파일이 남으면 다음 실행이 최초 실행으로
     오인해 위반 tip을 조용히 기록하므로, 원자성은 적발 누락 방지 요건이다.
+
+    실패를 삼키지 않고 돌려주는 이유: 지속에 실패하면 워터마크가 전진하지 못해
+    "같은 위반은 한 번만 보고한다"를 보증할 수 없고, 그 상태로 차단하면 무관한
+    명령까지 매 호출 오염된다(#115). 호출자가 채널을 강등하는 근거다.
+
+    Args:
+        path: 상태 파일 절대 경로.
+        state: 저장할 상태 딕셔너리.
+
+    Returns:
+        지속에 성공하면 True, `OSError`로 실패하면 False.
     """
     tmp = path + ".tmp"
     try:
@@ -216,6 +241,8 @@ def _store_state(path: str, state: dict) -> None:
             os.unlink(tmp)
         except OSError:
             pass
+        return False
+    return True
 
 
 def _moved_refs(
@@ -415,11 +442,35 @@ def _header_report(problems: list[tuple[str, str]], prescribe: bool = True) -> s
     return "\n".join(lines)
 
 
+def _degraded_notice(state_path: str) -> str:
+    """지속 실패로 판정을 집행하지 못했음을 알리는 고지문.
+
+    로그 채널(exit 1)로만 나가므로 모델 컨텍스트에 주입되지 않는다. 명령 텍스트도
+    커밋 제목도 싣지 않는다 — 상태 경로와 사실 진술뿐이다.
+
+    Args:
+        state_path: 저장에 실패한 상태 파일 경로.
+
+    Returns:
+        stderr에 실을 고지문.
+    """
+    return "\n".join(
+        [
+            f"[commit-backstop] state could not be persisted at {state_path}; "
+            "the report(s) below were NOT enforced (log only).",
+            "  Reporting once cannot be guaranteed while the write fails, so "
+            "this verdict is held - it is reported again once the state file "
+            "becomes writable.",
+        ]
+    )
+
+
 def main() -> int:
     """stdin의 PostToolUse JSON을 판정한다.
 
     Returns:
-        종료 코드 (0 통과, 1 내부 경고 — 로그 전용, 42 위반 — 래퍼가 2로 되매핑).
+        종료 코드 (0 통과, 1 비차단 — 내부 경고 또는 집행되지 않은 강등 보고,
+        42 위반 — 래퍼가 2로 되매핑).
     """
     try:
         payload = json.loads(sys.stdin.read())
@@ -517,17 +568,27 @@ def main() -> int:
     seen = dict(state["seen"])
     seen.update({key: new for key, (_, new) in moved.items()})
     checked = (state["checked"] + newly_checked)[-CHECKED_CAP:]
-    _store_state(state_path, {"seen": seen, "checked": checked})
+    persisted = _store_state(state_path, {"seen": seen, "checked": checked})
 
     reports = list(branch_reports)
     if header is not None:
         reports.append(header)
 
+    if reports and not persisted:
+        # 지속 실패: 1회 보고를 보증할 수 없으므로 집행하지 않고 유예한다.
+        # 경고도 같은 로그 채널로 함께 내보낸다 — 42를 쓰지 않으므로
+        # "42 = 확인된 위반" 계약(#52)에 닿지 않는다.
+        print(
+            "\n".join([_degraded_notice(state_path), *reports, *warnings]),
+            file=sys.stderr,
+        )
+        return 1
     if reports:
         print("\n".join(reports), file=sys.stderr)
         return EXIT_BLOCK
     if warnings:
         # 로그 전용: exit 1의 stderr는 모델에 주입되지 않는다(의도됨 — #52).
+        # 지속 여부와 무관하게 내보낸다 — 강등이 현행 경고를 삼키면 안 된다.
         print("\n".join(warnings), file=sys.stderr)
         return 1
     return 0

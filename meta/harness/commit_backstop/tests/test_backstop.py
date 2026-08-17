@@ -92,6 +92,36 @@ def _state_path(repo) -> str:
     return os.path.join(str(repo), ".git", backstop.STATE_FILENAME)
 
 
+def _read_state(repo) -> dict:
+    """상태 파일을 읽어 돌려준다."""
+    with open(_state_path(repo), encoding="utf-8") as fp:
+        return json.load(fp)
+
+
+def _write_state(repo, state: dict) -> None:
+    """상태 파일을 덮어쓴다 (평가 실패 유도용)."""
+    with open(_state_path(repo), "w", encoding="utf-8") as fp:
+        json.dump(state, fp)
+
+
+class _BreakReplace:
+    """`os.replace`를 토글로 실패시킨다 — 지속 실패와 복구를 한 테스트에 담는다.
+
+    `monkeypatch.undo()`는 그 시점까지의 모든 setattr를 함께 되돌리므로 중간
+    복구에 쓸 수 없다. `_store_state`는 `OSError`만 잡으므로 그 하위 타입을
+    던진다 — 다른 예외면 `main()` 밖으로 새어 의도한 경로를 태우지 못한다.
+    """
+
+    def __init__(self) -> None:
+        self.broken = True
+        self._real = os.replace
+
+    def __call__(self, src, dst, **kwargs):
+        if self.broken:
+            raise PermissionError(13, "state write blocked by test")
+        return self._real(src, dst, **kwargs)
+
+
 # --- 보호 브랜치 판정 --------------------------------------------------------
 
 
@@ -661,6 +691,101 @@ def test_git_remote_failure_fails_open(monkeypatch, capsys, tmp_path):
     _commit(repo, "feat: on main")
     monkeypatch.setattr(backstop, "_remote_names", lambda cwd: None)
     assert _run(monkeypatch, repo) == 1  # 스킵 (비차단)
+
+
+# --- 지속 실패 시 강등 (#115) -------------------------------------------------
+
+
+def test_failed_state_write_downgrades_and_never_repeats_into_the_model(
+    monkeypatch, capsys, tmp_path
+):
+    # #115가 재현한 것은 단발이 아니라 반복이다 — run 1/2/3이 전부 42였다.
+    repo = _baseline(monkeypatch, tmp_path)
+    before = _read_state(repo)
+    _commit(repo, "feat: on main")
+    monkeypatch.setattr(backstop.os, "replace", _BreakReplace())
+    outputs = []
+    for _ in range(3):
+        assert _run(monkeypatch, repo) == 1  # 42가 아니다 — 집행하지 않는다
+        outputs.append(capsys.readouterr().err)
+    assert all("state could not be persisted" in err for err in outputs)
+    assert all("not present on any remote 'main'" in err for err in outputs)
+    assert len(set(outputs)) == 1  # 판정은 그대로, 채널만 강등
+    assert _read_state(repo)["seen"] == before["seen"]  # 워터마크 불변
+
+
+def test_verdict_fires_at_exit_block_once_persistence_recovers(
+    monkeypatch, capsys, tmp_path
+):
+    repo = _baseline(monkeypatch, tmp_path)
+    breaker = _BreakReplace()
+    monkeypatch.setattr(backstop.os, "replace", breaker)
+    sha = _commit(repo, "feat: on main")
+    assert _run(monkeypatch, repo) == 1
+    capsys.readouterr()
+    breaker.broken = False
+    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK  # 계류하던 판정이 발화
+    err = capsys.readouterr().err
+    assert sha[:12] in err
+    assert "state could not be persisted" not in err
+    assert _run(monkeypatch, repo) == 0  # 이제 1회 보고가 보증된다
+
+
+def test_degraded_output_carries_both_the_report_and_the_warning(
+    monkeypatch, capsys, tmp_path
+):
+    repo = _baseline(monkeypatch, tmp_path)
+    _git(repo, "branch", "master")  # 두 번째 보호 브랜치
+    assert _run(monkeypatch, repo) == 0  # master 최초 관찰
+    state = _read_state(repo)
+    state["seen"]["refs/heads/master"] = "0" * 40  # 평가 실패를 유도
+    _write_state(repo, state)
+    _git(repo, "checkout", "-q", "master")
+    _commit(repo, "feat: moves master")
+    _git(repo, "checkout", "-q", "main")
+    _commit(repo, "feat: on main")
+    monkeypatch.setattr(backstop.os, "replace", _BreakReplace())
+    assert _run(monkeypatch, repo) == 1
+    err = capsys.readouterr().err
+    assert "state could not be persisted" in err
+    assert "not present on any remote 'main'" in err  # 보고
+    assert "NOT checked" in err  # 경고가 보고에 삼켜지지 않는다
+
+
+def test_failed_state_write_without_a_verdict_stays_silent(
+    monkeypatch, capsys, tmp_path
+):
+    repo = _baseline(monkeypatch, tmp_path)
+    _git(repo, "checkout", "-q", "-b", "feat/x")
+    _commit(repo, "feat: fine everywhere")
+    monkeypatch.setattr(backstop.os, "replace", _BreakReplace())
+    assert _run(monkeypatch, repo) == 0  # 매 호출 알리면 항시 노이즈가 된다
+    assert capsys.readouterr().err == ""
+
+
+def test_failed_state_write_never_swallows_a_standalone_warning(
+    monkeypatch, capsys, tmp_path
+):
+    repo = _baseline(monkeypatch, tmp_path)
+    state = _read_state(repo)
+    state["seen"]["refs/heads/main"] = "0" * 40
+    _write_state(repo, state)
+    _commit(repo, "feat: moves main")
+    monkeypatch.setattr(backstop.os, "replace", _BreakReplace())
+    assert _run(monkeypatch, repo) == 1
+    err = capsys.readouterr().err
+    assert "NOT checked" in err  # 강등이 현행 경고를 삼키면 안 된다
+    assert "state could not be persisted" not in err  # 보고가 없으면 고지도 없다
+
+
+def test_override_under_a_failed_state_write_stays_silent(
+    monkeypatch, capsys, tmp_path
+):
+    repo = _baseline(monkeypatch, tmp_path)
+    _commit(repo, "feat: deliberate exception")
+    monkeypatch.setattr(backstop.os, "replace", _BreakReplace())
+    assert _run(monkeypatch, repo, command="ATOM_COMMIT_OVERRIDE=1 git commit") == 0
+    assert capsys.readouterr().err == ""
 
 
 # --- 프롤로그·환경 fail-open --------------------------------------------------
