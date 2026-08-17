@@ -33,12 +33,14 @@ def test_rule_degraded_reasons_match_the_constant() -> None:
     assert parsed == set(backstop.DEGRADED_REASONS)
 
 
-def test_module_docstring_does_not_copy_the_reason_names() -> None:
-    """모듈 docstring은 사유 이름을 복제하지 않는다.
+def test_reason_names_appear_once_in_the_source() -> None:
+    """사유 이름은 소스 파일에 상수 정의 한 번만 등장한다.
 
     어휘의 사본은 상수와 규칙 파일 둘뿐이고 둘은 위 테스트가 결속한다. 세 번째
     사본이 생기면 결속 밖에서 조용히 낡으므로, 복제를 관례가 아니라 여기서 막는다.
+    모듈 docstring만이 아니라 파일 전체를 본다 — 함수 docstring·주석·문자열도
+    결속 밖이며, 모듈 docstring만 보던 판이 그 구멍을 남겼다(PR #118 라운드 4).
     """
-    doc = backstop.__doc__ or ""
+    source = Path(backstop.__file__).read_text(encoding="utf-8")
     for reason in backstop.DEGRADED_REASONS:
-        assert reason not in doc, f"docstring이 사유 이름을 복제한다: {reason}"
+        assert source.count(reason) == 1, f"사유 이름이 복제됐다: {reason}"

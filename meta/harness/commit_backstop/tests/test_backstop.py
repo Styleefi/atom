@@ -652,22 +652,81 @@ def test_state_write_is_atomic_and_capped(monkeypatch, capsys, tmp_path):
     assert isinstance(state["seen"], dict)
 
 
-def test_corrupt_or_invalid_state_is_treated_as_first_run(
+def test_corrupt_state_reports_the_lost_baseline_and_stops_repeating(
     monkeypatch, capsys, tmp_path
 ):
     repo = _baseline(monkeypatch, tmp_path)
     _commit(repo, "feat: on main")
     with open(_state_path(repo), "w", encoding="utf-8") as fp:
         fp.write("{ not json")
-    assert _run(monkeypatch, repo) == 0  # 손상 → 최초 실행 취급 (기록만)
+    assert _run(monkeypatch, repo) == 1  # 기준선 상실: 판정 없이 알리기만
+    assert "no usable baseline" in capsys.readouterr().err
+    entries = _ledger_entries(tmp_path)
+    assert len(entries) == 1
+    assert entries[0]["event"] == "degraded"
+    assert entries[0]["reason"] == "state-corrupt"
+    assert entries[0]["command"] is None
+    assert _run(monkeypatch, repo) == 0  # 재구축됐으므로 반복하지 않는다
+    assert capsys.readouterr().err == ""
+    assert len(_ledger_entries(tmp_path)) == 1
     _commit(repo, "feat: next one")
-    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK  # 이후는 정상 적발
+    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK  # 적발 재개
     with open(_state_path(repo), "w", encoding="utf-8") as fp:
         json.dump({"seen": [], "checked": {}}, fp)  # 유효 JSON, 스키마 불일치
     _commit(repo, "feat: after schema break")
-    assert _run(monkeypatch, repo) == 0  # 최초 실행 취급
+    assert _run(monkeypatch, repo) == 1
+    assert _ledger_entries(tmp_path)[-1]["reason"] == "state-corrupt"
     _commit(repo, "feat: caught again")
     assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
+
+
+def test_unreadable_state_reports_the_lost_baseline(monkeypatch, capsys, tmp_path):
+    repo = _baseline(monkeypatch, tmp_path)
+    path = _state_path(repo)
+    os.remove(path)
+    try:
+        os.symlink(path, path)  # 자기 참조 — open()이 ELOOP를 낸다
+    except OSError:  # 심링크를 만들 수 없는 파일시스템(Windows 마운트 등)
+        pytest.skip("이 파일시스템에서는 심링크를 만들 수 없다")
+    _commit(repo, "feat: on main")
+    assert _run(monkeypatch, repo) == 1
+    assert "no usable baseline" in capsys.readouterr().err
+    assert _ledger_entries(tmp_path)[0]["reason"] == "state-unreadable"
+    # os.replace는 심링크를 따라가지 않으므로 그 자리가 정규 파일로 치유된다.
+    assert _run(monkeypatch, repo) == 0
+    assert len(_ledger_entries(tmp_path)) == 1
+
+
+def test_absent_state_file_is_not_a_lost_baseline(monkeypatch, capsys, tmp_path):
+    # 부재를 상실로 기록하면 모든 새 클론이 첫 호출에서 퇴화를 보고한다.
+    repo = _baseline(monkeypatch, tmp_path)
+    assert not os.path.exists(_state_path(repo) + ".absent-probe")
+    assert _ledger_entries(tmp_path) == []
+    assert capsys.readouterr().err == ""
+
+
+def test_state_that_cannot_be_rebuilt_warns_without_a_ledger_line(
+    monkeypatch, capsys, tmp_path
+):
+    repo = _baseline(monkeypatch, tmp_path)
+    path = _state_path(repo)
+    os.remove(path)
+    os.mkdir(path)  # 읽기도 os.replace도 EISDIR — 다시 쓸 수 없다
+    _commit(repo, "feat: on main")
+    for _ in range(2):
+        assert _run(monkeypatch, repo) == 1
+        assert "no usable baseline" in capsys.readouterr().err
+    assert _ledger_entries(tmp_path) == []  # 선언된 경계: 원장에는 쌓지 않는다
+
+
+def test_override_does_not_suppress_the_lost_baseline(monkeypatch, capsys, tmp_path):
+    repo = _baseline(monkeypatch, tmp_path)
+    _commit(repo, "feat: on main")
+    with open(_state_path(repo), "w", encoding="utf-8") as fp:
+        fp.write("{ not json")
+    assert _run(monkeypatch, repo, command="ATOM_COMMIT_OVERRIDE=1 git commit") == 1
+    assert "no usable baseline" in capsys.readouterr().err
+    assert {e["event"] for e in _ledger_entries(tmp_path)} == {"override", "degraded"}
 
 
 def test_unreachable_previous_tip_warns_log_only(monkeypatch, capsys, tmp_path):
@@ -819,8 +878,8 @@ def test_override_under_a_failed_state_write_stays_silent(
 
 # --- 원장 기록 (#76 확장) -----------------------------------------------------
 #
-# `_log`는 예외를 삼키므로 호출부 키워드 오타가 조용한 무기록이 된다. 호출부
-# 5곳을 각각 태우는 아래 테스트들은 선택이 아니라 그 설계의 필수 조건이다.
+# `_log`는 예외를 삼키므로 호출부 키워드 오타가 조용한 무기록이 된다. 호출부를
+# 각각 태우는 아래 테스트들은 선택이 아니라 그 설계의 필수 조건이다.
 
 
 def test_ledger_records_a_protected_branch_block(monkeypatch, capsys, tmp_path):

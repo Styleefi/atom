@@ -38,6 +38,8 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     - 헤더 위반의 1회성은 `checked`(SHA 목록)에 의존하므로 CHECKED_CAP을
       넘겨 밀려나거나 rebase·amend로 같은 논리적 커밋이 새 SHA를 얻으면
       다시 보고된다.
+    - 기준선을 잃으면 `checked`도 함께 비므로, 이미 보고한 헤더 위반이 다시 HEAD에
+      도달하면 재보고된다.
     - 상태 쓰기가 실패하면 워터마크가 전진하지 못해 1회 보고를 보증할 수 없다.
       그때는 판정을 집행하지 않고 로그 채널로 강등해 유예하며, 쓰기가 가능해지면
       다시 보고한다(#115).
@@ -51,9 +53,12 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
       없다 — 이 훅의 방어 밖이며 선언된 경계다(PR #118 오너 결정).
     - 위반 없이 상태 쓰기만 실패하면 침묵한다. 매 호출 알리면 항시 노이즈가
       되므로 판정이 억제된 순간에만 알린다.
-    - 상태 파일을 **읽을 수 없으면**(경로가 디렉터리 등) `_load_state`가 최초
-      실행을 돌려주므로 훅은 영구히 기록만 하고 아무것도 적발하지 않는다. 이
-      퇴화는 조용하며 이 모듈이 해결하지 않는다.
+    - 상태 파일이 있는데 쓸 수 있는 기준선을 못 내주면(읽기 실패·손상) `_load_state`가
+      최초 실행을 돌려주므로, 그동안 훅은 기록만 하고 적발하지 않는다 — 마지막으로
+      기록된 tip 이후의 전진이 판정되지 않는다. stderr로는 매 호출 알리고, 원장에는
+      상태를 다시 쓰는 데 성공한 호출에서만 남긴다. 다시 쓰지 못하는 동안은 중복
+      제거가 불가능해 같은 줄이 쌓이므로 원장에 쓰지 않는다 — 선언된 경계다
+      (#119 오너 결정).
     - 평가에 실패한 구간(git 오류·timeout, 직전 tip 소멸)은 두 lane 모두 tip을
       그대로 전진시키므로 다시 검사되지 않는다. 경고만 남는다 — 붙들고 재시도하면
       영구 실패에서 매 호출 같은 실패를 반복해 훅이 세션을 마비시킨다.
@@ -99,8 +104,8 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
 상태:
     `<git-common-dir>/atom-commit-backstop.json` —
     `{"seen": {ref: sha, ...}, "checked": [sha, ...]}`. HEAD는 worktree별
-    `HEAD@<git-dir>` 키. 쓰기는 임시 파일 + os.replace로 원자적. 손상·스키마
-    불일치는 최초 실행으로 취급한다(기록만, 적발 없음).
+    `HEAD@<git-dir>` 키. 쓰기는 임시 파일 + os.replace로 원자적. 읽지 못하거나
+    스키마가 어긋나면 빈 상태로 대체하고 그 사실을 알린다 — 비주장 목록 참고.
 
 종료 코드:
     0 통과 / 1 비차단(로그 전용) / 42 위반(래퍼가 2로 되매핑).
@@ -137,10 +142,14 @@ STATE_FILENAME = "atom-commit-backstop.json"
 # degraded 이벤트의 사유 어휘. 규칙 파일의 열거와 test_reasons_sync가 결속한다 —
 # 같은 열거의 사본이 다섯 곳에서 따로 어긋난 뒤 도입했다(PR #118 리뷰 루프).
 REASON_STATE_UNWRITABLE = "state-unwritable"
+REASON_STATE_UNREADABLE = "state-unreadable"
+REASON_STATE_CORRUPT = "state-corrupt"
 REASON_BRANCH_EVAL_FAILED = "branch-eval-failed"
 REASON_HEAD_EVAL_FAILED = "head-eval-failed"
 DEGRADED_REASONS = (
     REASON_STATE_UNWRITABLE,
+    REASON_STATE_UNREADABLE,
+    REASON_STATE_CORRUPT,
     REASON_BRANCH_EVAL_FAILED,
     REASON_HEAD_EVAL_FAILED,
 )
@@ -216,32 +225,41 @@ def _rev_parse(cwd: str | None, ref: str) -> str | None:
     return out.strip() or None
 
 
-def _load_state(path: str) -> dict:
-    """상태 파일을 읽는다. 부재·손상·스키마 불일치는 전부 최초 실행 취급.
+def _load_state(path: str) -> tuple[dict, str | None]:
+    """상태 파일을 읽는다. 부재와 기준선 상실을 갈라 돌려준다.
+
+    부재는 정상 최초 실행(새 클론 포함)이라 알릴 것이 없고, 파일이 있는데 쓸 수 있는
+    기준선을 못 내주는 것은 그 호출이 아무것도 판정하지 못했다는 뜻이라 알려야 한다.
+    둘을 한 갈래로 삼키면 후자가 전자로 위장된다(#119).
 
     Args:
         path: 상태 파일 절대 경로.
 
     Returns:
-        `{"seen": dict[str, str], "checked": list[str]}` (항상 이 스키마).
+        `({"seen": dict[str, str], "checked": list[str]}, 상실 사유 | None)`.
+        상태는 항상 이 스키마이며, 읽지 못했으면 빈 것으로 대체된다.
     """
     fresh: dict = {"seen": {}, "checked": []}
     try:
         with open(path, encoding="utf-8") as fp:
             raw = json.load(fp)
-    except (OSError, ValueError):
-        return fresh
+    except FileNotFoundError:
+        return fresh, None
+    except OSError:
+        return fresh, REASON_STATE_UNREADABLE
+    except ValueError:
+        return fresh, REASON_STATE_CORRUPT
     if not isinstance(raw, dict):
-        return fresh
+        return fresh, REASON_STATE_CORRUPT
     seen = raw.get("seen")
     checked = raw.get("checked")
     if not isinstance(seen, dict) or not isinstance(checked, list):
-        return fresh
+        return fresh, REASON_STATE_CORRUPT
     if not all(isinstance(k, str) and isinstance(v, str) for k, v in seen.items()):
-        return fresh
+        return fresh, REASON_STATE_CORRUPT
     if not all(isinstance(sha, str) for sha in checked):
-        return fresh
-    return {"seen": seen, "checked": checked}
+        return fresh, REASON_STATE_CORRUPT
+    return {"seen": seen, "checked": checked}, None
 
 
 def _store_state(path: str, state: dict) -> bool:
@@ -249,6 +267,11 @@ def _store_state(path: str, state: dict) -> bool:
 
     쓰기 도중 중단으로 반쪽짜리 파일이 남으면 다음 실행이 최초 실행으로
     오인해 위반 tip을 조용히 기록하므로, 원자성은 적발 누락 방지 요건이다.
+
+    원자성은 단일 프로세스 기준이다. 임시 파일 이름이 고정(`path + ".tmp"`)이라
+    훅 프로세스가 병렬로 겹치면 서로의 임시 파일에 쓰고, 상태가 손상되거나 한쪽의
+    워터마크 전진이 지워질 수 있다. 고치지 않기로 한 결정이며(#119), 적어 두는
+    이유는 그 손상이 기준선 상실로 관측되기 때문이다.
 
     실패를 삼키지 않고 돌려주는 이유: 지속에 실패하면 워터마크가 전진하지 못해
     "같은 위반은 한 번만 보고한다"를 보증할 수 없고, 그 상태로 차단하면 무관한
@@ -482,7 +505,7 @@ def _log(**kwargs) -> None:
     모듈을 제거·수정한 경우) 훅 자체가 죽어 적발 기능이 통째로 사라진다.
 
     대가: 예외를 삼키므로 호출부 키워드 오타가 조용한 무기록이 된다. 그래서
-    호출부 5곳을 각각 확인하는 테스트는 선택이 아니라 이 설계의 필수 조건이다.
+    호출부마다 각각 확인하는 테스트는 선택이 아니라 이 설계의 필수 조건이다.
     """
     try:
         from harness.blocklog.blocklog import record_block
@@ -557,7 +580,7 @@ def main() -> int:
         current[head_key] = head_sha
 
     state_path = os.path.join(common_dir, STATE_FILENAME)
-    state = _load_state(state_path)
+    state, loss = _load_state(state_path)
     moved = _moved_refs(current, state["seen"])
     if not moved:
         return 0
@@ -657,6 +680,23 @@ def main() -> int:
     seen.update({key: new for key, (_, new) in moved.items()})
     checked = (state["checked"] + newly_checked)[-CHECKED_CAP:]
     persisted = _store_state(state_path, {"seen": seen, "checked": checked})
+
+    if loss is not None:
+        # 채널마다 비용이 다르다. stderr는 휘발성이라 `git remote` 실패와 같은 층에서
+        # 매 호출 알리고, 원장은 누적되므로 다시 쓰는 데 성공해 반복이 묶일 때만 남긴다.
+        warnings.append(
+            "[commit-backstop] the state file exists but yielded no usable "
+            "baseline - advances since the last recorded tip were NOT checked"
+        )
+        if persisted:
+            _log(
+                event="degraded",
+                harness="commit-backstop",
+                reason=loss,
+                command=None,
+                cwd=cwd,
+                session_id=session_id,
+            )
 
     reports = list(branch_reports)
     if header is not None:
