@@ -53,6 +53,12 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     - 평가에 실패한 구간(git 오류·timeout, 직전 tip 소멸)은 두 lane 모두 tip을
       그대로 전진시키므로 다시 검사되지 않는다. 경고만 남는다 — 붙들고 재시도하면
       영구 실패에서 매 호출 같은 실패를 반복해 훅이 세션을 마비시킨다.
+    - 보고와 평가 실패 경고가 같은 실행에서 나면 stderr에는 보고만 나간다 —
+      "42 = 확인된 위반" 채널에 "검사 안 됨"을 섞지 않기로 한 #52 결정 때문이다.
+      그 경고는 원장의 `degraded` 줄로 보존된다.
+    - 상태 저장이 계속 실패하는 동안 `degraded` 줄이 호출당 하나씩 원장에 쌓인다.
+      중복 제거는 지속성 없이 불가능하다. `override` 줄도 사용자가 그 명령을
+      반복한 횟수만큼 남는다.
     - 위반 사유는 REPORT_SHA_LIMIT개까지만 붙인다. SHA는 전부 싣지만(잘라내면
       `checked`에 기록된 나머지가 다시는 호명되지 않는다) 위반이 많은
       브랜치에서는 그만큼 stderr가 길어진다.
@@ -79,6 +85,10 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     함께 실어 내보낸다(42를 쓰지 않으므로 같은 계약에 닿지 않는다).
     프롬프트 주입 방지를 위해 커밋 제목 원문은 절대 에코하지 않는다
     (SHA + 위반 사유만 — answer_first_reminder의 상수 출력과 같은 근거).
+    차단·오버라이드·강등은 blocklog 원장(#76)에도 한 줄씩 남는다 — 저장소 밖
+    경로라 `.git`을 못 쓰게 되는 실패에서 살아남는 유일한 흔적이다. 원장의
+    `block`·`override` 줄은 **Bash 명령 원문을 그대로 담는다**(위 비에코 방침은
+    stderr 채널에 대한 것이다). `degraded` 줄은 명령을 싣지 않는다.
 
 상태:
     `<git-common-dir>/atom-commit-backstop.json` —
@@ -445,6 +455,26 @@ def _header_report(problems: list[tuple[str, str]], prescribe: bool = True) -> s
     return "\n".join(lines)
 
 
+def _log(**kwargs) -> None:
+    """이벤트 원장에 한 줄을 남긴다 — 절대 제어 흐름에 영향을 주지 않는다.
+
+    맨몸 호출을 금지하는 이유가 둘이다. (1) 인자 불일치 TypeError는 record_block
+    본문 진입 **전에** 나므로 그 안의 방어가 못 잡고, 예외가 main() 밖으로 나가면
+    run()이 1을 반환해 **차단이 통과로 강등된다**(래퍼는 42만 2로 되매핑한다).
+    (2) 모듈 최상단 import면 blocklog가 import 불가능해질 때(자식 프로젝트가 이
+    모듈을 제거·수정한 경우) 훅 자체가 죽어 적발 기능이 통째로 사라진다.
+
+    대가: 예외를 삼키므로 호출부 키워드 오타가 조용한 무기록이 된다. 그래서
+    호출부 5곳을 각각 확인하는 테스트는 선택이 아니라 이 설계의 필수 조건이다.
+    """
+    try:
+        from harness.blocklog.blocklog import record_block
+
+        record_block(**kwargs)
+    except Exception:  # noqa: BLE001 — fail-open이 설계 요구사항
+        pass
+
+
 def _degraded_notice(state_path: str) -> str:
     """지속 실패로 판정을 집행하지 못했음을 알리는 고지문.
 
@@ -489,6 +519,9 @@ def main() -> int:
     cwd = payload.get("cwd")
     if not isinstance(cwd, str) or not cwd:
         cwd = None
+    session_id = payload.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        session_id = None
     override = OVERRIDE_TOKEN in command
 
     dirs = _repo_dirs(cwd)
@@ -524,6 +557,15 @@ def main() -> int:
     header: str | None = None
     warnings: list[str] = []
     newly_checked: list[str] = []
+    if override:
+        _log(
+            event="override",
+            harness="commit-backstop",
+            reason=None,
+            command=command,
+            cwd=cwd,
+            session_id=session_id,
+        )
     if not override:
         exclusions: list[str] | None = None
         for branch in PROTECTED_BRANCHES:
@@ -540,6 +582,16 @@ def main() -> int:
                 warnings.append(
                     f"[commit-backstop] '{branch}' advanced but the previous tip "
                     "is unreachable or git failed - this advance was NOT checked"
+                )
+                # 경고를 append하는 이 자리에서 기록한다. main() 꼬리에 두면
+                # 보고가 동반될 때 stderr에서 버려지며 흔적도 함께 사라진다.
+                _log(
+                    event="degraded",
+                    harness="commit-backstop",
+                    reason="branch-eval-failed",
+                    command=None,
+                    cwd=cwd,
+                    session_id=session_id,
                 )
             elif offending:
                 has_ref = any(ref.endswith(f"/{branch}") for ref in exclusions)
@@ -575,6 +627,14 @@ def main() -> int:
                         "is unreachable or git failed - the header check was "
                         "NOT run for this advance"
                     )
+                    _log(
+                        event="degraded",
+                        harness="commit-backstop",
+                        reason="head-eval-failed",
+                        command=None,
+                        cwd=cwd,
+                        session_id=session_id,
+                    )
 
     seen = dict(state["seen"])
     seen.update({key: new for key, (_, new) in moved.items()})
@@ -589,12 +649,34 @@ def main() -> int:
         # 지속 실패: 1회 보고를 보증할 수 없으므로 집행하지 않고 유예한다.
         # 경고도 같은 로그 채널로 함께 내보낸다 — 42를 쓰지 않으므로
         # "42 = 확인된 위반" 계약(#52)에 닿지 않는다.
+        _log(
+            event="degraded",
+            harness="commit-backstop",
+            reason="state-unwritable",
+            command=None,
+            cwd=cwd,
+            session_id=session_id,
+        )
         print(
             "\n".join([_degraded_notice(state_path), *reports, *warnings]),
             file=sys.stderr,
         )
         return 1
     if reports:
+        _log(
+            event="block",
+            harness="commit-backstop",
+            reason=(
+                "protected-branch+header"
+                if branch_reports and header is not None
+                else "protected-branch"
+                if branch_reports
+                else "header"
+            ),
+            command=command,
+            cwd=cwd,
+            session_id=session_id,
+        )
         print("\n".join(reports), file=sys.stderr)
         return EXIT_BLOCK
     if warnings:

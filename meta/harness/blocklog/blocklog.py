@@ -15,10 +15,13 @@ git 저장소 밖에서도 발생한다.
 commit_backstop이 커밋 제목을 stderr로 되울리지 않는 것과 같은 근거다.
 
 주장하는 것:
-    - 차단(`event: "block"`)과 오버라이드 통과(`event: "override"`)가 발생하면
-      **최선을 다해** 한 줄을 남긴다.
+    - 차단(`event: "block"`), 오버라이드 통과(`event: "override"`), 그리고 판정을
+      내고도 집행하지 못한 강등(`event: "degraded"`)이 발생하면 **최선을 다해**
+      한 줄을 남긴다.
     - 어떤 실패도 호출자에게 전파하지 않는다 (fail-open). 예외를 던지지 않는다.
-    - 통과·fail-open 경로는 이 함수를 부르지 않으므로 아무것도 쓰지 않는다.
+    - 통과 경로는 이 함수를 부르지 않으므로 아무것도 쓰지 않는다. fail-open
+      경로도 마찬가지지만 `degraded`는 예외다 — 집행을 포기했다는 사실 자체가
+      기록 대상이고, 그 흔적이 남을 곳이 여기 말고 없다(#115).
 
 주장하지 않는 것 (비주장):
     - **완전성**: 기록 실패(쓰기 불가·디스크 가득·경로 이상)는 침묵으로 삼킨다.
@@ -30,7 +33,9 @@ commit_backstop이 커밋 제목을 stderr로 되울리지 않는 것과 같은 
       틈에 다른 프로세스의 줄이 끼어들어 두 줄이 섞일 수 있다. 감사 로그가 아니라
       집계용 근사 카운터이므로 집계 시 파싱 실패한 줄은 버리면 된다.
     - **줄 길이 상한 없음**: 긴 명령은 긴 줄을 만든다. 실측(길이 분포)이 쌓이기
-      전에는 근거 없는 상수를 심지 않는다.
+      전에는 근거 없는 상수를 심지 않는다. 단 `degraded` 줄은 `command`가 `null`
+      이라 길이가 고정이다 — 그 이벤트는 명령이 아니라 훅 자신의 상태를 서술하고,
+      상태 저장이 계속 실패하는 동안 호출당 한 줄씩 쌓이기 때문이다.
     - **권한**: 생성 시 0600/0700을 요청하지만 프로세스 umask가 더 좁힐 수 있고,
       **이미 존재하는 파일의 권한은 교정하지 않는다**. 원장 경로가 심링크여도
       따라간다(O_NOFOLLOW를 쓰지 않는다) — 홈 디렉터리에 쓸 수 있는 공격자는
@@ -54,6 +59,14 @@ commit_backstop이 커밋 제목을 stderr로 되울리지 않는 것과 같은 
       `session_id` 안에서 block 바로 다음에 오는 override**로 판정한다 — WSL2는
       절전 복귀 후 시계가 튈 수 있어 시간 창 기반 판정이 왜곡될 수 있지만, 세션 내
       기록 순서는 유지된다.
+    - **오버라이드는 하니스 사이에서 이중 계상된다.** 하나의
+      `ATOM_COMMIT_OVERRIDE=1 git commit ...`은 commit-guard(PreToolUse)와
+      commit-backstop(PostToolUse) 양쪽에서 각각 `override` 줄을 남긴다. #76
+      베이스라인 표는 마커별 횟수를 단일 숫자로 세었으므로, 그 표와의 비교는
+      `harness` 필드로 나눈 뒤에만 성립한다.
+    - **모르는 `event` 값은 오류가 아니라 무시 대상이다.** 이 어휘는 참여 하니스가
+      늘면 확장되며(`degraded`가 그렇게 들어왔다), 필드 구성이 그대로면 `v`는
+      올리지 않는다 — 읽는 쪽이 낯선 값에서 멈추지 않게 하는 것이 전방 호환 규칙이다.
     - **원장은 이 사용자의 모든 프로젝트를 담는다.** 이 모듈은 `meta/`에 있어 자식
       프로젝트에 전파되고 경로는 사용자 레벨 고정이므로, 어느 프로젝트의 차단이든
       같은 파일에 섞인다. 프로젝트별 집계는 `cwd` 접두사로 **근사**할 뿐이고,
@@ -133,7 +146,7 @@ def record_block(
     event: str,
     harness: str,
     reason: str | None,
-    command: str,
+    command: str | None,
     cwd: str | None,
     session_id: str | None,
     candidates: list[str] | None = None,
@@ -145,10 +158,11 @@ def record_block(
     래핑을 둔다(각 가드의 `_log`).
 
     Args:
-        event: `"block"` 또는 `"override"`.
+        event: `"block"`, `"override"`, 또는 `"degraded"`.
         harness: 이벤트를 낸 하니스 id (예: `"commit-guard"`).
-        reason: 차단 분류. override 이벤트에서는 None.
-        command: 훅 페이로드의 Bash 명령 원문.
+        reason: 이벤트 분류(차단 사유, 강등 사유). override 이벤트에서만 None.
+        command: 훅 페이로드의 Bash 명령 원문. `degraded`에서는 None — 그 이벤트는
+            명령이 아니라 훅 자신의 상태를 서술하므로 원문을 싣지 않는다.
         cwd: 훅 페이로드가 알려준 작업 디렉터리 (없으면 None).
         session_id: 훅 페이로드의 세션 식별자 (없으면 None).
         candidates: 유사 이슈 후보 설명 문자열 (해당 없으면 None). 번호만 기록되며,
