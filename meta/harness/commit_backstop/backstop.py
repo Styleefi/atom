@@ -41,18 +41,12 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     - 상태 쓰기가 실패하면 워터마크가 전진하지 못해 1회 보고를 보증할 수 없다.
       그때는 판정을 집행하지 않고 로그 채널로 강등해 유예하며, 쓰기가 가능해지면
       다시 보고한다(#115).
-    - 유예된 판정은 그 사이 push가 성공하면 영구히 소멸한다 — 모델이 보고를 보지
-      못하므로 아무도 막지 않는다. 두 lane의 창이 다르다. 브랜치 lane은 원격
-      main/master만 제외 집합에 넣으므로 main push라야 녹고, 그건 그 자체가 보고
-      대상인 규칙 위반이며 서버 브랜치 보호가 받는 층이다(위 commit+push 항목과
-      동일). 헤더 lane은 `--not --remotes`로 제외하므로 **어떤 원격 ref로든**
-      녹는다 — 이 저장소가 요구하는 정상 작업인 feature 브랜치 push가 방아쇠이고,
-      커밋 제목 규격을 검사하는 서버 계층은 없다. 막으려면 유예한 판정을 기억해야
-      하는데 그 기억 장치가 바로 실패한 상태 파일이므로, 헤더 lane의 이 소멸은
-      이 훅이 방어하는 범위 **밖**이다 — 선언된 경계다(PR #118 오너 결정).
-      두 lane 모두, 창은 `.git`은 쓸 수 있고 상태 파일만 못 쓰는 구성에서만
-      열린다. `.git` 자체를 못 쓰면 remote-tracking ref 갱신도 실패해 판정이
-      제외 집합에 걸리지 않고 살아남는다.
+    - 유예된 판정은 그 커밋을 담은 브랜치가 그 사이 push되면 소멸한다 — 모델이
+      보고를 보지 못하므로 아무도 막지 않는다. 브랜치 판정의 소멸은 위 commit+push
+      항목과 같은 층이며 서버 브랜치 보호의 몫이다(승인된 계획, 2026-08-17).
+      헤더 판정의 소멸은 이 훅의 방어 밖이다 — 막으려면 유예한 판정을 기억해야
+      하는데 그 기억 장치가 바로 실패한 상태 파일이고, 커밋 제목 규격을 받아 줄
+      서버 계층도 없다. 선언된 경계다(PR #118 오너 결정).
     - 위반 없이 상태 쓰기만 실패하면 침묵한다. 매 호출 알리면 항시 노이즈가
       되므로 판정이 억제된 순간에만 알린다.
     - 상태 파일을 **읽을 수 없으면**(경로가 디렉터리 등) `_load_state`가 최초
@@ -64,10 +58,8 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     - 보고와 평가 실패 경고가 같은 실행에서 나면 stderr에는 보고만 나간다 —
       "42 = 확인된 위반" 채널에 "검사 안 됨"을 섞지 않기로 한 #52 결정 때문이다.
       그 경고는 원장의 `degraded` 줄로 보존된다.
-    - 상태 저장이 계속 실패하는 동안 `degraded` 줄이 매 호출 원장에 쌓인다.
-      중복 제거는 지속성 없이 불가능하다. 한 호출이 한 줄이라는 뜻은 아니다 —
-      평가 실패는 보호 브랜치마다, 그리고 HEAD lane에서 따로 기록되므로 한 호출이
-      최대 세 줄을 낸다. `override` 줄도 사용자가 그 명령을 반복한 횟수만큼 남는다.
+    - 상태 저장이 계속 실패하는 동안, 그리고 override가 반복되는 동안 원장에 줄이
+      쌓인다. 중복 제거는 지속성 없이 불가능하다.
     - 위반 사유는 REPORT_SHA_LIMIT개까지만 붙인다. SHA는 전부 싣지만(잘라내면
       `checked`에 기록된 나머지가 다시는 호명되지 않는다) 위반이 많은
       브랜치에서는 그만큼 stderr가 길어진다.
@@ -95,12 +87,12 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     프롬프트 주입 방지를 위해 커밋 제목 원문은 절대 에코하지 않는다
     (SHA + 위반 사유만 — answer_first_reminder의 상수 출력과 같은 근거).
     차단·오버라이드·강등은 blocklog 원장(#76)에도 남는다 — 저장소 밖 경로라
-    `.git`을 못 쓰게 되는 실패에서 살아남는 유일한 흔적이다. `degraded`의
-    `reason`은 셋뿐이다. `state-unwritable`(판정을 냈으나 집행하지 못함),
-    `branch-eval-failed`·`head-eval-failed`(평가 자체를 수행하지 못함 — 판정이
-    없다). 뒤 둘을 억제된 위반으로 세면 안 된다. 원장의 `block`·`override` 줄은
-    **Bash 명령 원문을 그대로 담는다**(위 비에코 방침은 stderr 채널에 대한
-    것이다). `degraded` 줄은 명령을 싣지 않는다.
+    `.git`을 못 쓰게 되는 실패에서도 살아남는 흔적이다. `degraded`의 사유 어휘는
+    DEGRADED_REASONS가 보유한다. `state-unwritable`은 판정을 내고도 집행하지 못한
+    경우이고, `branch-eval-failed`·`head-eval-failed`는 평가 자체를 수행하지 못해
+    판정이 없는 경우다 — 뒤 둘을 억제된 위반으로 세면 관측하려는 수치가 부풀려진다.
+    원장의 `block`·`override` 줄은 **Bash 명령 원문을 그대로 담는다**(위 비에코
+    방침은 stderr 채널에 대한 것이다). `degraded` 줄은 명령을 싣지 않는다.
 
 상태:
     `<git-common-dir>/atom-commit-backstop.json` —
@@ -139,6 +131,17 @@ PROTECTED_BRANCHES = ("main", "master")
 GIT_TIMEOUT_SECONDS = 10
 
 STATE_FILENAME = "atom-commit-backstop.json"
+
+# degraded 이벤트의 사유 어휘. 규칙 파일의 열거와 test_reasons_sync가 결속한다 —
+# 같은 열거의 사본이 다섯 곳에서 따로 어긋난 뒤 도입했다(PR #118 리뷰 루프).
+REASON_STATE_UNWRITABLE = "state-unwritable"
+REASON_BRANCH_EVAL_FAILED = "branch-eval-failed"
+REASON_HEAD_EVAL_FAILED = "head-eval-failed"
+DEGRADED_REASONS = (
+    REASON_STATE_UNWRITABLE,
+    REASON_BRANCH_EVAL_FAILED,
+    REASON_HEAD_EVAL_FAILED,
+)
 
 # 헤더 검사 완료 커밋 기록 상한 (FIFO — 초과분은 오래된 것부터 버린다).
 CHECKED_CAP = 200
@@ -600,7 +603,7 @@ def main() -> int:
                 _log(
                     event="degraded",
                     harness="commit-backstop",
-                    reason="branch-eval-failed",
+                    reason=REASON_BRANCH_EVAL_FAILED,
                     command=None,
                     cwd=cwd,
                     session_id=session_id,
@@ -642,7 +645,7 @@ def main() -> int:
                     _log(
                         event="degraded",
                         harness="commit-backstop",
-                        reason="head-eval-failed",
+                        reason=REASON_HEAD_EVAL_FAILED,
                         command=None,
                         cwd=cwd,
                         session_id=session_id,
@@ -664,7 +667,7 @@ def main() -> int:
         _log(
             event="degraded",
             harness="commit-backstop",
-            reason="state-unwritable",
+            reason=REASON_STATE_UNWRITABLE,
             command=None,
             cwd=cwd,
             session_id=session_id,

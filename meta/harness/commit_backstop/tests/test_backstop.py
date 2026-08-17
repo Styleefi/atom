@@ -868,7 +868,7 @@ def test_ledger_records_a_suppressed_verdict_without_the_command(
     entry = _ledger_entries(tmp_path)[0]
     assert entry["event"] == "degraded"
     assert entry["reason"] == "state-unwritable"
-    assert entry["command"] is None  # 호출당 한 줄씩 쌓이므로 원문을 싣지 않는다
+    assert entry["command"] is None  # 훅 자신의 상태를 서술하는 이벤트다
 
 
 def test_ledger_records_evaluation_failures_in_both_lanes(
