@@ -54,8 +54,7 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     - 위반 없이 상태 쓰기만 실패하면 침묵한다. 매 호출 알리면 항시 노이즈가
       되므로 판정이 억제된 순간에만 알린다.
     - 상태 파일이 있는데 쓸 수 있는 기준선을 못 내주면(읽기 실패·손상) `_load_state`가
-      최초 실행을 돌려주므로, 그동안 훅은 기록만 하고 적발하지 않는다 — 마지막으로
-      기록된 tip 이후의 전진이 판정되지 않는다. stderr로 알리고, 원장에는
+      최초 실행을 돌려주므로, 그동안 훅은 적발하지 않는다. stderr로 알리고, 원장에는
       상태를 다시 쓰는 데 성공한 호출에서만 남긴다. 다시 쓰지 못하는 동안은 중복
       제거가 불가능해 같은 줄이 쌓이므로 원장에 쓰지 않는다 — 선언된 경계다
       (#119 오너 결정).
@@ -271,7 +270,7 @@ def _store_state(path: str, state: dict) -> bool:
     원자성은 단일 프로세스 기준이다. 임시 파일 이름이 고정(`path + ".tmp"`)이라
     훅 프로세스가 병렬로 겹치면 서로의 임시 파일에 쓰고, 상태가 손상되거나 한쪽의
     워터마크 전진이 지워질 수 있다. 고치지 않기로 한 결정이며(#119), 적어 두는
-    이유는 그 손상이 기준선 상실로 관측되기 때문이다.
+    이유는 앞쪽이 기준선 상실로 관측되기 때문이다.
 
     실패를 삼키지 않고 돌려주는 이유: 지속에 실패하면 워터마크가 전진하지 못해
     "같은 위반은 한 번만 보고한다"를 보증할 수 없고, 그 상태로 차단하면 무관한
@@ -686,7 +685,7 @@ def main() -> int:
         # 다시 쓰는 데 성공해 반복이 묶일 때만 남긴다.
         warnings.append(
             f"[commit-backstop] {state_path} exists but yielded no usable "
-            "baseline - advances since the last recorded tip were NOT checked"
+            "baseline - nothing was judged on this call"
         )
         if persisted:
             _log(

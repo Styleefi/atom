@@ -36,14 +36,15 @@ def test_rule_degraded_reasons_match_the_constant() -> None:
 def test_reason_names_appear_once_in_the_source() -> None:
     """사유 이름은 소스 파일에 상수 정의 한 번만 등장한다.
 
-    어휘의 사본은 상수와 규칙 파일 둘뿐이고 둘은 위 테스트가 결속한다. 세 번째
-    사본이 생기면 결속 밖에서 조용히 낡으므로, 복제를 관례가 아니라 여기서 막는다.
-    모듈 docstring만이 아니라 파일 전체를 본다 — 함수 docstring·주석·문자열도
-    결속 밖이며, 모듈 docstring만 보던 판이 그 구멍을 남겼다(PR #118 라운드 4).
+    `backstop.py` 안에서 어휘가 상수 정의 하나로만 유지되는지 확인한다. 그 파일에
+    두 번째 사본이 생기면 결속 밖에서 조용히 낡으므로, 복제를 관례가 아니라 여기서
+    막는다. 모듈 docstring만이 아니라 파일 전체를 본다 — 함수 docstring·주석·
+    문자열도 결속 밖이며, 모듈 docstring만 보던 판이 그 구멍을 남겼다
+    (PR #118 라운드 4).
     """
     source = Path(backstop.__file__).read_text(encoding="utf-8")
     for reason in backstop.DEGRADED_REASONS:
-        # 토큰 경계를 요구한다 — 부분 문자열로 세면 `state-corrupt-schema` 같은
-        # 미래의 사유가 `state-corrupt`의 복제로 오탐된다.
+        # 토큰 경계를 요구한다 — 부분 문자열로 세면 접미사가 붙은 미래의 사유가
+        # 기존 사유의 복제로 오탐된다.
         hits = re.findall(rf"(?<![\w-]){re.escape(reason)}(?![\w-])", source)
         assert len(hits) == 1, f"사유 이름이 복제됐다: {reason}"
