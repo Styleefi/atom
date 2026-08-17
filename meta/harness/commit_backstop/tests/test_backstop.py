@@ -699,9 +699,13 @@ def test_unreadable_state_reports_the_lost_baseline(monkeypatch, capsys, tmp_pat
 
 def test_absent_state_file_is_not_a_lost_baseline(monkeypatch, capsys, tmp_path):
     # 부재를 상실로 기록하면 모든 새 클론이 첫 호출에서 퇴화를 보고한다.
-    repo = _baseline(monkeypatch, tmp_path)  # 상태 파일 없이 첫 실행 == 0
-    assert _ledger_entries(tmp_path) == []
+    repo = _make_repo(tmp_path)
+    _commit(repo, "chore: init")
+    _git(repo, "push", "-q", "-u", "origin", "main")
+    assert not os.path.exists(_state_path(repo))  # 전제를 헬퍼에 맡기지 않는다
+    assert _run(monkeypatch, repo) == 0
     assert capsys.readouterr().err == ""
+    assert _ledger_entries(tmp_path) == []
 
 
 def test_state_that_cannot_be_rebuilt_warns_without_a_ledger_line(

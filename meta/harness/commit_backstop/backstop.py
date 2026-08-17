@@ -263,7 +263,7 @@ def _load_state(path: str) -> tuple[dict, str | None]:
 
 
 def _store_state(path: str, state: dict) -> bool:
-    """상태를 원자적으로 쓴다(임시 파일 + os.replace). 실패는 호출자에게 알린다.
+    """상태를 임시 파일 + os.replace로 쓴다. 실패는 호출자에게 알린다.
 
     쓰기 도중 중단으로 반쪽짜리 파일이 남으면 다음 실행이 기준선을 잃으므로,
     원자성은 그 상실을 막는 요건이다.
@@ -682,8 +682,8 @@ def main() -> int:
     persisted = _store_state(state_path, {"seen": seen, "checked": checked})
 
     if loss is not None:
-        # 채널마다 비용이 다르다. stderr는 휘발성이라 `git remote` 실패와 같은 층에서
-        # 매 호출 알리고, 원장은 누적되므로 다시 쓰는 데 성공해 반복이 묶일 때만 남긴다.
+        # 채널마다 비용이 다르다. stderr는 휘발성이라 알리고, 원장은 누적되므로
+        # 다시 쓰는 데 성공해 반복이 묶일 때만 남긴다.
         warnings.append(
             f"[commit-backstop] {state_path} exists but yielded no usable "
             "baseline - advances since the last recorded tip were NOT checked"
