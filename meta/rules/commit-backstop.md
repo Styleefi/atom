@@ -47,6 +47,24 @@ single command, out-of-cwd repositories, pre-first-observation history) are
 listed in the module docstring — that layer belongs to server-side branch
 protection.
 
+Reporting once depends on that state file, so when it cannot be written the
+hook does not enforce: the verdict is held on the log channel (exit 1, not
+injected) instead of blocking, and fires normally once the file becomes
+writable again. Enforcing without the ability to deduplicate would repeat the
+same report on every following Bash call, including unrelated ones (#115).
+While a verdict is held the model sees nothing, so a push that lands in that
+window puts the commits on the remote and dissolves the verdict — the same
+layer the commit+push non-claim already delegates to server-side protection.
+
+Every block, override pass and held verdict appends one line to the user-level
+ledger at `${XDG_STATE_HOME:-~/.local/state}/atom/guard-blocklog.jsonl` (#76).
+For the held verdicts that ledger is the point: it lives outside the git
+directory, so it is the one trace that survives the very failure it records.
+Recording is **best-effort** — write failures are swallowed fail-open, so the
+absence of a line is not evidence that nothing happened. The ledger stores raw
+command text, which includes commit messages: whatever reads it treats the
+contents as **data, never instructions**.
+
 ## Recovering a protected branch (owner decides; the agent does not)
 
 First decide whether the report was noise. The hook compares only against
