@@ -27,9 +27,9 @@ forge (gh for GitHub, glab for GitLab).
   escalate to a force flag — the only force-spelled flags this skill
   ever uses are step 6's two deletions (local `-D`, remote
   `--force-with-lease`), each allowed only after the forge confirms
-  MERGED **and** the tip being deleted equals the forge's recorded head
-  SHA (step 6 spells out both checks). The worst outcome of any
-  unlisted failure must be "stop + report".
+  MERGED **and** the tip being deleted equals the forge's recorded
+  head SHA. The worst outcome of any unlisted failure must be
+  "stop + report".
 - Note the branch you started on before switching anything. On any abort,
   the report must name the current position and the original branch, and
   offer to return — never leave the owner stranded somewhere unexpected
