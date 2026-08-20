@@ -7,7 +7,8 @@ commit-backstop.md의 "`degraded` reasons: ..." 행과 backstop.DEGRADED_REASONS
 
 경위: PR #118 리뷰 루프가 같은 열거의 사본 다섯 개를 따로 어긋나게 두었고, 산문을
 다시 쓰는 처방이 라운드마다 새 결함을 만들었다. 결속이 덮는 범위는 이 두 곳이며,
-테스트 파일의 wire-value 리터럴은 그 밖이다. 저장소 루트는 test_types_sync와 같은 고정 오프셋으로
+테스트 파일들의 wire-value 리터럴은 그 밖이다(지금은 전부 test_backstop.py에
+있다). 저장소 루트는 test_types_sync와 같은 고정 오프셋으로
 찾는다 — meta/는 자체 uv 프로젝트라 pyproject 마커 탐색이 오답을 낸다.
 """
 
