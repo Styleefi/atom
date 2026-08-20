@@ -7,7 +7,8 @@ commit-backstop.md의 "`degraded` reasons: ..." 행과 backstop.DEGRADED_REASONS
 
 경위: PR #118 리뷰 루프가 같은 열거의 사본 다섯 개를 따로 어긋나게 두었고, 산문을
 다시 쓰는 처방이 라운드마다 새 결함을 만들었다. 결속이 덮는 범위는 이 두 곳이며,
-테스트 파일의 wire-value 리터럴은 그 밖이다. 저장소 루트는 test_types_sync와 같은 고정 오프셋으로
+테스트 파일들의 wire-value 리터럴은 그 밖이다(지금은 전부 test_backstop.py에
+있다). 저장소 루트는 test_types_sync와 같은 고정 오프셋으로
 찾는다 — meta/는 자체 uv 프로젝트라 pyproject 마커 탐색이 오답을 낸다.
 """
 
@@ -33,10 +34,20 @@ def test_rule_degraded_reasons_match_the_constant() -> None:
     # 집합만 맞추면 재정렬이 그 설명을 조용히 뒤집는다.
     parsed = [token.strip().strip("`") for token in matches[0].split(",")]
     assert parsed == list(backstop.DEGRADED_REASONS)
-    # 위 단언은 두 순서를 서로 묶을 뿐이다. 규칙 파일이 "The first is…"로
-    # 위치를 지칭하므로 첫 자리가 무엇인지도 고정한다 — 상수와 규칙을 함께
-    # 재정렬하면 위 단언은 통과하고 산문만 조용히 뒤집힌다.
-    assert backstop.DEGRADED_REASONS[0] == backstop.REASON_STATE_UNWRITABLE
+    # 위 단언은 두 순서를 서로 묶을 뿐이다. 규칙 파일이 "The first is…"와
+    # "The second and third…"로 위치를 지칭하므로 그 자리들을 상수에도 고정한다 —
+    # 상수와 규칙을 함께 재정렬하면 위 단언은 통과하고 산문만 조용히 뒤집힌다.
+    assert backstop.DEGRADED_REASONS[:3] == (
+        backstop.REASON_STATE_UNWRITABLE,
+        backstop.REASON_STATE_UNREADABLE,
+        backstop.REASON_STATE_CORRUPT,
+    )
+    # 위치 지칭의 존재 자체도 여기 묶는다 — 규칙이 위치 지칭을 그만두면 이
+    # 단언이 실패해, 근거를 잃은 pin이 조용히 남는 대신 함께 회수된다.
+    # 짧은 접두어("The first is")는 무관한 미래 문장에도 맞을 수 있어
+    # 술어까지 포함해 앵커한다.
+    assert "The first is a verdict" in text
+    assert "The second and third mean" in text
 
 
 def test_reason_names_appear_once_in_the_source() -> None:
