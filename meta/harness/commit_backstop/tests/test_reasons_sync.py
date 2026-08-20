@@ -33,10 +33,20 @@ def test_rule_degraded_reasons_match_the_constant() -> None:
     # 집합만 맞추면 재정렬이 그 설명을 조용히 뒤집는다.
     parsed = [token.strip().strip("`") for token in matches[0].split(",")]
     assert parsed == list(backstop.DEGRADED_REASONS)
-    # 위 단언은 두 순서를 서로 묶을 뿐이다. 규칙 파일이 "The first is…"로
-    # 위치를 지칭하므로 첫 자리가 무엇인지도 고정한다 — 상수와 규칙을 함께
-    # 재정렬하면 위 단언은 통과하고 산문만 조용히 뒤집힌다.
-    assert backstop.DEGRADED_REASONS[0] == backstop.REASON_STATE_UNWRITABLE
+    # 위 단언은 두 순서를 서로 묶을 뿐이다. 규칙 파일이 "The first is…"와
+    # "The second and third…"로 위치를 지칭하므로 그 자리들을 상수에도 고정한다 —
+    # 상수와 규칙을 함께 재정렬하면 위 단언은 통과하고 산문만 조용히 뒤집힌다.
+    assert backstop.DEGRADED_REASONS[:3] == (
+        backstop.REASON_STATE_UNWRITABLE,
+        backstop.REASON_STATE_UNREADABLE,
+        backstop.REASON_STATE_CORRUPT,
+    )
+    # 위치 지칭의 존재 자체도 여기 묶는다 — 규칙이 위치 지칭을 그만두면 이
+    # 단언이 실패해, 근거를 잃은 pin이 조용히 남는 대신 함께 회수된다.
+    # 짧은 접두어("The first is")는 무관한 미래 문장에도 맞을 수 있어
+    # 술어까지 포함해 앵커한다.
+    assert "The first is a verdict" in text
+    assert "The second and third mean" in text
 
 
 def test_reason_names_appear_once_in_the_source() -> None:

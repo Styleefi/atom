@@ -54,8 +54,11 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     - 위반 없이 상태 쓰기만 실패하면 침묵한다. 매 호출 알리면 항시 노이즈가
       되므로 판정이 억제된 순간에만 알린다.
     - 상태 파일이 있는데 쓸 수 있는 기준선을 못 내주면(읽기 실패·손상) `_load_state`가
-      최초 실행을 돌려주므로, 그동안 훅은 적발하지 않고 그 구간은 이후에도
-      판정되지 않는다. stderr로 알리고, 원장에는
+      최초 실행을 돌려주므로, 그동안 훅은 적발하지 않는다. 기준선은 상태를 다시
+      쓰는 데 성공한 호출에서 그 호출의 tip들로 다시 시작하며, 그때까지 잃은
+      구간은 계속 자란다. 그 구간의 전진은 판정 없이 지나가고, 그 안의 미발행
+      커밋은 이후의 검사 범위에 다시 들어오면 그때 판정된다. stderr로 알리고,
+      원장에는
       상태를 다시 쓰는 데 성공한 호출에서만 남긴다. 다시 쓰지 못하는 동안은 중복
       제거가 불가능해 같은 줄이 쌓이므로 원장에 쓰지 않는다 — 선언된 경계다
       (#119 오너 결정).
@@ -684,9 +687,16 @@ def main() -> int:
     if loss is not None:
         # 채널마다 비용이 다르다. stderr는 휘발성이라 알리고, 원장은 누적되므로
         # 다시 쓰는 데 성공해 반복이 묶일 때만 남긴다.
+        # 재시작 주장은 쓰기 성공에 조건화한다 — 실패한 호출에서 "restarts"를
+        # 말하면 아직 자라는 구간을 닫힌 것처럼 보고하게 된다.
+        outcome = (
+            "the baseline restarts at the current tips"
+            if persisted
+            else "the state could not be rewritten and the gap is still growing"
+        )
         warnings.append(
             f"[commit-backstop] {state_path} exists but yielded no usable "
-            "baseline - nothing was judged, and this gap is not revisited"
+            f"baseline - nothing was judged; {outcome}"
         )
         if persisted:
             _log(

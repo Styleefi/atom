@@ -67,9 +67,11 @@ Blocks, override passes and degraded outcomes are appended to the user-level
 ledger at `${XDG_STATE_HOME:-~/.local/state}/atom/guard-blocklog.jsonl` (#76).
 `degraded` reasons: `state-unwritable`, `state-unreadable`, `state-corrupt`,
 `branch-eval-failed`, `head-eval-failed`. The first is a verdict that was
-produced and not enforced; the other four mean no verdict was reached at all,
+produced and not enforced; the others mean no verdict was reached at all,
 and counting those as suppressed violations inflates exactly the number this
-recording exists to observe. For a held verdict the ledger is the point: it lives outside the git
+recording exists to observe. The second and third mean the state file was
+there but yielded no usable baseline — the lost-baseline reasons that
+meta/README.md's ledger guidance refers to. For a held verdict the ledger is the point: it lives outside the git
 directory, so the trace survives the failure it records.
 Recording is **best-effort** — write failures are swallowed fail-open, so the
 absence of a line is not evidence that nothing happened. The ledger stores raw

@@ -660,7 +660,10 @@ def test_corrupt_state_reports_the_lost_baseline_and_stops_repeating(
     with open(_state_path(repo), "w", encoding="utf-8") as fp:
         fp.write("{ not json")
     assert _run(monkeypatch, repo) == 1  # 기준선 상실: 판정 없이 알리기만
-    assert "no usable baseline" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "no usable baseline" in err
+    # 다시 쓰기에 성공한 호출이므로 재시작을 말해도 된다.
+    assert "restarts at the current tips" in err
     entries = _ledger_entries(tmp_path)
     assert len(entries) == 1
     assert entries[0]["event"] == "degraded"
@@ -718,7 +721,11 @@ def test_state_that_cannot_be_rebuilt_warns_without_a_ledger_line(
     _commit(repo, "feat: on main")
     for _ in range(2):
         assert _run(monkeypatch, repo) == 1
-        assert "no usable baseline" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert "no usable baseline" in err
+        # 다시 쓰지 못한 호출이 "restarts"를 말하면 자라는 구간을 닫힌 것처럼
+        # 보고하게 된다 — 실패 변형을 고정한다.
+        assert "the gap is still growing" in err
     assert _ledger_entries(tmp_path) == []  # 선언된 경계: 원장에는 쌓지 않는다
 
 
