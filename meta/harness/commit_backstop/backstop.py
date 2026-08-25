@@ -28,11 +28,11 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
       보호의 몫이다(평범한 단일 라인 형태는 commit_guard가 실행 전에 차단).
     - payload cwd 밖 저장소(`git -C`, 서브모듈→부모)는 cwd가 그 저장소로
       돌아온 뒤에야 지연 적발된다.
-    - tip을 처음 기록하는 호출은 판정하지 않는다(기록만). 예외는 기록의
-      상속이다 — `HEAD@<git-dir>` 키는 worktree가 사라져도 남으므로, 같은
-      git-dir을 다시 얻는 새 worktree의 첫 호출은 첫 기록이 아니라 옛 tip을
-      직전 tip으로 삼는다. 덜 판정하는 방향은 없다. #52의 오래된 미push
-      커밋 트레이드오프와 같은 급으로 수용했다 — 선언된 경계다(PR #126 오너
+    - 처음 기록되는 tip은 판정하지 않는다(기록만). 예외는 기록의 상속이다 —
+      `HEAD@<git-dir>` 키는 worktree가 사라져도 남으므로, 같은 git-dir을
+      다시 얻는 새 worktree의 HEAD는 첫 기록이 아니라 옛 tip을 직전 tip으로
+      삼는다. 덜 판정하는 방향은 없다. #52의 오래된 미push 커밋
+      트레이드오프와 같은 급으로 수용했다 — 선언된 경계다(PR #126 오너
       결정).
     - 오래된 미push 커밋이 HEAD로 들어오면(checkout·merge·rebase·cherry-pick
       불문) 그 커밋이 헤더 보고를 유발한다 — 이 명령이 만든 커밋이 아니어도.
