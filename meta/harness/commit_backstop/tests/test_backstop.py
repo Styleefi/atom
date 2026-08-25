@@ -849,6 +849,30 @@ def test_worktree_enumeration_failure_degrades_to_first_observation(
     assert _run(monkeypatch, wt) == 0  # 최초 관찰 — 기록 이전 동작으로 강등
 
 
+def test_reacquired_git_dir_inherits_the_old_baseline(monkeypatch, capsys, tmp_path):
+    # 선언된 경계(PR #126): HEAD@<git-dir> 키는 worktree가 사라져도 남아, 같은
+    # git-dir을 다시 얻는 worktree의 첫 호출이 옛 tip..현재 tip을 판정한다.
+    repo, wt, _ = _observed_worktree(monkeypatch, tmp_path)
+    key = _head_key(wt)
+    _git(repo, "worktree", "remove", "--force", str(wt))
+    # 제거 후 persist를 한 번 거쳐도 키가 남는다 — primary를 움직여 조기
+    # 반환을 피한다(움직임 없는 호출은 저장 단계에 닿지 않는다).
+    _git(repo, "checkout", "-q", "-b", "feat/other")
+    _commit(repo, "feat: primary moves")
+    assert _run(monkeypatch, repo) == 0
+    assert key in _read_state(repo)["seen"]  # 키는 남는다
+    # 훅이 본 적 없는 나쁜 커밋을 얹은 브랜치를 같은 경로에 다시 추가한다.
+    bad = _commit(repo, "Bad header never observed here.")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "worktree", "add", "-q", str(wt), "feat/other")
+    assert _head_key(wt) == key  # 같은 git-dir을 다시 얻었다
+    assert _run(monkeypatch, wt) == backstop.EXIT_BLOCK  # 첫 기록이 아니다
+    err = capsys.readouterr().err
+    assert bad[:12] in err
+    assert "Conventional Commits" in err  # 헤더 레인
+    assert "landed on local" not in err  # 브랜치 레인 오인 봉인
+
+
 def test_reseed_never_fires_on_the_healthy_path(monkeypatch, capsys, tmp_path):
     repo, wt, _ = _observed_worktree(monkeypatch, tmp_path)
     # 항상 기록하는 구현은 아직 판정하지 않은 형제 tip을 정상 경로에서
