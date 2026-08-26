@@ -28,7 +28,12 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
       보호의 몫이다(평범한 단일 라인 형태는 commit_guard가 실행 전에 차단).
     - payload cwd 밖 저장소(`git -C`, 서브모듈→부모)는 cwd가 그 저장소로
       돌아온 뒤에야 지연 적발된다.
-    - ref를 처음 관찰한 시점 이전의 커밋은 판정하지 않는다(기록만).
+    - 처음 기록되는 tip은 판정하지 않는다(기록만). 예외는 기록의 상속이다 —
+      `HEAD@<git-dir>` 키는 worktree가 사라져도 남으므로, 같은 git-dir을
+      다시 얻는 새 worktree의 HEAD는 첫 기록이 아니라 옛 tip을 직전 tip으로
+      삼는다. 덜 판정하는 방향은 없다. #52의 오래된 미push 커밋
+      트레이드오프와 같은 급으로 수용했다 — 선언된 경계다(PR #126 오너
+      결정).
     - 오래된 미push 커밋이 HEAD로 들어오면(checkout·merge·rebase·cherry-pick
       불문) 그 커밋이 헤더 보고를 유발한다 — 이 명령이 만든 커밋이 아니어도.
       수용한 트레이드오프다(#52, PR #54: checked dedup으로 ts 필터 대체).
@@ -55,14 +60,30 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
       되므로 판정이 억제된 순간에만 알린다.
     - 상태 파일이 있는데 쓸 수 있는 기준선을 못 내주면(읽기 실패·손상) `_load_state`가
       최초 실행을 돌려주므로, 그동안 훅은 적발하지 않는다. 기준선은 상태를 다시
-      쓰는 데 성공한 호출에서 다시 시작하되, 그 호출이 보는 tip들(보호 브랜치 +
-      자기 worktree의 HEAD)만 담는다 — 다른 worktree의 HEAD 기준선은 이 재시작에
-      담기지 않아 그쪽 다음 호출이 최초 관찰로 기록만 한다(#124). 다시 쓰기
+      쓰는 데 성공한 호출에서 다시 시작한다. 그 호출은 worktree를 열거해 얻은
+      HEAD들을 열거 시점의 tip으로 함께 기록하므로, 기록된 worktree의 HEAD
+      기준선은 최초 관찰로 퇴행하지 않고 자기 tip에서 재시작한다(#124) — 그
+      worktree가 훅을 한 번도 부르지 않았어도 같고, 기준선이 유지되는 한 그쪽
+      다음 호출은 기록된 tip을 기준선으로 쓴다. 담기지 않는 경우가 있다 —
+      열거 자체가 실패하면 다른 worktree 전부가, 개별 스탠자가 걸러지면(경로 줄
+      부재·경로 해석 실패·prunable·HEAD 줄 부재 또는 0-SHA) 그 worktree만 —
+      어느 쪽도 알리지 않는다. 빠진 worktree의 HEAD 기준선은 그쪽 다음 호출이
+      최초 관찰로 기록만 한다. 이 호출 자신이 관찰한 자기 HEAD tip은 열거
+      결과를 덮어 담기고, 관찰된 보호 브랜치 tip은 열거와 무관하게 담긴다.
+      다시 쓰기
       전까지 잃은 구간은 계속 자란다. 판정 없이 지나간 구간의 미발행 커밋은
-      이후의 검사 범위에 다시 들어오면 그때 판정된다. stderr로 알리고, 원장에는
-      상태를 다시 쓰는 데 성공한 호출에서만 남긴다. 다시 쓰지 못하는 동안은 중복
-      제거가 불가능해 같은 줄이 쌓이므로 원장에 쓰지 않는다 — 선언된 경계다
-      (#119 오너 결정).
+      이후의 검사 범위에 다시 들어오면 그때 판정된다. 저장 단계에 도달한 호출은
+      stderr로 알리고, 원장에는 상태를 다시 쓰는 데 성공한 호출에서만 남긴다.
+      다시 쓰지 못하는 동안은 중복 제거가 불가능해 같은 줄이 쌓이므로 원장에
+      쓰지 않는다 — 선언된 경계다(#119 오너 결정).
+    - 상태 파일 부재는 최초 실행과 구분하지 않는다(#119). 부재로 출발하는
+      호출도 위 항목의 재시작과 같은 방식으로 worktree들의 HEAD를 담는다.
+      부재 후 첫 훅 호출 전에 들어온 위반은 재수립되는 기준선에 흡수되거나
+      기준선 밖에 남아 그 시점에는 판정되지 않는다 — 삭제와 위반 커밋을 한
+      명령에 묶든, 훅 밖 경로로 지우든 같다. 이후 검사 범위에 다시 들어오면
+      그때 판정된다. 그 뒤의 위반은 앞선 호출이 상태 다시 쓰기에 성공했고 그
+      worktree의 HEAD 키가 담겼을 때 판정 범위에 들어온다(그 사이 기준선이
+      다시 유실되면 위 상실 항목이 적용된다) — 선언된 경계다(#124 오너 결정).
     - 평가에 실패한 구간(git 오류·timeout, 직전 tip 소멸)은 두 lane 모두 tip을
       그대로 전진시키므로 다시 검사되지 않는다. 경고만 남는다 — 붙들고 재시도하면
       영구 실패에서 매 호출 같은 실패를 반복해 훅이 세션을 마비시킨다.
@@ -87,6 +108,10 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
     - merge 커밋은 부모 수로 걸러져(`--no-merges`) 제목을 읽지 않는다.
       이와 별개로 git 자동 생성 제목 3종(`Revert "`, `fixup! `, `squash! `)은
       접두사 매칭으로 헤더 검사에서 면제한다 — 누가 썼는지는 보지 않는다.
+    - git < 2.36은 전제 밖이다 — `worktree list --porcelain -z`(2.36)가 이
+      모듈이 쓰는 git 기능 바닥의 최고점이다. 버전은 검사하지 않으며,
+      미만에서는 기능별로 제각기 열화하고(그 양상은 주장 밖), 2.31 미만은
+      훅 전체가 조용히 무동작이다.
 
 보고 채널:
     stderr는 exit 42(래퍼가 2로 되매핑)일 때만 모델 컨텍스트에 주입된다.
@@ -108,8 +133,9 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
 상태:
     `<git-common-dir>/atom-commit-backstop.json` —
     `{"seen": {ref: sha, ...}, "checked": [sha, ...]}`. HEAD는 worktree별
-    `HEAD@<git-dir>` 키. 읽지 못하거나 스키마가 어긋나면 빈 상태로 대체하고 그
-    사실을 알린다 — 비주장 목록 참고.
+    `HEAD@<git-dir>` 키(기준선이 빈 채 출발한 호출은 열거한 다른 worktree의
+    키도 함께 쓴다 — 비주장 목록 참고). 읽지 못하거나 스키마가 어긋나면 빈
+    상태로 대체하고 그 사실을 알린다 — 비주장 목록 참고.
 
 종료 코드:
     0 통과 / 1 비차단(로그 전용) / 42 위반(래퍼가 2로 되매핑).
@@ -227,6 +253,56 @@ def _rev_parse(cwd: str | None, ref: str) -> str | None:
     if out is None:
         return None
     return out.strip() or None
+
+
+def _worktree_heads(cwd: str | None) -> dict[str, str]:
+    """저장소의 모든 worktree에 대해 `HEAD@<git-dir>` 키와 현재 tip을 조립한다.
+
+    기준선이 빈 채 출발한 호출(상실·부재) 전용(#124): 재시작하는 호출은 자기
+    worktree의 HEAD만 관찰하므로, 함께 기록하지 않으면 다른 worktree의 HEAD
+    기준선이 사라져 그쪽 다음 호출이 최초 관찰로 퇴행한다. 키는 현재 tip
+    수집과 같은 `_repo_dirs` realpath 정규화로 만들어 바이트 단위로 일치한다.
+
+    `-z`(NUL 종결, git >= 2.36)는 위생이 아니라 건전성 요건이다 — 개행 종결
+    porcelain은 경로·lock reason의 개행이 가짜 `HEAD` 줄을 위조할 수 있다.
+    스탠자를 경계까지 모았다가 방출하므로 `HEAD` 뒤에 오는 `prunable`(등록만
+    남은 worktree — 경로가 재사용되면 stale sha로 키를 오염시킨다)을 배제할
+    수 있다.
+
+    실패는 조용히 좁힌다 — 열거 자체가 실패하면 빈 dict(이 기록 이전과 같은
+    동작으로 강등), 개별 스탠자가 걸러지면 그 항목만 뺀다(걸러지는 조건의
+    열거는 모듈 docstring 비주장 목록이 보유한다 — 사본이 갈리면 목록 쪽이
+    거짓말이 된다). bare 스탠자는 HEAD 줄이 없어 자연 제외된다.
+
+    Args:
+        cwd: hook 페이로드의 Bash 작업 디렉터리.
+
+    Returns:
+        `{f"HEAD@{git_dir}": sha}` — 걸러진 worktree는 빠진 dict.
+    """
+    out = _run_git(cwd, "worktree", "list", "--porcelain", "-z")
+    if out is None:
+        return {}
+    heads: dict[str, str] = {}
+    path: str | None = None
+    sha: str | None = None
+    prunable = False
+    for item in out.split("\0"):
+        if item.startswith("worktree "):
+            path = item[len("worktree "):]
+        elif item.startswith("HEAD "):
+            sha = item[len("HEAD "):].strip()
+        elif item.startswith("prunable"):
+            prunable = True
+        elif not item:  # 스탠자 경계 — 방출 후 리셋
+            # sha.strip("0")이 falsy면 해석 불가 HEAD(미탄생·손상 admin dir).
+            if path and sha and sha.strip("0") and not prunable:
+                dirs = _repo_dirs(path)
+                if dirs is not None:
+                    heads[f"HEAD@{dirs[1]}"] = sha
+            path = sha = None
+            prunable = False
+    return heads
 
 
 def _load_state(path: str) -> tuple[dict, str | None]:
@@ -681,6 +757,13 @@ def main() -> int:
                     )
 
     seen = dict(state["seen"])
+    if not state["seen"]:
+        # 상실(_load_state의 모든 상실 갈래는 빈 상태를 돌려준다)·부재·삭제가
+        # 전부 이 분기로 온다. 재시작이 이 호출의 시야로 좁혀지면 다른
+        # worktree의 HEAD 기준선이 사라진다 — 전 worktree tip을 함께
+        # 기록한다(#124). moved가 뒤에서 덮어써 이 호출 자신이 판정에 쓴
+        # 관찰이 이긴다.
+        seen.update(_worktree_heads(cwd))
     seen.update({key: new for key, (_, new) in moved.items()})
     checked = (state["checked"] + newly_checked)[-CHECKED_CAP:]
     persisted = _store_state(state_path, {"seen": seen, "checked": checked})

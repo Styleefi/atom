@@ -732,6 +732,159 @@ def test_state_that_cannot_be_rebuilt_warns_without_a_ledger_line(
     assert _ledger_entries(tmp_path) == []  # 선언된 경계: 원장에는 쌓지 않는다
 
 
+def _observed_worktree(monkeypatch, tmp_path):
+    """기준선 재시작 테스트 공통 준비: primary + 관찰된 worktree.
+
+    main·primary HEAD·worktree HEAD가 전부 같은 sha면 "어느 tip을 기록하는가"
+    를 구분할 수 없어 잘못된 출처(호출자 HEAD, main tip)를 심는 구현이
+    통과한다 — worktree tip을 반드시 분기시킨다. 분기 커밋의 추가 호출은
+    무음·원장 무기록이다(헤더 정상, main 부동).
+    """
+    repo = _baseline(monkeypatch, tmp_path)
+    wt = tmp_path / "wt"
+    _git(repo, "worktree", "add", "-q", str(wt), "-b", "feat/wt", "main")
+    assert _run(monkeypatch, wt) == 0  # HEAD@<wt-git-dir> 최초 관찰
+    wt_tip = _commit(wt, "feat: wt work")
+    assert _run(monkeypatch, wt) == 0  # 분기한 tip을 조용히 기록
+    return repo, wt, wt_tip
+
+
+def _head_key(path) -> str:
+    """worktree의 `HEAD@<git-dir>` 키를 구현과 독립적으로 계산한다."""
+    out = _git(path, "rev-parse", "--path-format=absolute", "--git-dir")
+    return f"HEAD@{os.path.realpath(out)}"
+
+
+def test_lost_baseline_rewrite_reseeds_every_worktree_head(
+    monkeypatch, capsys, tmp_path
+):
+    repo, wt, wt_tip = _observed_worktree(monkeypatch, tmp_path)
+    # 한 번도 관찰되지 않은 worktree — 기록이 기억이 아니라 열거에 근거함을
+    # 고정한다(마지막 스탠자만 남기는 구현도 여기서 죽는다).
+    wt2 = tmp_path / "wt2"
+    _git(repo, "worktree", "add", "-q", str(wt2), "-b", "feat/wt2", "main")
+    with open(_state_path(repo), "w", encoding="utf-8") as fp:
+        fp.write("{ not json")
+    assert _run(monkeypatch, repo) == 1
+    assert "restarts at this call's tips" in capsys.readouterr().err
+    main_tip = _git(repo, "rev-parse", "refs/heads/main")
+    seen = _read_state(repo)["seen"]
+    assert set(seen) == {
+        "refs/heads/main",
+        _head_key(repo),
+        _head_key(wt),
+        _head_key(wt2),
+    }
+    assert wt_tip != main_tip  # tip이 갈려야 아래 단언이 출처를 구분한다
+    assert seen[_head_key(wt)] == wt_tip
+    assert seen[_head_key(repo)] == _git(repo, "rev-parse", "HEAD")
+    assert seen[_head_key(wt2)] == main_tip
+
+
+def test_sibling_worktree_violation_after_lost_baseline_blocks(
+    monkeypatch, capsys, tmp_path
+):
+    repo, wt, _ = _observed_worktree(monkeypatch, tmp_path)
+    with open(_state_path(repo), "w", encoding="utf-8") as fp:
+        fp.write("{ not json")
+    # 재시작은 반드시 primary에서 — worktree 자신이 재시작하면 자기 HEAD는
+    # 수정 없이도 기록되어(#124 이전 동작) 이 테스트가 아무것도 증명하지
+    # 못한다.
+    assert _run(monkeypatch, repo) == 1
+    capsys.readouterr()
+    bad = _commit(wt, "Bad header in sibling.")
+    assert _run(monkeypatch, wt) == backstop.EXIT_BLOCK
+    err = capsys.readouterr().err
+    assert bad[:12] in err
+    assert "Conventional Commits" in err  # 헤더 레인이 잡은 것
+    assert "landed on local" not in err  # 브랜치 레인 오인 봉인
+
+
+def test_deleted_state_reseeds_quietly_and_still_blocks_siblings(
+    monkeypatch, capsys, tmp_path
+):
+    repo, wt, wt_tip = _observed_worktree(monkeypatch, tmp_path)
+    os.remove(_state_path(repo))
+    # 부재는 상실이 아니다(#119) — 조용함을 함께 고정한다.
+    assert _run(monkeypatch, repo) == 0
+    assert capsys.readouterr().err == ""
+    assert _ledger_entries(tmp_path) == []
+    assert _read_state(repo)["seen"][_head_key(wt)] == wt_tip
+    bad = _commit(wt, "Bad header after deletion.")
+    assert _run(monkeypatch, wt) == backstop.EXIT_BLOCK
+    assert bad[:12] in capsys.readouterr().err
+
+
+def test_worktree_enumeration_failure_degrades_to_first_observation(
+    monkeypatch, capsys, tmp_path
+):
+    repo, wt, _ = _observed_worktree(monkeypatch, tmp_path)
+    with open(_state_path(repo), "w", encoding="utf-8") as fp:
+        fp.write("{ not json")
+    real_run = subprocess.run
+
+    class _FlakyWorktreeList:
+        """`worktree list`만 토글로 실패시킨다.
+
+        tmp_path에 이 테스트 이름의 "worktree"가 들어가므로 부분 문자열
+        매칭은 경로 인자를 오검출한다 — 리스트 원소 정확 일치만 쓴다.
+        복원은 토글로 한다(`_BreakReplace` docstring 참고 — `undo()`는
+        conftest의 원장 격리까지 되돌린다).
+        """
+
+        broken = True
+
+        def __call__(self, argv, **kwargs):
+            if self.broken and "worktree" in argv:
+                raise subprocess.TimeoutExpired(argv, backstop.GIT_TIMEOUT_SECONDS)
+            return real_run(argv, **kwargs)
+
+    flaky = _FlakyWorktreeList()
+    monkeypatch.setattr(backstop.subprocess, "run", flaky)
+    assert _run(monkeypatch, repo) == 1
+    assert "restarts at this call's tips" in capsys.readouterr().err  # 문구 불변
+    assert _head_key(wt) not in _read_state(repo)["seen"]
+    flaky.broken = False
+    _commit(wt, "Bad header dropped by degradation.")
+    assert _run(monkeypatch, wt) == 0  # 최초 관찰 — 기록 이전 동작으로 강등
+
+
+def test_reacquired_git_dir_inherits_the_old_baseline(monkeypatch, capsys, tmp_path):
+    # 선언된 경계(PR #126): HEAD@<git-dir> 키는 worktree가 사라져도 남아, 같은
+    # git-dir을 다시 얻는 worktree의 첫 호출이 옛 tip..현재 tip을 판정한다.
+    repo, wt, _ = _observed_worktree(monkeypatch, tmp_path)
+    key = _head_key(wt)
+    _git(repo, "worktree", "remove", "--force", str(wt))
+    # 제거 후 persist를 한 번 거쳐도 키가 남는다 — primary를 움직여 조기
+    # 반환을 피한다(움직임 없는 호출은 저장 단계에 닿지 않는다).
+    _git(repo, "checkout", "-q", "-b", "feat/other")
+    _commit(repo, "feat: primary moves")
+    assert _run(monkeypatch, repo) == 0
+    assert key in _read_state(repo)["seen"]  # 키는 남는다
+    # 훅이 본 적 없는 나쁜 커밋을 얹은 브랜치를 같은 경로에 다시 추가한다.
+    bad = _commit(repo, "Bad header never observed here.")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "worktree", "add", "-q", str(wt), "feat/other")
+    assert _head_key(wt) == key  # 같은 git-dir을 다시 얻었다
+    assert _run(monkeypatch, wt) == backstop.EXIT_BLOCK  # 첫 기록이 아니다
+    err = capsys.readouterr().err
+    assert bad[:12] in err
+    assert "Conventional Commits" in err  # 헤더 레인
+    assert "landed on local" not in err  # 브랜치 레인 오인 봉인
+
+
+def test_reseed_never_fires_on_the_healthy_path(monkeypatch, capsys, tmp_path):
+    repo, wt, _ = _observed_worktree(monkeypatch, tmp_path)
+    # 항상 기록하는 구현은 아직 판정하지 않은 형제 tip을 정상 경로에서
+    # 전진시켜 #124를 더 넓게 재도입한다 — 가드의 반대편을 고정한다.
+    bad = _commit(wt, "Bad header not yet seen.")
+    _git(repo, "checkout", "-q", "-b", "feat/p")
+    _commit(repo, "feat: primary work")
+    assert _run(monkeypatch, repo) == 0  # persist에 도달하되 기록은 안 한다
+    assert _run(monkeypatch, wt) == backstop.EXIT_BLOCK
+    assert bad[:12] in capsys.readouterr().err
+
+
 def test_override_does_not_suppress_the_lost_baseline(monkeypatch, capsys, tmp_path):
     repo = _baseline(monkeypatch, tmp_path)
     _commit(repo, "feat: on main")
