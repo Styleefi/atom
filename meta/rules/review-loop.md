@@ -27,10 +27,15 @@ loop, never the owner.
 ## Severity bar
 
 - Before round 1, declare in the ledger the concrete defect classes that
-  count as above-bar for this PR, plus one or two below-bar examples.
-  Restating an abstract formula is not a declaration. Guide: "a finding with
-  a realistic scenario reproducing the defect class this PR exists to fix,
-  or an equally harmful malfunction."
+  count as above-bar for this PR, plus one or two below-bar examples. A
+  declared class names two things: its **wrong action** — what the artifact
+  under review, or a later session following the diff as written, does wrong
+  while a finding in the class stands — and its **bound** — a mechanically
+  checkable limit on fix commits, such as a test the fix must add or a count
+  no fix may raise. Restating an abstract formula, or a class missing either
+  part, is not a declaration (Origin: #113). Guide: "a finding with a
+  realistic scenario reproducing the defect class this PR exists to fix, or
+  an equally harmful malfunction."
 - Floor: the declared classes MUST include failure of the PR's purpose (the
   issue it closes, or the PR body's stated goal).
 - Scale the bar to the diff's behavior surface, not its line count.
@@ -64,15 +69,15 @@ loop, never the owner.
   trigger-(a) comparisons use the corrected number. (Measured: PR #86
   round 4 nearly added guard code against CI-disabling conditionals — a
   state no accident produces.)
-- Raising the bar (adding a class) needs only a ledger entry through
-  round 2; from round 3 on it requires owner approval. A serious finding
-  matching no class is handled by adding its class, under the same
-  approval requirement; a raise pending owner decision blocks the exit
-  observation as an unresolved case. On every raise,
-  re-match the ledger's past triage records — findings that now match return
-  to the above-bar lane (they join the fix backlog but never the divergence
-  count). Lowering the bar requires owner approval. Uncertain matches
-  escalate to the owner.
+- Raising the bar (adding a class) needs only a ledger entry through round
+  2; from round 3 on it requires owner approval. A class added by a raise
+  names the same two parts. A serious finding matching no class is handled
+  by adding its class, under the same approval requirement; a raise pending
+  owner decision blocks the exit observation as an unresolved case. On every
+  raise, re-match the ledger's past triage records — findings that now match
+  return to the above-bar lane (they join the fix backlog but never the
+  divergence count). Lowering the bar, or changing a declared bound,
+  requires owner approval. Uncertain matches escalate to the owner.
 - If a review ran before any declaration, that pass counts retroactively as
   round 1, but the bar and ledger must exist before the first fix commit,
   with round 1's records back-filled.
@@ -108,6 +113,7 @@ loop, never the owner.
   sibling copy is a recurrence waiting to happen. (Measured: PR #86
   fixed one README line while a second copy in the same file returned as
   the next round's finding.)
+- A fix commit stays within every declared bound. (Origin: #113.)
 - A commit in this loop that writes or rewrites a declarative sentence
   commits no such sentence the diff changes — including one written in place
   of a falsified claim — until a reviewer that did not write it has tried
