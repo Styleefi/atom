@@ -92,8 +92,10 @@ loop, never the owner.
   chain includes the new diff — including new code that triggers or exposes
   a latent defect ("the root cause is pre-existing" is not an exemption).
   Whether a fix commit actually removed its target finding is always in
-  scope for the next pass. Defects unrelated to the new diff are filed as
-  issues immediately, even above-bar-grade ones, and do not block this PR.
+  scope for the next pass. Defects unrelated to the new diff do not block
+  this PR and are never fixed in it: one worth fixing is filed as an issue
+  immediately, even an above-bar-grade one; one not worth fixing is
+  recorded in the ledger with the reason.
 - A fix that changes a documented behavior or semantic — or the wording
   that describes one — must, in the same commit, align every live copy
   of that description repo-wide. The sweep is a grep, not a full read:
@@ -123,20 +125,32 @@ filed) unless it carries new evidence, which makes it a normal finding.
 
 ## Triage lanes
 
-Only above-bar findings re-enter the loop as in-PR fixes, with one narrow
-exception: a below-bar prose finding may ride an above-bar fix commit
-when the fix independently requires touching the finding's subject —
-same function, same comment block, same table row or list item;
-everything else waits for round-end disposition. A ridden finding is
-recorded in the ledger under its fix, not filed as an issue. Bundled
-prose is part of the next round's review surface, and unrelated bundling
-slows convergence. (Measured: a comment bundled into a PR #86 fix commit
-became the next round's finding.) Below-bar findings
-with a verified failure scenario or a concrete improvement are filed as
-issues per the issue-workflow rule — bundled by defect class, at round end,
-with provenance (PR, round) and the verified scenario. Style preferences and
-speculation stay in the round report. Duplicate prevention is the
-issue-duplicate-guard hook's job.
+Only above-bar findings re-enter the loop as in-PR fixes, with two narrow
+exceptions. A below-bar prose finding worth fixing may ride an above-bar fix
+commit when the fix independently requires touching the finding's subject —
+same function, same comment block, same table row or list item. A below-bar
+finding worth fixing that does not ride, whose fix is one line — a copy the
+sweep bullet requires aligning counts as more — in a file the full PR diff
+already touches, and needs no design decision, is folded: fixed in its own
+commit among the round's fix commits, except in the exit pass, where it is
+recorded instead. Whatever is neither ridden nor folded in the round waits
+for round-end disposition. A ridden or folded finding is recorded in the
+ledger under its commit, not filed as an issue. Bundled prose is part of the
+next round's review surface, and unrelated bundling slows convergence.
+(Measured: a comment bundled into a PR #86 fix commit became the next
+round's finding.)
+
+Two questions, answered in order and recorded in the ledger with their
+reasons, decide what happens to a below-bar finding that does not ride; the
+first alone applies to a defect unrelated to the new diff (Rounds). (1) **Is
+it worth fixing?** A verified failure scenario or a concrete improvement is
+necessary, not sufficient; style preferences and speculation count as
+neither. One not worth fixing is recorded with that answer. (2) **How large
+is the fix?** Fold-sized (above) is folded or, in the cases named there,
+recorded; anything else is filed as an issue per the issue-workflow rule —
+bundled by defect class, at round end, with provenance (PR, round) and the
+verified scenario or improvement. (Origin: #125.) Duplicate prevention is
+the issue-duplicate-guard hook's job.
 
 ## Divergence trigger
 
@@ -198,7 +212,8 @@ Exactly two endings:
    valid only if the reviewed HEAD is still the PR's HEAD when the pass
    completes — any new commit, whoever pushed it, invalidates the
    observation (not the pass) and requires a new pass. Below-bar findings
-   from this pass are filed, then the loop ends.
+   from this pass are filed or recorded in the ledger per Triage lanes,
+   then the loop ends.
 2. **Owner decision** — at any point, typically in response to a checkpoint
    or escalation report.
 
