@@ -108,6 +108,19 @@ loop, never the owner.
   sibling copy is a recurrence waiting to happen. (Measured: PR #86
   fixed one README line while a second copy in the same file returned as
   the next round's finding.)
+- A commit in this loop that writes or rewrites a declarative sentence
+  commits no such sentence the diff changes — including one written in place
+  of a falsified claim — until a reviewer that did not write it has tried
+  and failed to falsify it: against what it describes, or, for a sentence
+  that requires something, by a situation in which following it leaves no
+  compliant action or two different ones. What the attempt falsifies is
+  disposed of per the next bullet. (Origin: #125; PR #126 round 2.)
+- A prose claim falsified in this loop — by a finding fixed in this PR or by
+  the attempt above — is deleted (whole, or its overclaiming clause) or
+  moved to where it is held (a test, a constant, the one place that already
+  states it); it is not kept by adding a qualifier. Text written in its
+  place or at a move's destination — not the falsified claim under a
+  condition — is new text under the bullet above. (Origin: #125.)
 
 ## Ledger
 
@@ -178,15 +191,19 @@ artifact under review is meant to defend — because the artifact cannot
 detect or prevent the class by its own means, or because reaching it
 requires a deliberate, PR-visible act (Severity bar, accident test); the
 class may still be reachable in the world. Closing it means proposing a
-trade-off (the owner decides, per the Ledger section) and, once
-accepted, writing the boundary into that artifact's own documentation
-(docstring, README entry), citing the accepting decision (PR or issue
-link) — prose exactly as wide as the actual defense. Later findings of
-the class close at triage on the Ledger section's terms only when that
-citation is present; new evidence makes them normal findings again.
-(PR #86 chased one class down four layers — regex boundary → token →
-shell control flow → YAML conditionals — and closed it only this way.)
-The trigger mandates the diagnosis, never a particular remedy.
+trade-off (the owner decides, per the Ledger section) and, once accepted,
+writing the boundary into that artifact's own documentation (docstring,
+README entry) in three parts — the invariant the artifact holds in that
+state, in its own terms; the failure direction there (the artifact
+over-acts, under-acts, or stays silent); and, last, a citation of the
+accepting decision (PR or issue link) — and not, within that declaration, as
+a list of the triggers that reach the state or of the outcome per branch
+(Origin: #125; PR #126 round 2). Later findings of the class close at triage
+on the Ledger section's terms only when that citation is present; new
+evidence makes them normal findings again. (PR #86 chased one class down
+four layers — regex boundary → token → shell control flow → YAML
+conditionals — and closed it only this way.) The trigger mandates the
+diagnosis, never a particular remedy.
 
 ## Checkpoint
 
