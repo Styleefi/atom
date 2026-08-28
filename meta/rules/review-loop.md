@@ -31,11 +31,11 @@ loop, never the owner.
   declared class names two things: its **wrong action** — what the artifact
   under review, or a later session following the diff as written, does wrong
   while a finding in the class stands — and its **bound** — a mechanically
-  checkable limit on fix commits, such as a test the fix must add or a count
-  no fix may raise. Restating an abstract formula, or a class missing either
-  part, is not a declaration (Origin: #113). Guide: "a finding with a
-  realistic scenario reproducing the defect class this PR exists to fix, or
-  an equally harmful malfunction."
+  checkable limit on its findings' fixes, such as a test the fix must add or
+  a count no such fix may raise. Restating an abstract formula, or a class
+  missing either part, is not a declaration (Origin: #113). Guide: "a
+  finding with a realistic scenario reproducing the defect class this PR
+  exists to fix, or an equally harmful malfunction."
 - Floor: the declared classes MUST include failure of the PR's purpose (the
   issue it closes, or the PR body's stated goal).
 - Scale the bar to the diff's behavior surface, not its line count.
@@ -76,8 +76,9 @@ loop, never the owner.
   owner decision blocks the exit observation as an unresolved case. On every
   raise, re-match the ledger's past triage records — findings that now match
   return to the above-bar lane (they join the fix backlog but never the
-  divergence count). Lowering the bar, or changing a declared bound,
-  requires owner approval. Uncertain matches escalate to the owner.
+  divergence count). Lowering the bar, or relaxing a declared bound,
+  requires owner approval. Uncertain matches or bound directions escalate to
+  the owner.
 - If a review ran before any declaration, that pass counts retroactively as
   round 1, but the bar and ledger must exist before the first fix commit,
   with round 1's records back-filled.
@@ -98,9 +99,8 @@ loop, never the owner.
   a latent defect ("the root cause is pre-existing" is not an exemption).
   Whether a fix commit actually removed its target finding is always in
   scope for the next pass. Defects unrelated to the new diff do not block
-  this PR and are never fixed in it: one worth fixing is filed as an issue
-  immediately, even an above-bar-grade one; one not worth fixing is
-  recorded in the ledger with the reason.
+  this PR and are never fixed in it: one worth fixing (Triage lanes,
+  question 1) is filed as an issue immediately, even an above-bar-grade one.
 - A fix that changes a documented behavior or semantic — or the wording
   that describes one — must, in the same commit, align every live copy
   of that description repo-wide. The sweep is a grep, not a full read:
@@ -113,7 +113,9 @@ loop, never the owner.
   sibling copy is a recurrence waiting to happen. (Measured: PR #86
   fixed one README line while a second copy in the same file returned as
   the next round's finding.)
-- A fix commit stays within every declared bound. (Origin: #113.)
+- A fix commit stays within the bound of every class whose finding it fixes;
+  a fix that cannot leaves its finding pending owner decision. (Origin:
+  #113.)
 - A commit in this loop that writes or rewrites a declarative sentence
   commits no such sentence the diff changes — including one written in place
   of a falsified claim — until a reviewer that did not write it has tried
@@ -150,23 +152,22 @@ commit when the fix independently requires touching the finding's subject —
 same function, same comment block, same table row or list item. A below-bar
 finding worth fixing that does not ride, whose fix is one line — a copy the
 sweep bullet requires aligning counts as more — in a file the full PR diff
-already touches, and needs no design decision, is folded: fixed in its own
-commit among the round's fix commits, except in the exit pass, where it is
-recorded instead. Whatever is neither ridden nor folded in the round waits
-for round-end disposition. A ridden or folded finding is recorded in the
-ledger under its commit, not filed as an issue. Bundled prose is part of the
-next round's review surface, and unrelated bundling slows convergence.
-(Measured: a comment bundled into a PR #86 fix commit became the next
-round's finding.)
+already touches, and needs no design decision, is fold-sized. A ridden or
+folded finding is recorded in the ledger under its commit. Bundled prose is
+part of the next round's review surface, and unrelated bundling slows
+convergence. (Measured: a comment bundled into a PR #86 fix commit became
+the next round's finding.)
 
 Two questions, answered in order and recorded in the ledger with their
-reasons, decide what happens to a below-bar finding that does not ride; the
-first alone applies to a defect unrelated to the new diff (Rounds). (1) **Is
-it worth fixing?** A verified failure scenario or a concrete improvement is
-necessary, not sufficient; style preferences and speculation count as
-neither. One not worth fixing is recorded with that answer. (2) **How large
-is the fix?** Fold-sized (above) is folded or, in the cases named there,
-recorded; anything else is filed as an issue per the issue-workflow rule —
+reasons, decide what happens to a below-bar finding; the second is asked
+only of one worth fixing that does not ride, and the first alone applies to
+a defect unrelated to the new diff (Rounds). (1) **Is it worth fixing?** A
+verified failure scenario or a concrete improvement is necessary, not
+sufficient; style preferences and speculation count as neither. One not
+worth fixing is recorded with that answer. (2) **How large is the fix?**
+Fold-sized (above) is fixed in its own commit after the round's above-bar
+fix commits, except in a round that fixes none, where it is recorded
+instead; anything else is filed as an issue per the issue-workflow rule —
 bundled by defect class, at round end, with provenance (PR, round) and the
 verified scenario or improvement. (Origin: #125.) Duplicate prevention is
 the issue-duplicate-guard hook's job.
