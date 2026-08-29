@@ -459,8 +459,7 @@ def test_header_range_excludes_commits_already_on_a_remote(
     assert capsys.readouterr().err == ""
     # 보고문이 아니라 판정 범위를 직접 잰다 — newly_checked는 제목·면제 접두사
     # 검사보다 먼저 적재되므로, checked가 비었다는 것은 bad가 _new_head_commits의
-    # 반환값에 아예 없었다는 뜻이다. 제외가 rev-list **안에서** 일어났음을 재는
-    # 유일한 자다: 사후 필터로 옮기면 위 침묵은 그대로인 채 여기서 걸린다.
+    # 반환값에 아예 없었다는 뜻이다.
     assert _read_state(repo)["checked"] == []
     # 여기부터가 범위 진입 증명이다. 위 침묵의 이유는 "필터가 걸렀다"일 수도,
     # "애초에 범위에 안 들어왔다"일 수도 있는데 — 후자가 바로 지금 스위트 전체가
@@ -476,7 +475,10 @@ def test_header_range_excludes_commits_already_on_a_remote(
     _git(repo, "push", "-q", "origin", "--delete", "feat/up")
     left = _git(repo, "for-each-ref", "--format=%(refname)", "refs/remotes/")
     assert "refs/remotes/origin/feat/up" not in left
-    assert "refs/remotes/origin/main" in left  # --not --remotes는 여전히 실동작한다
+    # 원격 ref 집합이 비지 않았다 — 아래 블록이 "제외할 ref가 하나도 없어서"
+    # 생긴 퇴화가 아님을 배제한다. 이 커밋에 대해 제외가 일하고 있다는 뜻은
+    # 아니다: 남은 origin/main은 init을 가리키고 그 조상은 범위 하한이 이미 뺀다.
+    assert "refs/remotes/origin/main" in left
     _git(repo, "checkout", "-q", "feat/up")
     assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
     err = capsys.readouterr().err
