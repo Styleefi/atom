@@ -31,11 +31,11 @@ loop, never the owner.
   declared class names two things: its **wrong action** — what the artifact
   under review, or a later session following the diff as written, does wrong
   while a finding in the class stands — and its **bound** — a mechanically
-  checkable limit on fixes, such as a test each fix of the class must add or
-  a count no fix may raise. Restating an abstract formula, or a class
-  missing either part, is not a declaration (Origin: #113). Guide: "a
-  finding with a realistic scenario reproducing the defect class this PR
-  exists to fix, or an equally harmful malfunction."
+  checkable limit on fixes, such as a test the fix must add or a count no
+  fix may raise. Restating an abstract formula, or a class missing either
+  part, is not a declaration (Origin: #113). Guide: "a finding with a
+  realistic scenario reproducing the defect class this PR exists to fix, or
+  an equally harmful malfunction."
 - Floor: the declared classes MUST include failure of the PR's purpose (the
   issue it closes, or the PR body's stated goal).
 - Scale the bar to the diff's behavior surface, not its line count.
@@ -150,13 +150,12 @@ Only above-bar findings re-enter the loop as in-PR fixes, with two narrow
 exceptions. A below-bar prose finding worth fixing may ride an above-bar fix
 commit when the fix independently requires touching the finding's subject —
 same function, same comment block, same table row or list item. A below-bar
-finding worth fixing whose fix is one line — a copy the sweep bullet
-requires aligning counts as more — in a file the full PR diff already
-touches, and needs no design decision, is fold-sized. A ridden or folded
-finding is recorded in the ledger under its commit. Bundled prose is part of
-the next round's review surface, and unrelated bundling slows convergence.
-(Measured: a comment bundled into a PR #86 fix commit became the next
-round's finding.)
+finding whose fix is one line — a copy the sweep bullet requires aligning
+counts as more — in a file the full PR diff already touches, and needs no
+design decision, is fold-sized. A ridden or folded finding is recorded in
+the ledger under its commit. Bundled prose is part of the next round's
+review surface, and unrelated bundling slows convergence. (Measured: a
+comment bundled into a PR #86 fix commit became the next round's finding.)
 
 Two questions, answered in order and recorded in the ledger with their
 reasons, decide what happens to a below-bar finding; the second is asked
