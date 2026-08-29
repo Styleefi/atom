@@ -405,6 +405,34 @@ def test_checked_commits_not_rereported_after_branch_roundtrip(
     assert _run(monkeypatch, repo) == 0  # checked dedup — 재보고 없음
 
 
+def test_header_range_lower_bound_excludes_the_recorded_tip(
+    monkeypatch, capsys, tmp_path
+):
+    # `old..new`의 하한이 사라지면(범위가 `new` 단독이 되면) 최초 관찰로 기록만
+    # 된 미push 커밋 — checked에 없다 — 이 다시 판정 범위에 들어온다.
+    repo = _make_repo(tmp_path)
+    _commit(repo, "chore: init")
+    _git(repo, "push", "-q", "-u", "origin", "main")
+    _git(repo, "checkout", "-q", "-b", "feat/x")  # main 부동 — 브랜치 레인 봉인
+    below = _commit(repo, "below the baseline.")
+    assert _run(monkeypatch, repo) == 0  # 최초 관찰: 기록만
+    # 아래 err를 둘째 호출로 한정한다 — 첫 호출이 말을 시작하면 여기서 터진다.
+    assert capsys.readouterr().err == ""
+    # 살해력은 below가 checked 밖이라는 데 걸린다 — _baseline처럼 훅이 먼저 돈
+    # 준비로 바꾸면 below가 checked에 들어가 하한을 지워도 테스트가 생존한다.
+    assert _read_state(repo)["checked"] == []
+    above = _commit(repo, "above the baseline.")
+    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
+    # 판정 범위를 직접 잰다 — newly_checked는 제목·면제 접두사 검사보다 먼저
+    # 적재되므로 이 단언만 보고문을 경유하지 않고 범위 자체를 잰다.
+    assert _read_state(repo)["checked"] == [above]
+    err = capsys.readouterr().err
+    assert "1 commit(s) newly reachable from HEAD" in err  # 하한이 사라지면 2
+    assert above[:12] in err
+    assert below[:12] not in err
+    assert "landed on local" not in err  # 브랜치 레인 오인 봉인
+
+
 def test_merge_commit_subject_is_exempt(monkeypatch, capsys, tmp_path):
     repo = _baseline(monkeypatch, tmp_path)
     other = tmp_path / "other"
