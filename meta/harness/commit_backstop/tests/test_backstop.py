@@ -433,6 +433,60 @@ def test_header_range_lower_bound_excludes_the_recorded_tip(
     assert "landed on local" not in err  # 브랜치 레인 오인 봉인
 
 
+def test_header_range_excludes_commits_already_on_a_remote(
+    monkeypatch, capsys, tmp_path
+):
+    # `--not --remotes`가 사라지면 이미 push된 비규격 커밋이 HEAD 범위에 들어온
+    # 것만으로 보고된다 — 호출자가 고칠 수도, 재작성해서도 안 되는 남의 이력에
+    # 대한 오탐이다. 모듈 docstring의 "미공개 커밋만 판정"과 "그 커밋을 담은
+    # 브랜치가 push되면 녹는다"(#118 경계)가 둘 다 이 인자 쌍에 얹혀 있다 (#134).
+    repo = _baseline(monkeypatch, tmp_path)
+    other = tmp_path / "other"
+    subprocess.run(
+        ["git", "clone", "-q", str(tmp_path / "repo-remote.git"), str(other)],
+        capture_output=True,
+        env=_GIT_ENV,
+        check=True,
+    )
+    _git(other, "checkout", "-q", "-b", "feat/up")
+    bad = _commit(other, "Upstream subject, not conventional.")
+    _git(other, "push", "-q", "origin", "feat/up")
+    # main은 처음부터 끝까지 부동이다 — 브랜치 레인 봉인. 이 테스트가 빨개지면
+    # 원인은 헤더 레인 하나로 좁혀진다.
+    _git(repo, "fetch", "-q", "origin")
+    _git(repo, "checkout", "-q", "-b", "feat/up", "origin/feat/up")
+    assert _run(monkeypatch, repo) == 0
+    assert capsys.readouterr().err == ""
+    # 보고문이 아니라 판정 범위를 직접 잰다 — newly_checked는 제목·면제 접두사
+    # 검사보다 먼저 적재되므로, checked가 비었다는 것은 bad가 _new_head_commits의
+    # 반환값에 아예 없었다는 뜻이다.
+    assert _read_state(repo)["checked"] == []
+    # 여기부터가 범위 진입 증명이다. 위 침묵의 이유는 "필터가 걸렀다"일 수도,
+    # "애초에 범위에 안 들어왔다"일 수도 있는데 — 후자가 바로 지금 스위트 전체가
+    # 이 인자 쌍을 지워도 녹색인 이유다(#134). 같은 SHA를 같은 범위로 다시 넣되
+    # published만 없앤다. 원격 도달성 하나가 유일한 변수다.
+    _git(repo, "checkout", "-q", "main")
+    assert _run(monkeypatch, repo) == 0  # bad..init은 빈 범위
+    assert capsys.readouterr().err == ""
+    # 원격에서 브랜치를 실제로 지운다 — 머지된 PR의 브랜치 삭제와 같은 일상
+    # 경로다. 로컬 remote-tracking ref만 손대면 "서버엔 있는데 로컬 ref가 없다"는
+    # 선언된 한계(모듈 docstring)에 이 단언이 결속되어, 그 한계를 고치는 날
+    # 엉뚱하게 깨진다.
+    _git(repo, "push", "-q", "origin", "--delete", "feat/up")
+    left = _git(repo, "for-each-ref", "--format=%(refname)", "refs/remotes/")
+    assert "refs/remotes/origin/feat/up" not in left
+    # 원격 ref 집합이 비지 않았다 — 아래 블록이 "제외할 ref가 하나도 없어서"
+    # 생긴 퇴화가 아님을 배제한다. 이 커밋에 대해 제외가 일하고 있다는 뜻은
+    # 아니다: 남은 origin/main은 init을 가리키고 그 조상은 범위 하한이 이미 뺀다.
+    assert "refs/remotes/origin/main" in left
+    _git(repo, "checkout", "-q", "feat/up")
+    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
+    err = capsys.readouterr().err
+    assert bad[:12] in err
+    assert "landed on local" not in err  # 브랜치 레인 오인 봉인
+    assert _read_state(repo)["checked"] == [bad]
+
+
 def test_merge_commit_subject_is_exempt(monkeypatch, capsys, tmp_path):
     repo = _baseline(monkeypatch, tmp_path)
     other = tmp_path / "other"
