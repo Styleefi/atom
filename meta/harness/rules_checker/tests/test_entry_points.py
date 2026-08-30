@@ -21,6 +21,8 @@ from harness.rules_checker.check_rules import find_repo_root
 
 _SUBPROCESS_TIMEOUT = 30
 
+_HOST_PACKAGE = Path(__file__).resolve().parents[1].name
+
 # 진입점별 기대값: {패키지: (기대 종료 코드 | None, 자기 태그)}.
 #
 # 태그는 메시지 전문이 아니라 하네스의 정체다 — 문구를 다듬어도 빨개지면 안 된다.
@@ -43,8 +45,6 @@ ENTRY_POINTS = {
 #
 # 뺄셈이 아니라 명시 목록이다 — 뺄셈으로 두면 새로 추가되는 진입점이 아무도
 # 판단하지 않은 관용을 물려받는다. 여기 없는 진입점은 부재가 곧 실패다.
-_HOST_PACKAGE = Path(__file__).resolve().parents[1].name
-
 REMOVABLE = {
     "answer_first_reminder",
     "commit_backstop",
@@ -87,6 +87,7 @@ def test_no_entry_point_is_uncovered() -> None:
     }
     assert discovered - set(ENTRY_POINTS) == set()
     assert REMOVABLE <= set(ENTRY_POINTS)
+    assert _HOST_PACKAGE not in REMOVABLE
 
 
 @pytest.mark.parametrize("package", sorted(ENTRY_POINTS))
@@ -96,11 +97,7 @@ def test_entry_point_runs(package: str, tmp_path: Path) -> None:
     #
     # skip은 진입점 파일 자체의 부재로 좁힌다 — 넓게 잡으면 깨진 진입점까지 삼켜
     # 이 테스트가 조용히 무력해진다(#43에서 importorskip이 그렇게 실패했다).
-    if (
-        package in REMOVABLE
-        and package != _HOST_PACKAGE
-        and not _entry_point_path(package).is_file()
-    ):
+    if package in REMOVABLE and not _entry_point_path(package).is_file():
         pytest.skip(f"entry point removed: harness/{package}/__main__.py")
     expected_code, tag = ENTRY_POINTS[package]
     result = _run_entry_point(package, tmp_path)
