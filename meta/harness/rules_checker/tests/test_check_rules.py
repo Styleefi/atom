@@ -1854,3 +1854,18 @@ def test_inventory_tolerates_crlf_and_trailing_space(tmp_path: Path) -> None:
 def test_real_repo_rules_all_pass() -> None:
     # 통합 확인: 실제 저장소의 규칙이 전부 선언대로 배포되어 있어야 한다.
     assert check_rules(find_repo_root()) == []
+
+
+def test_main_maps_violations_to_a_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 위반 → 1 매핑은 두 CI의 체커 게이트가 기대는 유일한 신호다
+    # (`uv run --directory meta python -m harness.rules_checker`). 바로 위
+    # 테스트는 check_rules()의 반환값만 보고 main()을 지나가므로, 이 매핑이
+    # 조용히 0으로 회귀하면 게이트가 영구히 초록이 된다 (PR #137 라운드 1 실측).
+    monkeypatch.setattr(check_rules_module, "check_rules", lambda root: ["boom"])
+    assert check_rules_module.main() == 1
+
+
+def test_main_maps_a_clean_repo_to_a_zero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 반대 방향도 함께 핀한다 — 한쪽만 고정하면 게이트가 항상 빨간 회귀를 놓친다.
+    monkeypatch.setattr(check_rules_module, "check_rules", lambda root: [])
+    assert check_rules_module.main() == 0
