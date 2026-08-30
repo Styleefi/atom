@@ -1857,10 +1857,8 @@ def test_real_repo_rules_all_pass() -> None:
 
 
 def test_main_maps_violations_to_a_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
-    # 위반 → 1 매핑은 두 CI의 체커 게이트가 기대는 유일한 신호다
-    # (`uv run --directory meta python -m harness.rules_checker`). 바로 위
-    # 테스트는 check_rules()의 반환값만 보고 main()을 지나가므로, 이 매핑이
-    # 조용히 0으로 회귀하면 게이트가 영구히 초록이 된다 (PR #137 라운드 1 실측).
+    # 위반을 종료 코드로 옮기는 매핑. 바로 위 테스트는 check_rules()의 반환값만
+    # 보고 main()을 지나간다 (PR #137 라운드 1 실측).
     monkeypatch.setattr(check_rules_module, "check_rules", lambda root: ["boom"])
     assert check_rules_module.main() == 1
 

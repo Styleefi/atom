@@ -25,8 +25,6 @@ _SUBPROCESS_TIMEOUT = 30
 #
 # 태그는 메시지 전문이 아니라 하네스의 정체다 — 문구를 다듬어도 빨개지면 안 된다.
 # 태그가 서는 범위는 "진입점이 import를 풀고 자기 모듈의 코드에 도달했다"까지다.
-# 하네스 내부가 건강하다는 뜻은 아니다: main()이 던져도 run()의 포괄 예외가 같은
-# 태그를 찍는다.
 #
 # rules_checker만 종료 코드가 None이다. 그 코드는 진입점이 아니라 저장소 규칙
 # 건강을 보고하므로(위반이면 1), 0을 단언하면 무관한 위반에 이 테스트가 빨개진다.
@@ -40,14 +38,17 @@ ENTRY_POINTS = {
     "rules_checker": (None, "rules_checker:"),
 }
 
-# 부재를 허용하는 진입점. atom은 자식 프로젝트가 상속하는 SSOT이고, 가드를
-# 정합하게 제거한 자식에서 부재를 실패로 다루면 상속된 스위트가 영구히 빨개진다
+# 부재를 허용하는 진입점. 가드를 정합하게 제거한 자식 프로젝트를 위한 완화다
 # (형제 test_hook_command_contract.py가 #43에서 같은 완화를 둔다).
 #
-# rules_checker는 제외한다 — 이 파일이 그 패키지의 tests 안에 살므로 패키지가
-# 없으면 이 테스트도 없다. 제거 관용이 성립하지 않는 대신, 그 진입점의 삭제를
-# 보는 것은 이 단언뿐이다(단방향 커버리지 단언은 부재를 보지 않는다).
-REMOVABLE = set(ENTRY_POINTS) - {"rules_checker"}
+# 뺄셈이 아니라 명시 목록이다 — 뺄셈으로 두면 새로 추가되는 진입점이 아무도
+# 판단하지 않은 관용을 물려받는다. 여기 없는 진입점은 부재가 곧 실패다.
+REMOVABLE = {
+    "answer_first_reminder",
+    "commit_backstop",
+    "commit_guard",
+    "issue_duplicate_guard",
+}
 
 
 def _entry_point_path(package: str) -> Path:
@@ -61,11 +62,7 @@ def _run_entry_point(package: str, state_home: Path) -> subprocess.CompletedProc
     상속하고, `pytest -s`에서는 그게 터미널이라 가드 넷이 stdin.read()에서
     막힌다. timeout은 그 회귀를 멈춤이 아니라 실패로 바꾼다.
 
-    `harness` import를 지탱하는 것은 `cwd`다 — `python -m`이 cwd를 sys.path[0]에
-    넣는다(패키지는 venv에 설치되지 않는다). env 병합은 그 import와 무관하며,
-    배포된 훅이 물려받는 환경에 대한 충실도를 위한 것이다. XDG_STATE_HOME은
-    blocklog 원장만 격리한다 — commit_backstop의 상태 파일은 대상 저장소의 git
-    디렉터리에 쓰이므로 밖이다(잘못된 입력 경로는 그 전에 반환한다).
+    나머지 인자(cwd·env)는 빠지면 즉시 시끄럽게 실패하므로 경고를 달지 않는다.
     """
     return subprocess.run(
         [sys.executable, "-m", f"harness.{package}"],
@@ -105,3 +102,24 @@ def test_entry_point_runs(package: str, tmp_path: Path) -> None:
     assert tag in result.stdout + result.stderr
     if expected_code is not None:
         assert result.returncode == expected_code
+
+
+def test_rules_checker_entry_point_propagates_the_exit_code(tmp_path: Path) -> None:
+    # `raise SystemExit(main())` 이음매 — 표에서 이 모듈의 종료 코드를 None으로
+    # 둔 대가를 여기서 갚는다. 깨끗한 저장소에서는 main()이 0을 반환해 이음매가
+    # 있으나 없으나 0이므로, 위반을 주입한 채 모듈을 __main__으로 실행해 잰다.
+    driver = (
+        "import runpy, harness.rules_checker.check_rules as m\n"
+        'm.check_rules = lambda root: ["injected"]\n'
+        'runpy.run_module("harness.rules_checker", run_name="__main__")\n'
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", driver],
+        cwd=find_repo_root() / "meta",
+        input="",
+        capture_output=True,
+        text=True,
+        timeout=_SUBPROCESS_TIMEOUT,
+        env={**os.environ, "XDG_STATE_HOME": str(tmp_path)},
+    )
+    assert result.returncode == 1
