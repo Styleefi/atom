@@ -23,21 +23,21 @@ _SUBPROCESS_TIMEOUT = 30
 
 _HOST_PACKAGE = Path(__file__).resolve().parents[1].name
 
-# 진입점별 기대값: {패키지: (0이 아닌 코드로 끝나야 하는가, 자기 태그)}.
+# 진입점별 기대값: {패키지: (기대 종료 코드 | None, 자기 태그)}.
 #
 # 태그는 메시지 전문이 아니라 하네스의 정체다 — 문구를 다듬어도 빨개지면 안 된다.
 # 태그가 서는 범위는 "진입점이 import를 풀고 자기 모듈의 코드에 도달했다"까지다.
 #
-# rules_checker만 False다 — 종료 코드를 이 파일이 단언하지 않는다는 결정이며,
-# 근거는 PR #137 라운드 1 원장에 있다.
+# rules_checker만 종료 코드가 None이다. 그 코드는 진입점이 아니라 저장소 규칙
+# 건강을 보고하므로(위반이면 1), 0을 단언하면 무관한 위반에 이 테스트가 빨개진다.
 # 태그 `rules_checker:`는 양쪽 경로에 모두 찍혀 상태와 무관하고, 크래시는 태그가
 # 없어 그대로 걸린다.
 ENTRY_POINTS = {
-    "answer_first_reminder": (True, "[answer-first-reminder]"),
-    "commit_backstop": (True, "[commit-backstop]"),
-    "commit_guard": (True, "[commit-guard]"),
-    "issue_duplicate_guard": (True, "[issue-duplicate-guard]"),
-    "rules_checker": (False, "rules_checker:"),
+    "answer_first_reminder": (1, "[answer-first-reminder]"),
+    "commit_backstop": (1, "[commit-backstop]"),
+    "commit_guard": (1, "[commit-guard]"),
+    "issue_duplicate_guard": (1, "[issue-duplicate-guard]"),
+    "rules_checker": (None, "rules_checker:"),
 }
 
 # 부재를 허용하는 진입점. 가드를 정합하게 제거한 자식 프로젝트를 위한 완화다
@@ -99,17 +99,17 @@ def test_entry_point_runs(package: str, tmp_path: Path) -> None:
     # 이 테스트가 조용히 무력해진다(#43에서 importorskip이 그렇게 실패했다).
     if package in REMOVABLE and not _entry_point_path(package).is_file():
         pytest.skip(f"entry point removed: harness/{package}/__main__.py")
-    must_exit_nonzero, tag = ENTRY_POINTS[package]
+    expected_code, tag = ENTRY_POINTS[package]
     result = _run_entry_point(package, tmp_path)
     assert tag in result.stdout + result.stderr
-    if must_exit_nonzero:
-        assert result.returncode != 0
+    if expected_code is not None:
+        assert result.returncode == expected_code
 
 
 def test_rules_checker_entry_point_propagates_the_exit_code(tmp_path: Path) -> None:
-    # `raise SystemExit(main())` 이음매 — 표에서 이 모듈을 False로 둔 대가를
-    # 여기서 갚는다. 깨끗한 저장소에서는 main()이 0을 반환해 이음매가 있으나
-    # 없으나 0이므로, 위반을 주입한 채 모듈을 __main__으로 실행해 잰다.
+    # `raise SystemExit(main())` 이음매 — 표에서 이 모듈의 종료 코드를 None으로
+    # 둔 대가를 여기서 갚는다. 깨끗한 저장소에서는 main()이 0을 반환해 이음매가
+    # 있으나 없으나 0이므로, 위반을 주입한 채 모듈을 __main__으로 실행해 잰다.
     driver = (
         "import runpy, harness.rules_checker.check_rules as m\n"
         'm.check_rules = lambda root: ["injected"]\n'
