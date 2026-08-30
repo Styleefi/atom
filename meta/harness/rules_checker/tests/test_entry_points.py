@@ -43,6 +43,8 @@ ENTRY_POINTS = {
 #
 # 뺄셈이 아니라 명시 목록이다 — 뺄셈으로 두면 새로 추가되는 진입점이 아무도
 # 판단하지 않은 관용을 물려받는다. 여기 없는 진입점은 부재가 곧 실패다.
+_HOST_PACKAGE = Path(__file__).resolve().parents[1].name
+
 REMOVABLE = {
     "answer_first_reminder",
     "commit_backstop",
@@ -61,8 +63,6 @@ def _run_entry_point(package: str, state_home: Path) -> subprocess.CompletedProc
     `input=""`는 위생이 아니라 필수다 — 넘기지 않으면 자식이 부모의 stdin을
     상속하고, `pytest -s`에서는 그게 터미널이라 가드 넷이 stdin.read()에서
     막힌다. timeout은 그 회귀를 멈춤이 아니라 실패로 바꾼다.
-
-    나머지 인자(cwd·env)는 빠지면 즉시 시끄럽게 실패하므로 경고를 달지 않는다.
     """
     return subprocess.run(
         [sys.executable, "-m", f"harness.{package}"],
@@ -86,6 +86,7 @@ def test_no_entry_point_is_uncovered() -> None:
         for path in (find_repo_root() / "meta" / "harness").glob("*/__main__.py")
     }
     assert discovered - set(ENTRY_POINTS) == set()
+    assert REMOVABLE <= set(ENTRY_POINTS)
 
 
 @pytest.mark.parametrize("package", sorted(ENTRY_POINTS))
@@ -95,7 +96,11 @@ def test_entry_point_runs(package: str, tmp_path: Path) -> None:
     #
     # skip은 진입점 파일 자체의 부재로 좁힌다 — 넓게 잡으면 깨진 진입점까지 삼켜
     # 이 테스트가 조용히 무력해진다(#43에서 importorskip이 그렇게 실패했다).
-    if package in REMOVABLE and not _entry_point_path(package).is_file():
+    if (
+        package in REMOVABLE
+        and package != _HOST_PACKAGE
+        and not _entry_point_path(package).is_file()
+    ):
         pytest.skip(f"entry point removed: harness/{package}/__main__.py")
     expected_code, tag = ENTRY_POINTS[package]
     result = _run_entry_point(package, tmp_path)
@@ -122,4 +127,5 @@ def test_rules_checker_entry_point_propagates_the_exit_code(tmp_path: Path) -> N
         timeout=_SUBPROCESS_TIMEOUT,
         env={**os.environ, "XDG_STATE_HOME": str(tmp_path)},
     )
+    assert "rules_checker:" in result.stdout
     assert result.returncode == 1
