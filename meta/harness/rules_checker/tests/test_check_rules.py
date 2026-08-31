@@ -945,6 +945,26 @@ def write_legacy_wiring(root: Path) -> None:
     )
 
 
+class _Boom(Exception):
+    """영역 가드 probe 전용 예외 — 프로덕션 코드가 이름으로 지목할 수 없다.
+
+    사망 부류 방어 가드는 예외 타입이 아니라 영역을 감싼다. 그 성질을 검사하려면
+    어떤 except 절도 지목할 수 없는 타입을 던져야 하는데, RecursionError 같은
+    stdlib 타입은 그 성질을 오늘만 만족한다 — 탐지 대상인 축소
+    (except RecursionError)가 그 타입을 그대로 지목할 수 있기 때문이다. 테스트
+    모듈에만 사는 이름은 프로덕션 코드가 지목할 방법이 없으므로 같은 성질을
+    구성상 갖는다(#140).
+
+    Exception을 상속하는 이유는 가드에 **잡혀야** 하기 때문이다. blocklog의
+    _Timeout은 방향이 반대로, except Exception을 **빠져나가려고** BaseException을
+    쓴다(blocklog/tests/test_blocklog.py).
+
+    실입력이 진짜 예외를 내는 형제 테스트(깨진 symlink의 OSError, 비UTF-8의
+    UnicodeDecodeError)는 이 클래스를 쓰지 않는다 — 실제로 발생했던 회귀를
+    재현하는 쪽이라 몽키패치로 바꾸면 커버리지가 후퇴한다.
+    """
+
+
 def test_broken_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
     # 규칙 파일 하나가 안 읽혀도(깨진 symlink) 스윕의 배선 위반은 살아야
     # 한다(최종 게이트 리뷰: 스윕 전체가 internal error 하나로 뭉개지던 가림).
@@ -984,8 +1004,8 @@ def test_non_utf8_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
 def test_pathological_rule_yaml_does_not_kill_the_sweep(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # 파싱 중 예외(YAML 중첩의 RecursionError — OSError도 UnicodeDecodeError도
-    # 아님)도 스윕을 뭉개면 안 된다(탈출 관찰 2R: 가드가 예외 타입만 넓히고
+    # 파싱 중 예외(_Boom — 어떤 except 절도 지목할 수 없는 probe 타입)도
+    # 스윕을 뭉개면 안 된다(탈출 관찰 2R: 가드가 예외 타입만 넓히고
     # 영역을 안 넓혀 같은 가림이 세 번째 재발). 8000중첩 `[`로 PyYAML의
     # 재귀 한계를 실제로 때리는 방식은 구현 세부 의존이라 파서가 반복
     # 구현으로 바뀌면 공허 통과한다(#43) — 마커를 심은 파일에서만 직접
@@ -1001,7 +1021,7 @@ def test_pathological_rule_yaml_does_not_kill_the_sweep(
 
     def exploding_parse(text: str) -> tuple[dict | None, str | None]:
         if "explode-marker" in text:
-            raise RecursionError("simulated pathological frontmatter")
+            raise _Boom("simulated pathological frontmatter")
         return real_parse(text)
 
     monkeypatch.setattr(check_rules_module, "parse_frontmatter", exploding_parse)
@@ -1017,8 +1037,8 @@ def test_pathological_rule_yaml_does_not_kill_the_sweep(
 def test_pathological_settings_does_not_kill_the_sweep(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # settings 파일 하나의 파싱 사망(_load_settings 분류 밖 예외 — 심중첩
-    # JSON의 RecursionError 등)이 스윕 전체를 뭉개면 안 된다(PR #93 R1 F1:
+    # settings 파일 하나의 파싱 사망(_load_settings 분류 밖 예외 —
+    # _Boom)이 스윕 전체를 뭉개면 안 된다(PR #93 R1 F1:
     # 규칙 파일에 세 번 닫은 "하나가 전체를 가림" 클래스가 settings 대상
     # 쪽에 열려 있었다). 대상별 가드가 다른 대상의 배선 위반을 보존해야
     # 한다. 실입력(100k 중첩 [)으로 json 내부의 RecursionError를 때리는
@@ -1033,7 +1053,7 @@ def test_pathological_settings_does_not_kill_the_sweep(
 
     def exploding_load(path: Path) -> tuple[dict | None, str | None]:
         if path.name == "settings.local.json":
-            raise RecursionError("simulated pathological settings")
+            raise _Boom("simulated pathological settings")
         return real_load(path)
 
     monkeypatch.setattr(check_rules_module, "_load_settings", exploding_load)
@@ -1074,7 +1094,7 @@ def test_crashing_repo_check_does_not_kill_the_sweep(
     deploy_claude_md(root, "@meta/rules/ghost.md")
 
     def crashing_check(root: Path) -> list[str]:
-        raise RecursionError(f"simulated pathological {crashing}")
+        raise _Boom(f"simulated pathological {crashing}")
 
     # 가드가 메시지에 repo_check.__name__을 끼워 넣으므로 스텁의 __name__이
     # 그대로 출력에 찍힌다. 형제들의 exploding_* 관례를 따르면 단정이 깨지고
@@ -1088,7 +1108,7 @@ def test_crashing_repo_check_does_not_kill_the_sweep(
     # 지점 이름과 예외 타입을 한 위반 안에서 본다 — any()를 둘로 쪼개면
     # 서로 다른 위반이 각각을 만족시켜 진단 정보가 빠져도 green이 된다.
     assert any(
-        f"internal checker error in {crashing}" in v and "RecursionError" in v
+        f"internal checker error in {crashing}" in v and "_Boom" in v
         for v in violations
     )
     assert any(surviving in v for v in violations)
@@ -1113,13 +1133,13 @@ def test_crashing_inventory_check_does_not_kill_the_sweep(
     write_legacy_wiring(root)
 
     def check_inventory(root: Path) -> list[str]:
-        raise RecursionError("simulated pathological inventory")
+        raise _Boom("simulated pathological inventory")
 
     monkeypatch.setattr(check_rules_module, "check_inventory", check_inventory)
     violations = check_rules(root)
     assert any(
         "internal checker error in check_inventory" in v
-        and "RecursionError" in v
+        and "_Boom" in v
         for v in violations
     )
     # 가드가 append가 아니라 return/치환으로 바뀌면 앞선 위반이 증발한다.
