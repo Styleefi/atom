@@ -1111,10 +1111,6 @@ def test_crashing_repo_check_does_not_kill_the_sweep(
     def crashing_check(root: Path) -> list[str]:
         raise _Boom(f"simulated pathological {crashing}")
 
-    # 가드가 메시지에 repo_check.__name__을 끼워 넣으므로 스텁의 __name__이
-    # 그대로 출력에 찍힌다. 형제들의 exploding_* 관례를 따르면 단정이 깨지고
-    # lambda는 <lambda>가 찍힌다 — 명시 대입으로 그 의존을 눈에 보이게 둔다.
-    crashing_check.__name__ = crashing
     monkeypatch.setattr(check_rules_module, crashing, crashing_check)
     # rule_violations() 헬퍼를 쓰면 안 된다 — 그 헬퍼가 거르는
     # "coverage was not checked"가 아래 세 번째 단정이 찾는 문자열이라,

@@ -1109,12 +1109,17 @@ def check_rules(root: Path) -> list[str]:
     violations = list(rule_violations)
     # 역방향 스윕은 인벤토리와 달리 규칙 위반이 있어도 미루지 않는다 —
     # frontmatter 분류에 의존하지 않고, 파싱된 hook 규칙만으로 동작한다.
-    for repo_check in (check_template_sync, check_hook_wiring):
+    # 이름을 리터럴로 들고 다닌다 — 핸들러 안에서 repo_check.__name__을 읽으면
+    # __name__ 없는 객체가 바인딩됐을 때 가드가 처리 중에 죽어 탈출한다(#143).
+    for name, repo_check in (
+        ("check_template_sync", check_template_sync),
+        ("check_hook_wiring", check_hook_wiring),
+    ):
         try:
             violations.extend(repo_check(root))
         except Exception as exc:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
             violations.append(
-                f"internal checker error in {repo_check.__name__} — "
+                f"internal checker error in {name} — "
                 f"{type(exc).__name__}: {exc}"
             )
     if rule_violations:
