@@ -1043,6 +1043,73 @@ def test_pathological_settings_does_not_kill_the_sweep(
     assert any("harness.legacy" in v for v in violations)
 
 
+def test_crashing_repo_check_does_not_kill_the_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # repo-level 검사 하나가 죽어도 나머지 repo 검사와 인벤토리는 살아야
+    # 한다(#106: 세 변환 지점 중 per-rule 루프에만 핀이 있었고 repo-check
+    # 루프 가드는 무커버였다). 튜플 첫 원소를 터뜨려 루프가 break/return
+    # 없이 계속되는지를, 두 번째 원소(check_hook_wiring)가 내는
+    # harness.legacy 위반으로 앵커한다 — 두 번째를 터뜨리면 앵커 자체가
+    # 사라진다. 스텁 이름은 형제들의 exploding_* 관례를 따르지 않고 실함수
+    # 이름으로 둔다 — 가드가 메시지에 repo_check.__name__을 끼워 넣으므로
+    # 스텁 이름이 그대로 출력에 찍히고, exploding_template_sync로 지으면
+    # 단정이 깨진다. .claude 생성은 write_legacy_wiring에만 맡긴다(#109).
+    root = make_repo(tmp_path)
+    write_legacy_wiring(root)
+
+    def check_template_sync(root: Path) -> list[str]:
+        raise RecursionError("simulated pathological template sync")
+
+    monkeypatch.setattr(
+        check_rules_module, "check_template_sync", check_template_sync
+    )
+    # rule_violations() 헬퍼를 쓰면 안 된다 — 그 헬퍼가 거르는
+    # "coverage was not checked"가 아래 세 번째 단정이 찾는 문자열이라,
+    # 헬퍼로 바꾸는 순간 그 단정이 동어반복이 된다.
+    violations = check_rules(root)
+    # 지점 이름과 예외 타입을 한 위반 안에서 본다 — any()를 둘로 쪼개면
+    # 서로 다른 위반이 각각을 만족시켜 진단 정보가 빠져도 green이 된다.
+    assert any(
+        "internal checker error in check_template_sync" in v
+        and "RecursionError" in v
+        for v in violations
+    )
+    assert any("harness.legacy" in v for v in violations)
+    # 변환 오류가 rule_violations로 새면 인벤토리가 통째로 미뤄져 커버리지
+    # 검사가 조용히 사라진다 — 메시지는 정상이라 위 두 단정은 통과한다.
+    # 겨냥한 회귀는 그것 하나다. 픽스처가 바뀌어 이 문구가 나올 수 없게
+    # 되면 이 줄은 죽은 핀이 된다(#43에서 겪은 공허화의 재발 경로).
+    assert not any("coverage was not checked" in v for v in violations)
+
+
+def test_crashing_inventory_check_does_not_kill_the_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 인벤토리 검사가 죽어도 그 앞에서 이미 모인 위반은 살아야 한다(#106:
+    # 인벤토리 가드도 무커버였다). 이 가드는 규칙 위반이 0일 때만 도달하는
+    # else 가지에 있으므로 픽스처는 규칙 파일 없는 make_repo 그대로 두고,
+    # 앵커는 규칙이 아니라 repo-level인 check_hook_wiring이 내는
+    # harness.legacy 위반으로 잡는다 — 규칙 위반으로 앵커하면 보류 가지로
+    # 새어 이 테스트가 통째로 공허해진다. .claude 생성은
+    # write_legacy_wiring에만 맡긴다(#109).
+    root = make_repo(tmp_path)
+    write_legacy_wiring(root)
+
+    def check_inventory(root: Path) -> list[str]:
+        raise RecursionError("simulated pathological inventory")
+
+    monkeypatch.setattr(check_rules_module, "check_inventory", check_inventory)
+    violations = check_rules(root)
+    assert any(
+        "internal checker error in check_inventory" in v
+        and "RecursionError" in v
+        for v in violations
+    )
+    # 가드가 append가 아니라 return/치환으로 바뀌면 앞선 위반이 증발한다.
+    assert any("harness.legacy" in v for v in violations)
+
+
 def test_skill_missing_target_does_not_mask_shape(tmp_path: Path) -> None:
     # 대상 파일 부재가 SKILL.md 형태 위반을 가리면 안 된다(탈출 관찰 라운드:
     # bad_path만 고치고 missing-target 경로에 같은 가림이 남아 있었다).
