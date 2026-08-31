@@ -965,6 +965,21 @@ class _Boom(Exception):
     """
 
 
+class _Nameless:
+    """__name__ 없는 호출 가능 객체 — 표준 라이브러리의 Mock·partial과 같은 부류.
+
+    가드가 메시지를 만들며 함수 객체의 속성을 조회하면, 원래 예외를 처리하는
+    도중에 AttributeError가 나 check_rules를 탈출한다(#143). 그 부류를 이
+    클래스 하나로 대표한다 — unittest.mock을 새로 임포트하지 않고, 무엇을
+    재현하는지가 이름에 드러난다. 인스턴스에 __name__이 없는 것은 구성상
+    보장된다: type.__name__은 type의 getset 디스크립터라 인스턴스 조회
+    경로(instance → class → MRO)에 없다.
+    """
+
+    def __call__(self, root: Path) -> list[str]:
+        raise _Boom("simulated pathological repo check")
+
+
 def test_broken_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
     # 규칙 파일 하나가 안 읽혀도(깨진 symlink) 스윕의 배선 위반은 살아야
     # 한다(최종 게이트 리뷰: 스윕 전체가 internal error 하나로 뭉개지던 가림).
@@ -1096,10 +1111,6 @@ def test_crashing_repo_check_does_not_kill_the_sweep(
     def crashing_check(root: Path) -> list[str]:
         raise _Boom(f"simulated pathological {crashing}")
 
-    # 가드가 메시지에 repo_check.__name__을 끼워 넣으므로 스텁의 __name__이
-    # 그대로 출력에 찍힌다. 형제들의 exploding_* 관례를 따르면 단정이 깨지고
-    # lambda는 <lambda>가 찍힌다 — 명시 대입으로 그 의존을 눈에 보이게 둔다.
-    crashing_check.__name__ = crashing
     monkeypatch.setattr(check_rules_module, crashing, crashing_check)
     # rule_violations() 헬퍼를 쓰면 안 된다 — 그 헬퍼가 거르는
     # "coverage was not checked"가 아래 세 번째 단정이 찾는 문자열이라,
@@ -1143,6 +1154,29 @@ def test_crashing_inventory_check_does_not_kill_the_sweep(
         for v in violations
     )
     # 가드가 append가 아니라 return/치환으로 바뀌면 앞선 위반이 증발한다.
+    assert any("harness.legacy" in v for v in violations)
+
+
+def test_nameless_repo_check_does_not_kill_the_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 가드는 메시지를 만들 때 함수 객체의 속성을 읽으면 안 된다(#143). 읽으면
+    # __name__ 없는 객체가 바인딩됐을 때 핸들러가 원래 예외를 처리하다 죽어
+    # 탈출하고, 그게 이 가드가 막으려는 traceback 사망이다. 형제 테스트들은
+    # 파생 복귀를 메시지 불일치로 잡지만, 탈출 자체를 재현하는 건 여기뿐이다.
+    # 인벤토리 보류 단정은 형제(A)에 단일 소스로 두고 여기서 중복하지 않는다.
+    # .claude 생성은 write_legacy_wiring에만 맡긴다(#109).
+    root = make_repo(tmp_path)
+    write_legacy_wiring(root)
+
+    monkeypatch.setattr(check_rules_module, "check_template_sync", _Nameless())
+    violations = check_rules(root)
+    # "_Boom" 연접은 장식이 아니다 — 인스턴스 대신 클래스를 바인딩하는 실수는
+    # TypeError를 내는데, 이 연접이 그걸 조용한 통과가 아니라 실패로 만든다.
+    assert any(
+        "internal checker error in check_template_sync" in v and "_Boom" in v
+        for v in violations
+    )
     assert any("harness.legacy" in v for v in violations)
 
 
