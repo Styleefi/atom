@@ -1043,27 +1043,44 @@ def test_pathological_settings_does_not_kill_the_sweep(
     assert any("harness.legacy" in v for v in violations)
 
 
+@pytest.mark.parametrize(
+    ("crashing", "surviving"),
+    [
+        # 첫 원소가 죽으면 두 번째가 내는 배선 위반이 앵커다.
+        ("check_template_sync", "harness.legacy"),
+        # 두 번째가 죽으면 첫 원소가 내는 고아 import 위반이 앵커다. 이
+        # 방향이 없으면 루프를 풀어 두 번째 호출을 가드 밖으로 빼내는
+        # 리팩터가 스위트를 통째로 green으로 통과한다 — 가드가 지키던
+        # check_hook_wiring이 무방비가 되는데도(PR #141 R1에서 재현).
+        ("check_hook_wiring", "orphan rule import '@meta/rules/ghost.md'"),
+    ],
+    ids=["template-sync", "hook-wiring"],
+)
 def test_crashing_repo_check_does_not_kill_the_sweep(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    crashing: str,
+    surviving: str,
 ) -> None:
     # repo-level 검사 하나가 죽어도 나머지 repo 검사와 인벤토리는 살아야
     # 한다(#106: 세 변환 지점 중 per-rule 루프에만 핀이 있었고 repo-check
-    # 루프 가드는 무커버였다). 튜플 첫 원소를 터뜨려 루프가 break/return
-    # 없이 계속되는지를, 두 번째 원소(check_hook_wiring)가 내는
-    # harness.legacy 위반으로 앵커한다 — 두 번째를 터뜨리면 앵커 자체가
-    # 사라진다. 스텁 이름은 형제들의 exploding_* 관례를 따르지 않고 실함수
-    # 이름으로 둔다 — 가드가 메시지에 repo_check.__name__을 끼워 넣으므로
-    # 스텁 이름이 그대로 출력에 찍히고, exploding_template_sync로 지으면
-    # 단정이 깨진다. .claude 생성은 write_legacy_wiring에만 맡긴다(#109).
+    # 루프 가드는 무커버였다). 두 원소를 각각 터뜨려, 루프가 break/return
+    # 없이 계속되는지와 두 호출 모두 가드 안에 있는지를 함께 본다.
+    # ghost import는 hook-wiring 케이스의 앵커를 만들려고 심는다 — 규칙
+    # 파일이 없으므로 rule_violations는 여전히 비고, 세 번째 단정이 살아
+    # 있다. .claude 생성은 write_legacy_wiring에만 맡긴다(#109).
     root = make_repo(tmp_path)
     write_legacy_wiring(root)
+    deploy_claude_md(root, "@meta/rules/ghost.md")
 
-    def check_template_sync(root: Path) -> list[str]:
-        raise RecursionError("simulated pathological template sync")
+    def crashing_check(root: Path) -> list[str]:
+        raise RecursionError(f"simulated pathological {crashing}")
 
-    monkeypatch.setattr(
-        check_rules_module, "check_template_sync", check_template_sync
-    )
+    # 가드가 메시지에 repo_check.__name__을 끼워 넣으므로 스텁의 __name__이
+    # 그대로 출력에 찍힌다. 형제들의 exploding_* 관례를 따르면 단정이 깨지고
+    # lambda는 <lambda>가 찍힌다 — 명시 대입으로 그 의존을 눈에 보이게 둔다.
+    crashing_check.__name__ = crashing
+    monkeypatch.setattr(check_rules_module, crashing, crashing_check)
     # rule_violations() 헬퍼를 쓰면 안 된다 — 그 헬퍼가 거르는
     # "coverage was not checked"가 아래 세 번째 단정이 찾는 문자열이라,
     # 헬퍼로 바꾸는 순간 그 단정이 동어반복이 된다.
@@ -1071,11 +1088,10 @@ def test_crashing_repo_check_does_not_kill_the_sweep(
     # 지점 이름과 예외 타입을 한 위반 안에서 본다 — any()를 둘로 쪼개면
     # 서로 다른 위반이 각각을 만족시켜 진단 정보가 빠져도 green이 된다.
     assert any(
-        "internal checker error in check_template_sync" in v
-        and "RecursionError" in v
+        f"internal checker error in {crashing}" in v and "RecursionError" in v
         for v in violations
     )
-    assert any("harness.legacy" in v for v in violations)
+    assert any(surviving in v for v in violations)
     # 변환 오류가 rule_violations로 새면 인벤토리가 통째로 미뤄져 커버리지
     # 검사가 조용히 사라진다 — 메시지는 정상이라 위 두 단정은 통과한다.
     # 겨냥한 회귀는 그것 하나다. 픽스처가 바뀌어 이 문구가 나올 수 없게
