@@ -1004,8 +1004,8 @@ def test_non_utf8_rule_file_does_not_kill_the_sweep(tmp_path: Path) -> None:
 def test_pathological_rule_yaml_does_not_kill_the_sweep(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # 파싱 중 예외(_Boom — 어떤 except 절도 지목할 수 없는 probe 타입)도
-    # 스윕을 뭉개면 안 된다(탈출 관찰 2R: 가드가 예외 타입만 넓히고
+    # 파싱 중 예외(YAML 중첩의 RecursionError — OSError도 UnicodeDecodeError도
+    # 아님)도 스윕을 뭉개면 안 된다(탈출 관찰 2R: 가드가 예외 타입만 넓히고
     # 영역을 안 넓혀 같은 가림이 세 번째 재발). 8000중첩 `[`로 PyYAML의
     # 재귀 한계를 실제로 때리는 방식은 구현 세부 의존이라 파서가 반복
     # 구현으로 바뀌면 공허 통과한다(#43) — 마커를 심은 파일에서만 직접
@@ -1037,8 +1037,8 @@ def test_pathological_rule_yaml_does_not_kill_the_sweep(
 def test_pathological_settings_does_not_kill_the_sweep(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # settings 파일 하나의 파싱 사망(_load_settings 분류 밖 예외 —
-    # _Boom)이 스윕 전체를 뭉개면 안 된다(PR #93 R1 F1:
+    # settings 파일 하나의 파싱 사망(_load_settings 분류 밖 예외 — 심중첩
+    # JSON의 RecursionError 등)이 스윕 전체를 뭉개면 안 된다(PR #93 R1 F1:
     # 규칙 파일에 세 번 닫은 "하나가 전체를 가림" 클래스가 settings 대상
     # 쪽에 열려 있었다). 대상별 가드가 다른 대상의 배선 위반을 보존해야
     # 한다. 실입력(100k 중첩 [)으로 json 내부의 RecursionError를 때리는
