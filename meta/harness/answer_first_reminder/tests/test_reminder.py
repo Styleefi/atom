@@ -184,6 +184,24 @@ def test_run_catchall_fails_open(monkeypatch, capsys) -> None:
     assert captured.out == ""
 
 
+@pytest.mark.parametrize("code", [0, 1])
+def test_run_passes_main_return_through(monkeypatch, code: int) -> None:
+    # run()의 존재 이유는 fail-open이지만, 정상 경로에서 main()의 코드를 그대로
+    # 내보내는 것도 같은 함수의 계약이다 — 훅이 관측하는 값이 이쪽이다.
+    #
+    # 값만 보면 두 번 호출하는 드리프트가 통과한다 — 두 번째 stdin 읽기가 빈
+    # 값이라 1이 되고, exit 0에서만 주입되는 리마인더가 사라진다.
+    calls = []
+
+    def boom() -> int:
+        calls.append(1)
+        return code
+
+    monkeypatch.setattr(reminder, "main", boom)
+    assert reminder.run() == code
+    assert len(calls) == 1
+
+
 # --- 불변식 잠금 -------------------------------------------------------------
 
 _ALL_INPUT_CLASSES = [

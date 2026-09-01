@@ -625,6 +625,24 @@ def test_run_catchall_fails_open(monkeypatch, capsys) -> None:
     assert "fail-open" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("code", [0, 1, guard.EXIT_BLOCK])
+def test_run_passes_main_return_through(monkeypatch, code: int) -> None:
+    # run()의 존재 이유는 fail-open이지만, 정상 경로에서 main()의 코드를 그대로
+    # 내보내는 것도 같은 함수의 계약이다 — 훅이 관측하는 값이 이쪽이다.
+    #
+    # 값만 보면 두 번 호출하는 드리프트가 통과한다 — 두 번째 stdin 읽기가 빈
+    # 값이라 JSON 오류가 나고, 차단(42)이 비차단 1로 강등된다.
+    calls = []
+
+    def boom() -> int:
+        calls.append(1)
+        return code
+
+    monkeypatch.setattr(guard, "main", boom)
+    assert guard.run() == code
+    assert len(calls) == 1
+
+
 # --- _current_branch 자체의 fail-open ----------------------------------------
 
 
