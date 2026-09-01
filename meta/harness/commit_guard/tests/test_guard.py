@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import json
+import runpy
 import subprocess
 import sys
 
@@ -640,6 +641,25 @@ def test_run_passes_main_return_through(monkeypatch, code: int) -> None:
 
     monkeypatch.setattr(guard, "main", boom)
     assert guard.run() == code
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("code", [0, 1, guard.EXIT_BLOCK])
+def test_entry_point_propagates_the_exit_code(monkeypatch, code: int) -> None:
+    # __main__.py의 `sys.exit(run())` 이음매. 훅이 실제로 읽는 값은 여기서
+    # 만들어진다 — run()의 반환값이 아니라 프로세스 종료 코드다.
+    calls = []
+
+    def boom() -> int:
+        calls.append(1)
+        return code
+
+    monkeypatch.setattr(guard, "run", boom)
+    # stdin은 위생 — 이음매가 드리프트해 진짜 main()에 닿아도 터미널을 물지 않는다.
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_module("harness.commit_guard", run_name="__main__")
+    assert exc.value.code == code
     assert len(calls) == 1
 
 
