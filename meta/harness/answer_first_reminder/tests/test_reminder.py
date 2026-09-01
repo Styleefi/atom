@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import json
+import runpy
 import sys
 
 import pytest
@@ -172,7 +173,7 @@ def test_malformed_or_empty_stdin_fails_open(monkeypatch, capsys, raw: str) -> N
     assert captured.out == ""
 
 
-def test_run_fails_open_on_internal_error(monkeypatch, capsys) -> None:
+def test_run_catchall_fails_open(monkeypatch, capsys) -> None:
     def boom() -> int:
         raise RuntimeError("boom")
 
@@ -182,6 +183,54 @@ def test_run_fails_open_on_internal_error(monkeypatch, capsys) -> None:
     assert code == 1
     assert "fail-open" in captured.err
     assert captured.out == ""
+
+
+@pytest.mark.parametrize("code", [0, 1])
+def test_run_passes_main_return_through(monkeypatch, code: int) -> None:
+    # run()의 존재 이유는 fail-open이지만, 정상 경로에서 main()의 코드를 그대로
+    # 내보내는 것도 같은 함수의 계약이다 — 훅이 관측하는 값이 이쪽이다.
+    #
+    # 값만 보면 두 번 호출하는 드리프트가 통과한다 — 두 번째 stdin 읽기가 빈
+    # 값이라 1이 되고, exit 0에서만 주입되는 리마인더가 사라진다.
+    calls = []
+
+    def boom() -> int:
+        calls.append(1)
+        return code
+
+    monkeypatch.setattr(reminder, "main", boom)
+    assert reminder.run() == code
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("code", [0, 1])
+def test_entry_point_propagates_the_exit_code(monkeypatch, code: int) -> None:
+    # __main__.py의 `sys.exit(run())` 이음매. 훅이 실제로 읽는 값은 여기서
+    # 만들어진다 — run()의 반환값이 아니라 프로세스 종료 코드다.
+    calls = []
+
+    def boom() -> int:
+        calls.append(1)
+        return code
+
+    monkeypatch.setattr(reminder, "run", boom)
+    # stdin은 위생 — 이음매가 드리프트해 진짜 main()에 닿아도 터미널을 물지 않는다.
+    monkeypatch.setattr(
+        sys, "stdin", io.TextIOWrapper(io.BytesIO(b""), encoding="utf-8")
+    )
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_module("harness.answer_first_reminder", run_name="__main__")
+    assert exc.value.code == code
+    assert len(calls) == 1
+
+
+def test_run_reports_malformed_input_without_blocking(monkeypatch, capsys) -> None:
+    # 이 패키지에서 가짜 없이 main()→run()이 실제로 도는 유일한 지점.
+    monkeypatch.setattr(
+        sys, "stdin", io.TextIOWrapper(io.BytesIO(b"{not json"), encoding="utf-8")
+    )
+    assert reminder.run() == 1
+    assert "malformed hook input" in capsys.readouterr().err
 
 
 # --- 불변식 잠금 -------------------------------------------------------------

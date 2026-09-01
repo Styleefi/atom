@@ -13,8 +13,10 @@ from __future__ import annotations
 import io
 import json
 import os
+import runpy
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -1286,8 +1288,10 @@ def test_git_binary_failure_fails_open(monkeypatch, capsys, tmp_path):
     assert _run(monkeypatch, repo) == 0  # 저장소 해석 실패 → 통과
 
 
-def test_malformed_payloads_never_block(monkeypatch, capsys):
+def test_malformed_payloads_never_block(monkeypatch):
     monkeypatch.setattr(sys, "stdin", io.StringIO("not json"))
+    assert backstop.main() == 1
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
     assert backstop.main() == 1
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"tool_name": "Write"})))
     assert backstop.main() == 0
@@ -1304,6 +1308,68 @@ def test_run_catchall_fails_open(monkeypatch, capsys):
     monkeypatch.setattr(backstop, "main", explode)
     assert backstop.run() == 1
     assert "fail-open" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("code", [0, 1, backstop.EXIT_BLOCK])
+def test_run_passes_main_return_through(monkeypatch, code: int):
+    # run()의 존재 이유는 fail-open이지만, 정상 경로에서 main()의 코드를 그대로
+    # 내보내는 것도 같은 함수의 계약이다 — 훅이 관측하는 값이 이쪽이다.
+    #
+    # 값만 보면 두 번 호출하는 드리프트가 통과한다 — 두 번째 stdin 읽기가 빈
+    # 값이라 JSON 오류가 나고, 차단(42)이 비차단 1로 강등된다.
+    calls = []
+
+    def boom() -> int:
+        calls.append(1)
+        return code
+
+    monkeypatch.setattr(backstop, "main", boom)
+    assert backstop.run() == code
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("code", [0, 1, backstop.EXIT_BLOCK])
+def test_entry_point_propagates_the_exit_code(monkeypatch, code: int):
+    # __main__.py의 `sys.exit(run())` 이음매. 훅이 실제로 읽는 값은 여기서
+    # 만들어진다 — run()의 반환값이 아니라 프로세스 종료 코드다.
+    calls = []
+
+    def boom() -> int:
+        calls.append(1)
+        return code
+
+    monkeypatch.setattr(backstop, "run", boom)
+    # stdin은 위생 — 이음매가 드리프트해 진짜 main()에 닿아도 터미널을 물지 않는다.
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_module("harness.commit_backstop", run_name="__main__")
+    assert exc.value.code == code
+    assert len(calls) == 1
+
+
+def test_run_reports_malformed_input_without_blocking(monkeypatch, capsys):
+    # 이 패키지에서 가짜 없이 main()→run()이 실제로 도는 유일한 지점.
+    monkeypatch.setattr(sys, "stdin", io.StringIO("{not json"))
+    assert backstop.run() == 1
+    assert "malformed hook input" in capsys.readouterr().err
+
+
+def test_entry_point_never_blocks_on_malformed_input() -> None:
+    # 이 패키지의 다른 테스트는 전부 stdin을 가짜로 바꾼다. 실 파이프에서만
+    # 다르게 도는 분기는 그 전부를 통과하므로, 진짜 프로세스로 재는 지점이
+    # 하나 필요하다 — 차단 코드가 여기서 새면 래퍼가 exit 2로 만든다.
+    result = subprocess.run(
+        [sys.executable, "-m", "harness.commit_backstop"],
+        cwd=Path(__file__).resolve().parents[3],
+        input="",
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    # 태그가 없으면 하네스가 자기 코드에 도달조차 못 한 것이다. 그 경우
+    # 종료 코드는 42가 아니어서 아래 단언만으로는 초록으로 지나간다.
+    assert "[commit-backstop]" in result.stdout + result.stderr
+    assert result.returncode != backstop.EXIT_BLOCK
 
 
 # --- 순수 함수 단위 테스트 ----------------------------------------------------
