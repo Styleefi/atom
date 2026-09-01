@@ -172,7 +172,7 @@ def test_malformed_or_empty_stdin_fails_open(monkeypatch, capsys, raw: str) -> N
     assert captured.out == ""
 
 
-def test_run_fails_open_on_internal_error(monkeypatch, capsys) -> None:
+def test_run_catchall_fails_open(monkeypatch, capsys) -> None:
     def boom() -> int:
         raise RuntimeError("boom")
 

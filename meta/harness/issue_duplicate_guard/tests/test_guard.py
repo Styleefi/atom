@@ -790,7 +790,7 @@ def test_run_search_passes_cwd_to_subprocess(monkeypatch) -> None:
     assert captured["cwd"] == "/somewhere"
 
 
-def test_run_wrapper_converts_crash_to_nonblocking(monkeypatch, capsys) -> None:
+def test_run_catchall_fails_open(monkeypatch, capsys) -> None:
     def _boom() -> int:
         raise RuntimeError("boom")
 
