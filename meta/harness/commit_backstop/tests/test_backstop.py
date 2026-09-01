@@ -1287,7 +1287,7 @@ def test_git_binary_failure_fails_open(monkeypatch, capsys, tmp_path):
     assert _run(monkeypatch, repo) == 0  # 저장소 해석 실패 → 통과
 
 
-def test_malformed_payloads_never_block(monkeypatch, capsys):
+def test_malformed_payloads_never_block(monkeypatch):
     monkeypatch.setattr(sys, "stdin", io.StringIO("not json"))
     assert backstop.main() == 1
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
