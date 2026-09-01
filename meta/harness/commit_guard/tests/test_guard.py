@@ -616,6 +616,15 @@ def test_malformed_input_warns_not_blocks(monkeypatch) -> None:
     assert _run_main(monkeypatch, "{not json") == 1
 
 
+def test_run_catchall_fails_open(monkeypatch, capsys) -> None:
+    def boom() -> int:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(guard, "main", boom)
+    assert guard.run() == 1
+    assert "fail-open" in capsys.readouterr().err
+
+
 # --- _current_branch 자체의 fail-open ----------------------------------------
 
 
