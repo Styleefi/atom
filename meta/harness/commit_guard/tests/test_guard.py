@@ -615,6 +615,7 @@ def test_non_bash_tool_passes(monkeypatch) -> None:
 
 def test_malformed_input_warns_not_blocks(monkeypatch) -> None:
     assert _run_main(monkeypatch, "{not json") == 1
+    assert _run_main(monkeypatch, "") == 1
 
 
 def test_run_catchall_fails_open(monkeypatch, capsys) -> None:
@@ -661,6 +662,13 @@ def test_entry_point_propagates_the_exit_code(monkeypatch, code: int) -> None:
         runpy.run_module("harness.commit_guard", run_name="__main__")
     assert exc.value.code == code
     assert len(calls) == 1
+
+
+def test_run_reports_malformed_input_without_blocking(monkeypatch, capsys) -> None:
+    # 이 패키지에서 가짜 없이 main()→run()이 실제로 도는 유일한 지점.
+    monkeypatch.setattr(sys, "stdin", io.StringIO("{not json"))
+    assert guard.run() == 1
+    assert "malformed hook input" in capsys.readouterr().err
 
 
 # --- _current_branch 자체의 fail-open ----------------------------------------

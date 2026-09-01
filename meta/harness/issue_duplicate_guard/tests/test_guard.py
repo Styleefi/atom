@@ -639,6 +639,7 @@ def test_non_bash_tool_passes(monkeypatch) -> None:
 
 def test_malformed_stdin_warns_without_blocking(monkeypatch, capsys) -> None:
     assert _run_main(monkeypatch, "not json{") == 1
+    assert _run_main(monkeypatch, "") == 1
     assert "fail-open" in capsys.readouterr().err
 
 
@@ -838,6 +839,13 @@ def test_entry_point_propagates_the_exit_code(monkeypatch, code: int) -> None:
         runpy.run_module("harness.issue_duplicate_guard", run_name="__main__")
     assert exc.value.code == code
     assert len(calls) == 1
+
+
+def test_run_reports_malformed_input_without_blocking(monkeypatch, capsys) -> None:
+    # 이 패키지에서 가짜 없이 main()→run()이 실제로 도는 유일한 지점.
+    monkeypatch.setattr(sys, "stdin", io.StringIO("{not json"))
+    assert guard.run() == 1
+    assert "malformed hook input" in capsys.readouterr().err
 
 
 # ---------- 차단 이력 원장 (#76) ----------

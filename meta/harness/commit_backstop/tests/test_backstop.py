@@ -1290,6 +1290,8 @@ def test_git_binary_failure_fails_open(monkeypatch, capsys, tmp_path):
 def test_malformed_payloads_never_block(monkeypatch, capsys):
     monkeypatch.setattr(sys, "stdin", io.StringIO("not json"))
     assert backstop.main() == 1
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    assert backstop.main() == 1
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"tool_name": "Write"})))
     assert backstop.main() == 0
     monkeypatch.setattr(
@@ -1342,6 +1344,13 @@ def test_entry_point_propagates_the_exit_code(monkeypatch, code: int):
         runpy.run_module("harness.commit_backstop", run_name="__main__")
     assert exc.value.code == code
     assert len(calls) == 1
+
+
+def test_run_reports_malformed_input_without_blocking(monkeypatch, capsys):
+    # 이 패키지에서 가짜 없이 main()→run()이 실제로 도는 유일한 지점.
+    monkeypatch.setattr(sys, "stdin", io.StringIO("{not json"))
+    assert backstop.run() == 1
+    assert "malformed hook input" in capsys.readouterr().err
 
 
 # --- 순수 함수 단위 테스트 ----------------------------------------------------

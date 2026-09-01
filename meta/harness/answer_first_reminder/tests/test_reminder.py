@@ -215,11 +215,22 @@ def test_entry_point_propagates_the_exit_code(monkeypatch, code: int) -> None:
 
     monkeypatch.setattr(reminder, "run", boom)
     # stdin은 위생 — 이음매가 드리프트해 진짜 main()에 닿아도 터미널을 물지 않는다.
-    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b""), encoding="utf-8"))
+    monkeypatch.setattr(
+        sys, "stdin", io.TextIOWrapper(io.BytesIO(b""), encoding="utf-8")
+    )
     with pytest.raises(SystemExit) as exc:
         runpy.run_module("harness.answer_first_reminder", run_name="__main__")
     assert exc.value.code == code
     assert len(calls) == 1
+
+
+def test_run_reports_malformed_input_without_blocking(monkeypatch, capsys) -> None:
+    # 이 패키지에서 가짜 없이 main()→run()이 실제로 도는 유일한 지점.
+    monkeypatch.setattr(
+        sys, "stdin", io.TextIOWrapper(io.BytesIO(b"{not json"), encoding="utf-8")
+    )
+    assert reminder.run() == 1
+    assert "malformed hook input" in capsys.readouterr().err
 
 
 # --- 불변식 잠금 -------------------------------------------------------------
