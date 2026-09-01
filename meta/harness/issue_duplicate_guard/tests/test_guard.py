@@ -14,6 +14,7 @@ import json
 import runpy
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -846,6 +847,21 @@ def test_run_reports_malformed_input_without_blocking(monkeypatch, capsys) -> No
     monkeypatch.setattr(sys, "stdin", io.StringIO("{not json"))
     assert guard.run() == 1
     assert "malformed hook input" in capsys.readouterr().err
+
+
+def test_entry_point_never_blocks_on_malformed_input() -> None:
+    # 이 패키지의 다른 테스트는 전부 stdin을 가짜로 바꾼다. 실 파이프에서만
+    # 다르게 도는 분기는 그 전부를 통과하므로, 진짜 프로세스로 재는 지점이
+    # 하나 필요하다 — 차단 코드가 여기서 새면 래퍼가 exit 2로 만든다.
+    result = subprocess.run(
+        [sys.executable, "-m", "harness.issue_duplicate_guard"],
+        cwd=Path(__file__).resolve().parents[3],
+        input="",
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode != guard.EXIT_BLOCK
 
 
 # ---------- 차단 이력 원장 (#76) ----------
