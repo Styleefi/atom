@@ -225,7 +225,7 @@ def test_entry_point_propagates_the_exit_code(monkeypatch, code: int) -> None:
 
 
 def test_run_reports_malformed_input_without_blocking(monkeypatch, capsys) -> None:
-    # 이 패키지에서 가짜 없이 main()→run()이 실제로 도는 유일한 지점.
+    # 가짜 없이 main()→run()이 도는 합성.
     monkeypatch.setattr(
         sys, "stdin", io.TextIOWrapper(io.BytesIO(b"{not json"), encoding="utf-8")
     )
