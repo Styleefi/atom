@@ -842,7 +842,8 @@ def run() -> int:
     """최상위 방어 실행기: 어떤 내부 오류도 차단으로 새지 않게 한다.
 
     Returns:
-        종료 코드 (내부 오류 시 1 — 비차단).
+        종료 코드 (main()의 반환값을 그대로 내보낸다. main()이 Exception을
+        던지면 대신 1 — 비차단).
     """
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(errors="replace")
