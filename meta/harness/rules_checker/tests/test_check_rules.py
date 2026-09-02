@@ -1553,7 +1553,7 @@ def test_skill_shallow_path_is_rejected(tmp_path: Path) -> None:
         "deployed-to: .claude/skills/SKILL.md\n---\n",
     )
     skills_dir = root / ".claude" / "skills"
-    skills_dir.mkdir(parents=True)
+    skills_dir.mkdir(parents=True, exist_ok=True)
     (skills_dir / "SKILL.md").write_text("meta/rules/my-style.md\n", encoding="utf-8")
     violations = rule_violations(root)
     assert len(violations) == 1
