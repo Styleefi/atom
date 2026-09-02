@@ -1735,10 +1735,9 @@ def test_inventory_full_fixture_passes(tmp_path: Path) -> None:
     write_rule(root, "my-style.md", skill_rule("my-style"))
     make_skill_deployment(root, "my-skill", "meta/rules/my-style.md\n")
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
-    (root / ".claude" / "settings.json").write_text(
-        hook_settings(canonical_command("harness.my_guard")), encoding="utf-8"
+    make_hook_deployment(
+        root, "my-guard", hook_settings(canonical_command("harness.my_guard"))
     )
-    make_harness_package(root, "my_guard")
     # 규칙이 없는 셋은 전부 아티팩트 표에 실려야 한다.
     make_skill_deployment(root, "helper-skill", "functional skill\n")
     make_harness_package(root, "toolbox")
