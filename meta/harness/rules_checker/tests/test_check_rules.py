@@ -1444,6 +1444,39 @@ def make_skill_deployment(root: Path, skill_name: str, skill_text: str) -> None:
     (skill_dir / "SKILL.md").write_text(skill_text, encoding="utf-8")
 
 
+def test_write_settings_refuses_a_second_owner(tmp_path: Path) -> None:
+    # settings.json의 소유자는 하나여야 한다. 관대하게 덮어쓰면 앞선 소비자의
+    # 산출물이 사라진 채 그 테스트가 절반만 검사하고 통과한다 — PR #105가
+    # 반려된 형태다(#109).
+    root = make_repo(tmp_path)
+    settings_file = root / ".claude" / "settings.json"
+    write_settings(root, "SENTINEL-A")
+    # 단정은 with 블록 밖에 둔다. 안에 두면 호출 뒤 코드가 도달 불가가 되고
+    # pytest는 경고하지 않아 이 테스트 자체가 공허해진다.
+    with pytest.raises(FileExistsError) as excinfo:
+        write_settings(root, "SENTINEL-B")
+    # 메시지는 문구가 아니라 대안의 식별자로 앵커한다 — 다듬어도 빨개지면 안 된다.
+    assert "hook_settings" in str(excinfo.value)
+    # 이 단정이 실질이다. 타입과 메시지만 보면 "먼저 쓰고 그다음 raise"하는
+    # 구현도 통과하는데, 그건 파일이 이미 날아간 뒤다. 두 sentinel을 같은
+    # 인코딩으로 쓰는 이유는 섞으면 실패가 단정이 아니라 UnicodeDecodeError로
+    # 나서 진단 문구가 원인을 말해주지 않기 때문이다.
+    assert settings_file.read_text(encoding="utf-8") == "SENTINEL-A"
+
+
+def test_skill_and_hook_deployments_compose(tmp_path: Path) -> None:
+    # skill 배포가 .claude를 부모로 먼저 만들어도 hook 배포가 얹힌다(#109).
+    # 고유 커버리지가 아니라 진단 국소성이 이 테스트의 값이다 —
+    # test_inventory_full_fixture_passes가 같은 조합을 실행하지만 그건 인벤토리
+    # 테스트라, 조합이 깨지면 원인에서 한 단계 떨어진 곳에서 넘어진다.
+    root = make_repo(tmp_path)
+    settings = hook_settings(canonical_command("harness.my_guard"))
+    make_skill_deployment(root, "my-skill", "meta/rules/my-style.md\n")
+    make_hook_deployment(root, "my-guard", settings)
+    settings_file = root / ".claude" / "settings.json"
+    assert settings_file.read_text(encoding="utf-8") == settings
+
+
 def test_valid_skill_rule_passes(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "my-style.md", skill_rule("my-style"))
