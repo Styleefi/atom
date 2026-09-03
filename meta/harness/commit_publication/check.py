@@ -18,8 +18,10 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
     - **훅의 술어와 같지 않고 의도적으로 더 좁다.** 훅은 등록된 모든 remote의 main/master를
       제외 집합에 넣고, 이 도구는 하나만 본다. 차이는 안전한 방향으로만 작용한다 — not-on을
       과다 보고할 수는 있어도 훅이 옳았던 자리에서 면죄하지는 않는다.
-    - **판정 대상은 cwd의 저장소다.** 훅은 payload cwd 기준으로 보고하므로, 서브모듈이나
-      다른 worktree의 보고를 저장소 루트에서 확인하면 다른 저장소에 대해 답한다.
+    - **판정 대상은 `-C`가 가리키는 저장소이고, 기본값은 프로세스 cwd다.** 규칙이 인용하는
+      `uv run --directory meta ...`는 cwd를 `meta/`로 바꾸므로 기본 판정 대상은 **`meta/`를
+      담은 저장소**다(실측). 훅은 payload cwd 기준으로 보고하므로, 서브모듈이나 다른
+      worktree의 보고는 `-C <경로>`로 그 저장소를 가리켜야 한다.
     - **ls-remote와 fetch 사이의 경쟁은 양방향이다.** 그 사이 push가 들어오면 not-on으로
       보고되고(안전), 원격 main이 **되감기면** 로컬에 이미 있던 옛 tip이 pin이 되어 on으로
       보고된다(위험).
@@ -96,9 +98,12 @@ PIN_RE = re.compile(r"^[0-9a-f]{40}$|^[0-9a-f]{64}$")
 # URL 형태를 인쇄할 때 쓰는 고정 문구. URL은 자격 증명을 담을 수 있다.
 URL_TARGET_LABEL = "the remote given on the command line"
 
+# `-C` 로 받은 판정 대상 저장소. 러너가 모든 git 호출에 실어 준다.
+_repo_dir: str | None = None
+
 _USAGE = (
     f"{TAG} usage: python -m harness.commit_publication "
-    "[--remote <name|url>] <sha>..."
+    "[-C <path>] [--remote <name|url>] <sha>..."
 )
 
 
@@ -171,6 +176,9 @@ def run_git(args: list[str], *, timeout: int) -> tuple[int, str]:
 
     **stderr는 돌려주지 않는다** — 모듈 docstring의 출력 채널 항목 참조.
 
+    판정 대상 저장소는 `-C`로 실린다 — 규칙이 인용하는 `uv run --directory meta ...`가
+    cwd를 `meta/`로 바꾸므로, 다른 저장소를 물으려면 호출자가 경로를 줘야 한다.
+
     Args:
         args: `git` 뒤에 붙일 인자.
         timeout: 초 단위 상한. 네트워크 호출과 로컬 호출이 다르다.
@@ -178,7 +186,10 @@ def run_git(args: list[str], *, timeout: int) -> tuple[int, str]:
     Returns:
         `(rc, stdout)`. 타임아웃은 rc 124로 돌려준다(셸 관례; git이 내지 않는 값).
     """
-    argv = ["git", "-c", "credential.helper=", *args]
+    argv = ["git"]
+    if _repo_dir is not None:
+        argv += ["-C", _repo_dir]
+    argv += ["-c", "credential.helper=", *args]
     try:
         proc = subprocess.Popen(
             argv,
@@ -205,24 +216,29 @@ def run_git(args: list[str], *, timeout: int) -> tuple[int, str]:
     return proc.returncode, out
 
 
-def _parse_args(argv: list[str]) -> tuple[str | None, list[str]]:
+def _parse_args(argv: list[str]) -> tuple[str | None, str | None, list[str]]:
     """argv를 (remote, SHA 목록)으로 가른다. git을 부르기 전에 형식만 본다.
 
     Args:
         argv: 프로그램 이름을 제외한 인자 목록.
 
     Returns:
-        `(remote 또는 None, SHA 목록)`.
+        `(repo 또는 None, remote 또는 None, SHA 목록)`.
 
     Raises:
         _CallerError: 인자가 없거나 형식이 틀렸을 때.
     """
     remote: str | None = None
+    repo: str | None = None
     shas: list[str] = []
     rest = list(argv)
     while rest:
         item = rest.pop(0)
-        if item == "--remote":
+        if item == "-C":
+            if not rest:
+                raise _CallerError("-C needs a path")
+            repo = rest.pop(0)
+        elif item == "--remote":
             if not rest:
                 raise _CallerError("--remote needs a value")
             remote = rest.pop(0)
@@ -237,6 +253,9 @@ def _parse_args(argv: list[str]) -> tuple[str | None, list[str]]:
     bad = [s for s in shas if not SHA_RE.match(s)]
     if bad:
         raise _CallerError(f"not hex commit SHAs: {' '.join(bad)}")
+    if repo is not None:
+        if not repo or not Path(repo).is_dir():
+            raise _CallerError(f"-C is not a directory: {repo}")
     if remote is not None:
         if not remote:
             raise _CallerError("--remote needs a value")
@@ -244,7 +263,7 @@ def _parse_args(argv: list[str]) -> tuple[str | None, list[str]]:
         # 실행시킨다. SHA 는 hex 검증이 막고 있고, 남은 구멍이 여기였다.
         if remote.startswith("-"):
             raise _CallerError(f"--remote must not look like an option: {remote}")
-    return remote, shas
+    return repo, remote, shas
 
 
 def _assert_graph_is_trustworthy() -> None:
@@ -528,7 +547,9 @@ def _check(argv: list[str]) -> int:
         종료 코드.
     """
     try:
-        requested, shas = _parse_args(argv)
+        global _repo_dir
+        repo, requested, shas = _parse_args(argv)
+        _repo_dir = repo
         _assert_graph_is_trustworthy()
         remote, target = _resolve_remote(requested)
         tips = _pin_tips(remote)

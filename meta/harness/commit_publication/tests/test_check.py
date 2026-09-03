@@ -590,10 +590,10 @@ def test_the_rule_cites_a_command_this_module_accepts() -> None:
     assert placeholders, "the citation must show where the SHAs go"
     for token in placeholders:
         stripped = token.strip("[]<>.")
-        if stripped.startswith("--"):
-            assert stripped.split("=")[0] in ("--remote",), stripped
-    remote, shas = check._parse_args(["--remote", "origin", "0" * 40])
-    assert remote == "origin" and shas == ["0" * 40]
+        if stripped.startswith("-"):
+            assert stripped.split("=")[0] in ("-C", "--remote"), stripped
+    repo, remote, shas = check._parse_args(["--remote", "origin", "0" * 40])
+    assert repo is None and remote == "origin" and shas == ["0" * 40]
 
     # 대체된 절차가 되살아나지 않았는지 확인한다.
     for gone in ("merge-base --is-ancestor", "FETCH_HEAD", "HEAD branch"):
@@ -650,3 +650,27 @@ def test_option_shaped_remote_values_are_rejected(monkeypatch, tmp_path):
     for hostile in ("--upload-pack=/tmp/x.sh", "-o", "--exec=/bin/sh"):
         assert _run(monkeypatch, src, "--remote", hostile, _short(pub)) == \
             check.EXIT_CALLER
+
+
+def test_dash_c_judges_the_repository_it_points_at(monkeypatch, tmp_path):
+    """`-C` 가 가리키는 저장소를 판정한다 — cwd 가 다른 곳이어도.
+
+    규칙이 인용하는 `uv run --directory meta ...` 는 cwd 를 `meta/` 로 바꾼다(실측).
+    그래서 "cwd 의 저장소를 판정한다"는 주장은 거짓이었고, 훅이 서브모듈이나 다른
+    worktree 기준으로 낸 보고는 확인할 방법이 없었다. 주장을 좁히는 대신 코드가
+    주장과 맞도록 경로를 받는다.
+    """
+    src, pub, local = _published(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    # 다른 디렉터리에서 실행해도 -C 로 가리킨 저장소에 대해 답한다.
+    assert _run(monkeypatch, elsewhere, "-C", str(src), _short(pub)) == \
+        check.EXIT_ALL_ON
+    assert _run(monkeypatch, elsewhere, "-C", str(src), _short(local)) == \
+        check.EXIT_SOME_NOT_ON
+    # -C 없이 같은 자리에서 돌리면 저장소가 아니므로 호출자 잘못이다.
+    assert _run(monkeypatch, elsewhere, _short(pub)) == check.EXIT_CALLER
+    # 존재하지 않는 경로도 호출자 잘못이다.
+    assert _run(monkeypatch, src, "-C", str(tmp_path / "nope"), _short(pub)) == \
+        check.EXIT_CALLER
