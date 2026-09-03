@@ -22,9 +22,8 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
       `uv run --directory meta ...`는 cwd를 `meta/`로 바꾸므로 기본 판정 대상은 **`meta/`를
       담은 저장소**다(실측). 훅은 payload cwd 기준으로 보고하므로, 서브모듈이나 다른
       worktree의 보고는 `-C <경로>`로 그 저장소를 가리켜야 한다.
-    - **ls-remote와 fetch 사이의 경쟁은 양방향이다.** 그 사이 push가 들어오면 not-on으로
-      보고되고(안전), 원격 main이 **되감기면** 로컬에 이미 있던 옛 tip이 pin이 되어 on으로
-      보고된다(위험).
+    - ls-remote와 fetch 사이에 push가 들어오면 not-on으로 보고된다(안전한 방향). 반대
+      방향의 되감기는 fetch 뒤 tip 재확인으로 닫혀 있다 — 그때는 판정 불가가 된다.
     - **fetch의 추적 ref 갱신은 훅의 사각지대를 치유하지 않는다.** 설정된 refspec이 일치할
       때만 일어나므로 `--single-branch`/pruned 클론과 URL 형태에서는 아무 ref도 만들지
       않는다. 일치할 때는 forced 갱신이라 추적 ref를 되감을 수도 있고, 그러면 훅이 전에
@@ -408,7 +407,7 @@ def _usable_pins(remote: str, tips: dict[str, str]) -> dict[str, str]:
         사용 가능한 `{브랜치 이름: tip SHA}`.
 
     Raises:
-        _Undecided: fetch가 실패했거나 남는 pin이 없을 때.
+        _Undecided: fetch가 실패했거나, 남는 pin이 없거나, 읽는 사이 원격이 움직였을 때.
     """
     refs = [f"refs/heads/{name}" for name in tips]
     # --no-write-fetch-head: 이 도구는 FETCH_HEAD 를 읽지 않으면서 덮어쓰기만 한다.
@@ -430,6 +429,13 @@ def _usable_pins(remote: str, tips: dict[str, str]) -> dict[str, str]:
             usable[name] = tip
     if not usable:
         raise _Undecided("the fetched tips did not arrive")
+
+    # 되감기 경쟁을 닫는다. 3단계와 4단계 사이에 원격 main 이 되감기면, 로컬에 이미 있던
+    # 옛 tip 이 pin 이 되어 cat-file 을 통과하고 "on" 으로 — 면죄 방향으로 — 보고된다.
+    # fetch 뒤에 tip 을 한 번 더 확인해 그 창을 닫는다. 이 확인 뒤의 이동은 상관없다:
+    # 답은 "이 fetch 시점"에 대한 것이고 그 시점에는 참이었다.
+    if _pin_tips(remote) != tips:
+        raise _Undecided("the remote moved while it was being read")
     return usable
 
 

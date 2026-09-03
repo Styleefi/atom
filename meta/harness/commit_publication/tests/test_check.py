@@ -696,3 +696,34 @@ def test_an_irrelevant_forgery_does_not_block_the_answer(monkeypatch, tmp_path):
     _git(src, "replace", "--graft", local, island)
 
     assert _run(monkeypatch, src, _short(pub)) == check.EXIT_ALL_ON
+
+
+def test_a_remote_that_moves_while_being_read_yields_no_verdict(
+    monkeypatch, capsys, tmp_path
+):
+    """ls-remote 와 fetch 사이에 원격이 되감기면 판정하지 않는다.
+
+    그 창이 열려 있으면, 로컬에 이미 있던 옛 tip 이 pin 이 되어 `cat-file` 을 통과하고
+    "on" 으로 — **면죄 방향으로** — 보고된다. 도구의 비주장 중 유일하게 위험 방향이던
+    항목이고, fetch 뒤 tip 재확인으로 닫았다.
+    """
+    src, pub, _ = _published(tmp_path)
+    x = _commit(src, "chore: also published")
+    _git(src, "push", "-q", "origin", "main")
+
+    real_fetch_done = {"n": 0}
+    real_run = check.run_git
+
+    def _rewind_after_fetch(args, **kw):
+        result = real_run(args, **kw)
+        if args and args[0] == "fetch":
+            # fetch 직후 원격을 x 이전으로 되감는다.
+            real_fetch_done["n"] += 1
+            _git(src, "push", "-q", "-f", "origin", f"{pub}:refs/heads/main")
+        return result
+
+    monkeypatch.setattr(check, "run_git", _rewind_after_fetch)
+    rc = _run(monkeypatch, src, _short(x))
+    assert real_fetch_done["n"] == 1, "the fixture never reached the fetch"
+    assert rc == check.EXIT_UNDECIDED
+    assert "moved while it was being read" in capsys.readouterr().out
