@@ -27,7 +27,9 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
       때만 일어나므로 `--single-branch`/pruned 클론과 URL 형태에서는 아무 ref도 만들지
       않는다. 일치할 때는 forced 갱신이라 추적 ref를 되감을 수도 있고, 그러면 훅이 전에
       제외하던 커밋을 새로 보고하거나 유예된 판정이 push 없이 녹을 수 있다.
-    - `SHA_RE`는 hex 이름 브랜치에도 매칭된다 — 그때는 그 브랜치 tip을 판정한다.
+    - hex 이름 ref가 나열된 SHA의 접두사와 정확히 같으면 그 SHA는 **판정 불가**가 된다.
+      `rev-parse`가 ref를 먼저 보므로 객체를 되찾을 방법이 없어, 면죄가 아니라 판정 불가
+      쪽으로 떨어뜨린다.
     - fetch가 해석 가능하던 축약을 모호하게 만들 수 있다(그 SHA는 판정 불가가 된다).
     - 카운트는 argv 항목 기준이다. 같은 커밋을 축약형과 전체 SHA로 두 번 넘기면 둘로 센다.
     - 자식 프로젝트가 이 하네스를 제거하면 규칙이 존재하지 않는 명령을 인용하게 된다.
@@ -398,6 +400,12 @@ def judge(sha: str, pins: dict[str, str]) -> str | None:
     if rc != 0 or not out.strip():
         return None
     full = out.strip()
+    # rev-parse 는 ref 를 객체 이름보다 먼저 본다. hex 이름 브랜치(예: `deadbeefdead`)가
+    # 있으면 같은 접두사를 가진 진짜 커밋 대신 그 브랜치 tip 이 해석되고, 그 tip 이
+    # 발행돼 있으면 미발행 커밋이 on 으로 — 면죄 방향으로 — 뒤집힌다. 해석 결과가 인자를
+    # 접두사로 갖지 않으면 그건 우리가 물은 객체가 아니다.
+    if not full.startswith(sha):
+        return None
 
     saw_clean_negative = False
     for tip in pins.values():

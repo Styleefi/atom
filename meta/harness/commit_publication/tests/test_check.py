@@ -549,3 +549,18 @@ def test_the_rule_cites_a_command_this_module_accepts() -> None:
     # 대체된 절차가 되살아나지 않았는지 확인한다.
     for gone in ("merge-base --is-ancestor", "FETCH_HEAD", "HEAD branch"):
         assert gone not in rule, f"the replaced procedure came back: {gone}"
+
+
+def test_a_hex_named_ref_cannot_shadow_a_reported_sha(monkeypatch, tmp_path):
+    """hex 이름 브랜치가 같은 접두사의 커밋을 가리지 못한다.
+
+    rev-parse 는 ref 를 객체 이름보다 먼저 해석한다. 미발행 커밋 B 를 보고받았는데
+    B 의 축약형과 똑같은 이름의 브랜치가 발행된 커밋 A 를 가리키면, 방어가 없을 때
+    도구는 A 를 판정해 exit 4 — 거짓 면죄 — 를 낸다. 설계 전체가 피하려는 방향이다.
+    """
+    src, pub, local = _published(tmp_path)
+    _git(src, "branch", _short(local), pub)
+    assert _git(src, "rev-parse", f"{_short(local)}^{{commit}}") == pub
+
+    rc = _run(monkeypatch, src, _short(local))
+    assert rc == check.EXIT_UNDECIDED, "a shadowing ref must not produce a verdict"
