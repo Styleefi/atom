@@ -114,6 +114,12 @@ URL_TARGET_LABEL = "the remote given on the command line"
 ON = "on"
 NOT_ON = "not_on"
 FORGED = "forged"
+UNAVAILABLE = "unavailable"
+
+# 판정값 전체. `_report`는 이 목록을 열거하지 않고 **모르는 값을 거부 쪽으로** 보내므로,
+# 여기 항목이 늘어도 면죄 가지로 새지 않는다 — 새 값을 들이고 열거하는 이웃을 감사하지
+# 않는 것이 라운드 2~4를 만든 패턴이었다.
+VERDICTS = (ON, NOT_ON, FORGED, UNAVAILABLE, None)
 
 # `-C` 로 받은 판정 대상 저장소. 러너가 모든 git 호출에 실어 준다.
 _repo_dir: str | None = None
@@ -312,13 +318,17 @@ def _assert_not_shallow() -> None:
 
     Raises:
         _CallerError: 저장소가 아닐 때(cwd 문제는 호출자가 고친다).
-        _Undecided: 얕은 클론일 때.
+        _Undecided: 얕은 클론이거나, git이 답하지 않을 때.
     """
     rc, out = run_git(
         ["rev-parse", "--is-shallow-repository"], timeout=LOCAL_TIMEOUT_SECONDS
     )
+    # 128 은 "여기가 저장소가 아니다"(호출자가 cwd 나 -C 로 고친다), 그 밖의 nonzero 는
+    # "git 이 답하지 않았다"(환경 문제)이다. 섞으면 타임아웃을 잘못된 경로 탓으로 보고한다.
+    if rc == 128:
+        raise _CallerError("not a git repository")
     if rc != 0:
-        raise _CallerError("not a git repository (or git is unavailable)")
+        raise _Undecided("git did not answer when asked about this repository")
     if out.strip() == "true":
         raise _Undecided("this repository is a shallow clone")
 
@@ -410,22 +420,23 @@ def _pin_tips(remote: str) -> dict[str, str]:
     return tips
 
 
-def _usable_pins(remote: str, tips: dict[str, str]) -> dict[str, str]:
+def _usable_pins(
+    remote: str, tips: dict[str, str]
+) -> tuple[dict[str, str], str | None]:
     """fetch로 객체를 받아오고, 로컬에서 도달 가능한 pin만 남긴다.
 
-    `cat-file -e`가 확인하는 것은 **배달이 아니라 존재**다 — 이전 clone에 이미 있던 객체도
-    통과한다. 실패한 pin은 즉시 중단하지 않고 사용 불가로 두며, 판정 합성이 처리한다.
-    `^{commit}` peel은 필수다(없으면 blob도 rc 0을 낸다).
+    **실패를 예외가 아니라 사유로 돌려준다.** 예외로 던지면 호출자의 재시도 루프를
+    통째로 뛰어넘어, 재시도가 존재 이유인 경우에 정작 재시도하지 못한다(라운드 4 실측).
+
+    `cat-file -e`가 확인하는 것은 배달이 아니라 **존재**다 — 이전 clone에 이미 있던 객체도
+    통과한다. `^{commit}` peel은 필수다(없으면 blob도 rc 0을 낸다).
 
     Args:
         remote: git에 넘길 remote 값.
         tips: 고정된 tip.
 
     Returns:
-        사용 가능한 `{브랜치 이름: tip SHA}`.
-
-    Raises:
-        _Undecided: fetch가 실패했거나 남는 pin이 없을 때.
+        `(사용 가능한 pin, None)` 또는 `({}, 실패 사유)`.
     """
     refs = [f"refs/heads/{name}" for name in tips]
     # --no-write-fetch-head: 이 도구는 FETCH_HEAD 를 읽지 않으면서 덮어쓰기만 한다.
@@ -436,7 +447,7 @@ def _usable_pins(remote: str, tips: dict[str, str]) -> dict[str, str]:
         timeout=NETWORK_TIMEOUT_SECONDS,
     )
     if rc != 0:
-        raise _Undecided("the fetch failed; nothing was compared")
+        return {}, "the fetch failed"
 
     usable = {}
     for name, tip in tips.items():
@@ -446,35 +457,40 @@ def _usable_pins(remote: str, tips: dict[str, str]) -> dict[str, str]:
         if rc == 0:
             usable[name] = tip
     if not usable:
-        raise _Undecided("the fetched tips did not arrive")
-    return usable
+        return {}, "the fetched tips did not arrive"
+    return usable, None
 
 
 def _stable_pins(remote: str) -> dict[str, str]:
     """읽는 동안 움직이지 않은 tip에 대해서만 pin을 확정한다.
 
-    되감기 경쟁이 여기서 닫힌다. ls-remote와 fetch 사이에 원격 main이 되감기면, 로컬에
-    이미 있던 옛 tip이 pin이 되어 `cat-file`을 통과하고 "on"으로 — 면죄 방향으로 —
-    보고된다. fetch 뒤에 tip을 다시 읽어 그 창을 닫는다.
+    되감기 경쟁이 여기서 닫힌다. ls-remote와 fetch 사이에 원격 main이 움직이면, fetch는
+    **지금** 그 ref가 가리키는 것을 배달하므로 고정해 둔 tip은 오지 않는다. 그때 로컬에
+    옛 tip이 남아 있으면 `cat-file`을 통과해 "on"으로 — 면죄 방향으로 — 보고된다.
 
-    움직였다고 곧바로 포기하지는 않는다. 한 번 더 현재 tip으로 고정하고 받아온다 —
-    전진이면 답을 버릴 이유가 없고, 되감기여도 **현재** tip 기준으로 답하는 것이 옳다
-    (되감긴 커밋은 그때 not-on이 된다). 거부는 원격이 두 번 연속 움직였을 때뿐이다.
+    **재시도 기준은 오직 "tip이 움직였는가"다.** 시도의 성패를 기준에 섞으면, 움직이지도
+    않았는데 "kept moving"이라는 거짓 사유를 내거나 빈 pin을 돌려주게 된다. 움직이지
+    않았다면 레이스가 아니므로 그 시도의 사유를 그대로 올린다. 재확인 결과는 버리지 않고
+    **다음 시도의 pin으로 재사용**한다 — 관측 사이에 틈을 남기지 않는다.
 
     Args:
         remote: git에 넘길 remote 값.
 
     Returns:
-        사용 가능한 `{브랜치 이름: tip SHA}`.
+        사용 가능한 `{브랜치 이름: tip SHA}`. **비어 있지 않다.**
 
     Raises:
-        _Undecided: 원격이 계속 움직이거나, 읽기·fetch가 실패했을 때.
+        _Undecided: 원격이 연속으로 움직이거나, 움직이지 않은 시도가 실패했을 때.
     """
+    tips = _pin_tips(remote)
     for _ in range(PIN_ATTEMPTS):
-        tips = _pin_tips(remote)
-        usable = _usable_pins(remote, tips)
-        if _pin_tips(remote) == tips:
+        usable, reason = _usable_pins(remote, tips)
+        after = _pin_tips(remote)
+        if after == tips:
+            if reason is not None:
+                raise _Undecided(reason)
             return usable
+        tips = after
     raise _Undecided("the remote kept moving while it was being read")
 
 
@@ -500,13 +516,21 @@ def judge(sha: str, pins: dict[str, str]) -> str | None:
 
     Returns:
         `ON` / `NOT_ON` / `FORGED`(이 판정이 로컬 그래프 재작성에 의존) /
-        None(SHA 를 해석할 수 없음).
+        `UNAVAILABLE`(git 이 답하지 않았다) / None(이 저장소가 그 커밋을 모른다).
     """
+    if not pins:
+        return UNAVAILABLE
+
     rc, out = run_git(
         ["rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}"],
         timeout=LOCAL_TIMEOUT_SECONDS,
     )
-    if rc != 0 or not out.strip():
+    # rc 1 은 "이 저장소가 그런 커밋을 모른다"이고, 그 밖의 nonzero 는 "git 이 답하지
+    # 않았다"이다. 둘을 같은 채널에 넣으면, 타임아웃 때문에 실패한 것을 오너가 잘못된
+    # SHA 로 읽고 엉뚱한 곳을 뒤진다.
+    if rc not in (0, 1):
+        return UNAVAILABLE
+    if rc == 1 or not out.strip():
         return None
     full = out.strip()
     # rev-parse 는 ref 를 객체 이름보다 먼저 본다. hex 이름 브랜치(예: `deadbeefdead`)가
@@ -530,25 +554,25 @@ def judge(sha: str, pins: dict[str, str]) -> str | None:
         # 새는 길이 된다. 124(타임아웃)·127(OSError)를 "조작됐다"로 읽는 것도 확신에 찬
         # 오진이라 안 된다 — 둘 중 하나라도 판정값이 아니면 판정 불가다.
         if rc not in (0, 1) or rc_plain not in (0, 1):
-            return None
+            return UNAVAILABLE
         if rc != rc_plain:
             return FORGED
         if rc == 0:
             return ON
         saw_clean_negative = True
-    return NOT_ON if saw_clean_negative else None
+    return NOT_ON if saw_clean_negative else UNAVAILABLE
 
 
 def _report(target: str, shas: list[str], verdicts: dict[str, str | None]) -> int:
     """판정 결과를 인쇄하고 종료 코드를 돌려준다.
 
-    판정하지 못한 SHA가 하나라도 있으면 전체가 판정 불가다. `N of M` 형식은 "M 중 k개만
-    판정했다"를 표현할 수 없어, 그대로 두면 판정된 적 없는 SHA를 면죄하는 인쇄된 거짓이
-    된다 — 네 번째 결함과 같은 부류다.
+    **분기는 "판정되지 않은 것이 있는가"가 정한다 — 사유별 목록이 정하지 않는다.** 사유를
+    열거해 분기하면 목록에 없는 새 값이 조용히 "전부 on" 가지로 떨어져 판정된 적 없는
+    SHA 를 면죄한다(실측: 그렇게 하면 exit 4 가 나온다). 여기서는 `ON`/`NOT_ON`이 아닌
+    모든 값이 **구조적으로** 거부 쪽이므로, 나중에 판정값이 늘어도 새지 않는다.
 
-    **그때도 not-on 줄은 인쇄한다.** 판정 불가 SHA가 섞였다고 이미 판정한 not-on 을 보고에서
-    지우면, 오너는 조치가 필요한 커밋을 보지 못한 채 "판정 불가"만 받는다(라운드 3 실측).
-    분모는 실제 판정 수를 밝히고, 판정하지 못한 것은 사유별로 나눠 이름을 부른다.
+    판정 불가가 섞여도 not-on 줄은 인쇄한다 — 지우면 오너가 조치가 필요한 커밋을 보지
+    못한 채 "판정 불가"만 받는다. 분모는 실제 판정 수를 밝힌다.
 
     Args:
         target: 출력에 쓸 remote 표기.
@@ -559,14 +583,13 @@ def _report(target: str, shas: list[str], verdicts: dict[str, str | None]) -> in
         종료 코드.
     """
     judged = [s for s in shas if verdicts[s] in (ON, NOT_ON)]
+    unjudged = [s for s in shas if verdicts[s] not in (ON, NOT_ON)]
     not_on = [s for s in judged if verdicts[s] == NOT_ON]
-    forged = [s for s in shas if verdicts[s] == FORGED]
-    unresolved = [s for s in shas if verdicts[s] is None]
 
     def _verb(n: int) -> str:
         return "is" if n == 1 else "are"
 
-    if forged or unresolved:
+    if unjudged:
         head = (
             f"{TAG} {len(judged)} of {len(shas)} listed commits were judged "
             f"as of this fetch"
@@ -579,16 +602,23 @@ def _report(target: str, shas: list[str], verdicts: dict[str, str | None]) -> in
             )
         else:
             print(f"{head}.")
-        if unresolved:
-            print(
-                f"  {len(unresolved)} could not be resolved: "
-                f"{' '.join(unresolved)}"
-            )
-        if forged:
-            print(
-                f"  {len(forged)} could not be judged — ancestry there depends "
-                f"on replace refs or a grafts file: {' '.join(forged)}"
-            )
+
+        buckets = [
+            (None, "could not be resolved in this repository"),
+            (FORGED, "could not be judged — ancestry there depends on replace "
+                     "refs or a grafts file"),
+            (UNAVAILABLE, "could not be compared — git did not answer"),
+        ]
+        named = set()
+        for value, phrase in buckets:
+            group = [s for s in unjudged if verdicts[s] == value]
+            named.update(group)
+            if group:
+                print(f"  {len(group)} {phrase}: {' '.join(group)}")
+        # 목록에 없는 값도 이름은 불린다 — 조용히 사라지는 SHA 가 없어야 한다.
+        rest = [s for s in unjudged if s not in named]
+        if rest:
+            print(f"  {len(rest)} could not be judged: {' '.join(rest)}")
         return EXIT_UNDECIDED
 
     if not_on:

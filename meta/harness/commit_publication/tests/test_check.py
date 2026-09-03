@@ -782,35 +782,55 @@ def test_a_forged_sha_never_erases_the_not_on_shas(monkeypatch, capsys, tmp_path
 
 
 @pytest.mark.parametrize("n", range(1, 4))
-def test_every_not_on_sha_always_appears_in_the_output(capsys, n: int):
-    """**출력 불변식**: not-on 으로 판정된 SHA 는 어떤 조합에서도 출력에 이름이 불린다.
+def test_report_is_closed_world_over_verdicts(capsys, n: int):
+    """**출력 불변식.** 판정값 조합 전수에 대해 이름과 종료 코드가 모두 정직해야 한다.
 
-    이 불변식은 `_report` 의 docstring 문장으로만 존재했고, 라운드 2 의 변경이 그걸 조용히
-    어겼다(라운드 3 이 적발). 규약은 테스트로 옮겨갈 때에야 닫힌다 — 이 PR 이 존재하는
-    이유와 같은 수다. 판정 조합을 전수로 돌린다.
+    이 불변식은 `_report` 의 docstring 문장으로만 존재했고 라운드 2 의 변경이 조용히
+    어겼다(라운드 3 적발). 그리고 라운드 4 검토에서, 상태를 하나 더 들이면 사유별 목록으로
+    분기하던 `_report` 가 그 값을 "전부 on" 가지로 흘려 **exit 4 — 거짓 면죄** 를 낸다는
+    것이 실측됐다. 그래서 이름뿐 아니라 **종료 코드**까지, 그리고 목록에 **없는** 값까지
+    함께 고정한다 — 나중에 판정값이 늘어도 이 테스트가 먼저 빨개진다.
     """
     import itertools
 
-    states = [check.ON, check.NOT_ON, check.FORGED, None]
+    states = list(check.VERDICTS) + ["a-state-nobody-declared"]
     for combo in itertools.product(states, repeat=n):
         shas = [f"{i:012x}" for i in range(n)]
         verdicts = dict(zip(shas, combo))
-        check._report("origin", shas, verdicts)
+        rc = check._report("origin", shas, verdicts)
         out = capsys.readouterr().out
+
+        judged = [s for s in shas if verdicts[s] in (check.ON, check.NOT_ON)]
+        not_on = [s for s in judged if verdicts[s] == check.NOT_ON]
+        unjudged = [s for s in shas if verdicts[s] not in (check.ON, check.NOT_ON)]
+
+        # 종료 코드는 세 갈래뿐이고, 미판정이 하나라도 있으면 절대 4·5 가 아니다.
+        if unjudged:
+            assert rc == check.EXIT_UNDECIDED, f"{combo}: unjudged yielded {rc}"
+            assert "of the listed commits are on" not in out
+            assert not out.rstrip().endswith(
+                "on main/master at origin as of this fetch."
+            ) or not_on, f"{combo}: an all-on sentence with unjudged SHAs"
+        elif not_on:
+            assert rc == check.EXIT_SOME_NOT_ON, f"{combo}: {rc}"
+        else:
+            assert rc == check.EXIT_ALL_ON, f"{combo}: {rc}"
+
+        # 이름이 불리지 않고 사라지는 SHA 가 없어야 한다.
         for sha, verdict in verdicts.items():
-            if verdict == check.NOT_ON:
-                assert sha in out, f"{combo}: a not-on SHA is missing from the output"
-            if verdict is None or verdict == check.FORGED:
-                assert sha in out, f"{combo}: an unjudged SHA is not named"
+            if verdict != check.ON:
+                assert sha in out, f"{combo}: {verdict} SHA vanished"
 
 
-def test_a_runner_failure_is_not_diagnosed_as_forged_ancestry(monkeypatch, tmp_path):
-    """한쪽 호출만 실패하면 "조작됐다" 가 아니라 판정 불가다.
+
+def test_a_runner_failure_is_reported_as_unavailable(monkeypatch, tmp_path):
+    """한쪽 호출만 실패하면 "조작됐다" 도 "해석 불가" 도 아니라 "git 이 답하지 않음" 이다.
 
     `run_git` 은 타임아웃에 124, OSError 에 127 을 낸다. 두 rc 를 무조건 비교하면 그런
-    전이적 실패가 "이 저장소의 조상 관계는 replace/grafts 에 의존한다" 는 확신에 찬
-    오진으로 오너에게 전달된다 — 사실이 아니고, 사유가 틀리면 오너의 다음 행동도 틀린다.
+    전이적 실패가 위조로 오진되고, `None` 에 넣으면 오너가 멀쩡한 SHA 를 잘못된 것으로
+    읽고 엉뚱한 곳을 뒤진다 — 사유가 틀리면 다음 행동도 틀린다.
     """
+    monkeypatch.setattr(check, "_repo_dir", None)   # 앞 테스트의 -C 를 물려받지 않는다
     src, pub, _ = _published(tmp_path)
     real_run = check.run_git
 
@@ -821,8 +841,169 @@ def test_a_runner_failure_is_not_diagnosed_as_forged_ancestry(monkeypatch, tmp_p
 
     monkeypatch.setattr(check, "run_git", _neutralized_times_out)
     monkeypatch.chdir(src)
-    pins = {"main": _git(src, "rev-parse", "refs/remotes/origin/main")} \
-        if (src / ".git" / "refs" / "remotes").exists() else {"main": pub}
-    verdict = check.judge(_short(pub), pins)
-    assert verdict is not check.FORGED, "a runner failure was diagnosed as forgery"
-    assert verdict is None, "an undecidable comparison must not produce a verdict"
+    verdict = check.judge(_short(pub), {"main": pub})
+    assert verdict == check.UNAVAILABLE, (
+        "a runner failure must be neither a forgery nor an unknown SHA"
+    )
+
+
+def _behind(tmp_path):
+    """원격이 로컬보다 앞서 있는 저장소를 만든다 — B 는 현재 tip 객체를 갖지 않는다.
+
+    기존 헬퍼(`_make_repo`/`_published`)는 같은 작업 저장소에서 원격을 만들어, 로컬 객체
+    저장소가 원격이 가진 것을 **항상** 갖는다. 그래서 "로컬에 원격 것이 없다" 부류 전체가
+    스위트에 보이지 않았고, 라운드 4 의 결함이 그 사각지대로 들어왔다.
+
+    Returns:
+        `(B 저장소, A 저장소, base SHA, 원격 tip SHA, B 의 로컬 전용 SHA)`.
+    """
+    remote = _bare(tmp_path, "remote", branch="main")
+    a = tmp_path / "A"
+    subprocess.run(["git", "clone", "-q", str(remote), str(a)],
+                   capture_output=True, env=_GIT_ENV, check=True)
+    base = _commit(a, "chore: base")
+    _git(a, "push", "-q", "origin", "main")
+
+    b = tmp_path / "B"
+    subprocess.run(["git", "clone", "-q", str(remote), str(b)],
+                   capture_output=True, env=_GIT_ENV, check=True)   # B 는 base 까지만 안다
+
+    tip = _commit(a, "chore: pushed by someone else")
+    _git(a, "push", "-q", "origin", "main")
+    local = _commit(b, "chore: local only")
+    assert subprocess.run(["git", "-C", str(b), "cat-file", "-e", tip],
+                          capture_output=True, env=_GIT_ENV).returncode != 0, \
+        "the fixture must leave B without the remote tip"
+    return b, a, base, tip, local
+
+
+def test_a_remote_only_commit_is_found_which_proves_the_fetch_delivers(
+    monkeypatch, tmp_path
+):
+    """원격에만 있는 커밋이 on 으로 나온다 — 즉 fetch 가 실제로 배달한다.
+
+    이 성질을 고정하는 테스트가 없었다. 실측: fetch 대상을 `.` 으로 바꿔 아무것도 배달하지
+    않게 만들어도 스위트 전체가 초록이었다. 변이를 커밋 전에 손으로 넣는 의례 대신, 배달
+    자체를 단언한다.
+    """
+    b, _a, _base, tip, _local = _behind(tmp_path)
+    assert _run(monkeypatch, b, _short(tip)) == check.EXIT_ALL_ON
+
+
+def test_a_fetch_that_delivers_nothing_yields_no_verdict(monkeypatch, capsys, tmp_path):
+    """fetch 가 rc 0 을 내면서 아무것도 배달하지 않으면 판정하지 않는다."""
+    b, _a, _base, tip, _local = _behind(tmp_path)
+    real_run = check.run_git
+
+    def _hollow_fetch(args, **kw):
+        if args and args[0] == "fetch":
+            return 0, ""          # 성공했다고 하고 아무것도 가져오지 않는다
+        return real_run(args, **kw)
+
+    monkeypatch.setattr(check, "run_git", _hollow_fetch)
+    rc = _run(monkeypatch, b, _short(tip))
+    assert rc == check.EXIT_UNDECIDED
+    assert "did not arrive" in capsys.readouterr().out
+
+
+def test_a_rewind_between_pin_and_fetch_is_answered(monkeypatch, tmp_path):
+    """고정과 fetch 사이의 되감기에서도 답한다 — 로컬에 옛 tip 이 없어도.
+
+    라운드 4 의 above-bar. 재시도 루프가 존재 이유인 경우인데, `_usable_pins` 가 루프
+    **밖으로** 던지는 바람에 두 번째 시도가 오지 않았다.
+    """
+    b, a, base, _tip, local = _behind(tmp_path)
+    real_run = check.run_git
+    fired = {"n": 0}
+
+    def _rewind_after_ls_remote(args, **kw):
+        out = real_run(args, **kw)
+        if args and args[0] == "ls-remote" and fired["n"] == 0:
+            fired["n"] = 1
+            _git(a, "push", "-q", "-f", "origin", f"{base}:refs/heads/main")
+        return out
+
+    monkeypatch.setattr(check, "run_git", _rewind_after_ls_remote)
+    assert _run(monkeypatch, b, _short(local)) == check.EXIT_SOME_NOT_ON
+
+
+def test_a_branch_deleted_between_pin_and_fetch_is_answered(monkeypatch, tmp_path):
+    """ref 하나가 사라져도 남은 것으로 답한다.
+
+    `git fetch <remote> refs/heads/main refs/heads/master` 는 **둘 중 하나만 없어도**
+    통째로 rc 128 이다(실측). 그 실패가 재시도 루프 밖으로 던져지면, 기본 브랜치 이름
+    변경 같은 평범한 사건이 판정을 통째로 잃게 만든다.
+    """
+    b, a, _base, _tip, local = _behind(tmp_path)
+    _git(a, "branch", "master")
+    _git(a, "push", "-q", "origin", "master")
+    real_run = check.run_git
+    fired = {"n": 0}
+
+    def _delete_master_after_ls_remote(args, **kw):
+        out = real_run(args, **kw)
+        if args and args[0] == "ls-remote" and fired["n"] == 0:
+            fired["n"] = 1
+            _git(a, "push", "-q", "origin", "--delete", "master")
+        return out
+
+    monkeypatch.setattr(check, "run_git", _delete_master_after_ls_remote)
+    assert _run(monkeypatch, b, _short(local)) == check.EXIT_SOME_NOT_ON
+
+
+def test_a_stable_but_failing_attempt_does_not_claim_the_remote_moved(
+    monkeypatch, capsys, tmp_path
+):
+    """움직이지 않았는데 실패하면, 그 시도의 사유를 그대로 낸다.
+
+    성패를 재시도 기준에 섞으면 "kept moving" 이라는 거짓 사유가 나온다 — tip 은 움직이지
+    않았는데도.
+    """
+    b, _a, _base, tip, _local = _behind(tmp_path)
+    real_run = check.run_git
+
+    def _fetch_always_fails(args, **kw):
+        if args and args[0] == "fetch":
+            return 128, ""
+        return real_run(args, **kw)
+
+    monkeypatch.setattr(check, "run_git", _fetch_always_fails)
+    rc = _run(monkeypatch, b, _short(tip))
+    out = capsys.readouterr().out
+    assert rc == check.EXIT_UNDECIDED
+    assert "the fetch failed" in out
+    assert "kept moving" not in out
+    assert out.count("nothing was compared") == 1, "the phrase is doubled"
+
+
+@pytest.mark.parametrize(
+    "step", ["rev-parse", "remote", "ls-remote", "fetch", "cat-file", "merge-base"]
+)
+def test_every_git_call_site_fails_into_undecided(
+    monkeypatch, capsys, tmp_path, step: str
+):
+    """어느 git 호출이 타임아웃해도 판정이 아니라 판정 불가로 떨어진다.
+
+    ledger 의 부류 B bound("git 실패가 exit 5 로 렌더돼 오너를 `branch -f` 로 보내면 안
+    된다")를 **선언에서 기계로** 옮긴 것이다. 커밋 전에 호출 지점을 하나씩 124 로 강제하는
+    의례 대신, 그 성질을 파라미터로 돈다 — 의례는 기억에 기대고 테스트는 기대지 않는다.
+    """
+    b, _a, _base, tip, _local = _behind(tmp_path)
+    real_run = check.run_git
+    hit = {"n": 0}
+
+    def _step_times_out(args, **kw):
+        if args and args[0] == step:
+            hit["n"] += 1
+            return 124, ""
+        return real_run(args, **kw)
+
+    monkeypatch.setattr(check, "run_git", _step_times_out)
+    rc = _run(monkeypatch, b, _short(tip))
+    assert hit["n"] > 0, f"{step} was never called; the parametrisation is stale"
+    assert rc in (check.EXIT_UNDECIDED, check.EXIT_CALLER), (
+        f"a timeout at {step} produced {rc}, not a refusal"
+    )
+    assert rc != check.EXIT_ALL_ON and rc != check.EXIT_SOME_NOT_ON
+    captured = capsys.readouterr()
+    assert check.TAG in captured.out + captured.err
