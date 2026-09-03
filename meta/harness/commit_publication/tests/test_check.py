@@ -221,28 +221,6 @@ def test_shallow_clone_refuses_before_the_network(monkeypatch, capsys, tmp_path)
     assert "shallow" in capsys.readouterr().out
 
 
-def test_replace_ref_refuses(monkeypatch, capsys, tmp_path):
-    # replace/grafts는 on 쪽으로 — 면죄 방향으로 — 거짓말한다. 중화하지 않고 거부한다.
-    src, pub, local = _published(tmp_path)
-    extra = _commit(src, "chore: extra")
-    # extra 의 부모를 local 에서 pub 으로 바꿔 실제 그래프를 흔든다(항등 graft는 git이 거부).
-    _git(src, "replace", "--graft", extra, pub)
-    rc = _run(monkeypatch, src, _short(pub))
-    assert rc == check.EXIT_UNDECIDED
-    assert "replace refs" in capsys.readouterr().out
-
-
-def test_grafts_file_refuses(monkeypatch, capsys, tmp_path):
-    # --no-replace-objects 가 막지 못하는 쪽이라 반쪽 방어 대신 거부를 택했다.
-    src, pub, local = _published(tmp_path)
-    info = Path(_git(src, "rev-parse", "--git-common-dir"))
-    if not info.is_absolute():
-        info = src / info
-    (info / "info").mkdir(exist_ok=True)
-    (info / "info" / "grafts").write_text(f"{local} {pub}\n", encoding="utf-8")
-    rc = _run(monkeypatch, src, _short(pub))
-    assert rc == check.EXIT_UNDECIDED
-    assert "grafts" in capsys.readouterr().out
 
 
 def test_no_main_or_master_on_the_remote_hides_the_remote_branch_name(
@@ -512,7 +490,12 @@ def test_the_runner_isolates_every_git_call(monkeypatch, tmp_path):
 
     assert seen, "no git call was made"
     for call in seen:
-        assert call["argv"][:3] == ["git", "-c", "credential.helper="]
+        argv = call["argv"]
+        assert argv[0] == "git"
+        # 위치 고정 대신 존재로 본다 — -C 와 --no-replace-objects 가 앞에 붙을 수 있고,
+        # 위치를 박아 두면 그 경로들이 이 단언에서 조용히 빠진다(라운드 2 지적).
+        assert "credential.helper=" in argv
+        assert argv[argv.index("credential.helper=") - 1] == "-c"
         assert call["stdin"] is subprocess.DEVNULL
         assert call["stderr"] is subprocess.DEVNULL
         assert call["start_new_session"] is True
@@ -615,29 +598,6 @@ def test_a_hex_named_ref_cannot_shadow_a_reported_sha(monkeypatch, tmp_path):
     assert rc == check.EXIT_UNDECIDED, "a shadowing ref must not produce a verdict"
 
 
-@pytest.mark.parametrize("mechanism", ["core.graftsFile", "GIT_GRAFT_FILE"])
-def test_grafts_are_refused_through_every_path(
-    monkeypatch, capsys, tmp_path, mechanism: str
-):
-    """기본 위치가 아닌 graft 파일도 판정을 거부시킨다.
-
-    git 은 graft 파일을 `<git-dir>/info/grafts` 외에 `core.graftsFile` 과
-    `GIT_GRAFT_FILE` 로도 받는다. 기본 경로만 stat 하면 나머지 둘을 쓰는 저장소가
-    게이트를 통과해 조작된 그래프로 판정된다 — 그리고 graft 는 면죄 방향이다.
-    """
-    src, pub, local = _published(tmp_path)
-    elsewhere = tmp_path / "grafts-elsewhere"
-    elsewhere.write_text(f"{local} {pub}\n", encoding="utf-8")
-
-    if mechanism == "core.graftsFile":
-        _git(src, "config", "core.graftsFile", str(elsewhere))
-    else:
-        monkeypatch.setenv("GIT_GRAFT_FILE", str(elsewhere))
-
-    rc = _run(monkeypatch, src, _short(pub))
-    assert rc == check.EXIT_UNDECIDED
-    assert "grafts" in capsys.readouterr().out
-
 
 def test_option_shaped_remote_values_are_rejected(monkeypatch, tmp_path):
     """`--remote` 값이 옵션 꼴이면 git 에 닿기 전에 거부한다.
@@ -674,3 +634,65 @@ def test_dash_c_judges_the_repository_it_points_at(monkeypatch, tmp_path):
     # 존재하지 않는 경로도 호출자 잘못이다.
     assert _run(monkeypatch, src, "-C", str(tmp_path / "nope"), _short(pub)) == \
         check.EXIT_CALLER
+
+
+# core.graftsFile 은 뺐다 — git 2.53 은 그 설정을 조상 판정에 **쓰지 않는다**(실측:
+# 같은 위조 파일이 GIT_GRAFT_FILE 과 .git/info/grafts 로는 rc 0 을 만들고 core.graftsFile
+# 로는 rc 1 이다). 라운드 1 은 경로 해석 동작만 보고 그 설정에 방어를 붙였는데, 효과를
+# 재는 이 방식은 애초에 그런 유령을 만들지 않는다.
+@pytest.mark.parametrize(
+    "mechanism", ["info/grafts", "GIT_GRAFT_FILE", "replace ref"]
+)
+def test_forged_ancestry_is_refused_however_it_was_forged(
+    monkeypatch, capsys, tmp_path, mechanism: str
+):
+    """조상 관계가 위조돼 있으면 판정을 거부한다 — 위조 수단을 열거하지 않고.
+
+    무관한 orphan 커밋을 발행된 커밋의 부모로 위조하면, 방어가 없을 때 도구는 그 orphan 을
+    "on" 으로 — 거짓 면죄로 — 보고한다. 메커니즘 목록을 stat 하는 대신 같은 질문을 재작성을
+    끈 채 한 번 더 던져 답이 갈리는지를 본다. 경로를 해석하지 않으므로 `-C` 와도 어긋나지
+    않고, 앞으로 생길 재작성 수단까지 함께 덮인다.
+    """
+    src, pub, _ = _published(tmp_path)
+    _git(src, "checkout", "-q", "--orphan", "island")
+    island = _commit(src, "chore: unrelated island")
+    _git(src, "checkout", "-q", "main")
+
+    forgery = f"{pub} {island}\n"
+    if mechanism == "info/grafts":
+        info = src / ".git" / "info"
+        info.mkdir(exist_ok=True)
+        (info / "grafts").write_text(forgery, encoding="utf-8")
+    elif mechanism == "GIT_GRAFT_FILE":
+        elsewhere = tmp_path / "grafts-env"
+        elsewhere.write_text(forgery, encoding="utf-8")
+        monkeypatch.setenv("GIT_GRAFT_FILE", str(elsewhere))
+    else:
+        _git(src, "replace", "--graft", pub, island)
+
+    # 위조가 실제로 답을 뒤집는지 먼저 확인한다 — 아니면 이 테스트는 아무것도 지키지 않는다.
+    forged_rc = subprocess.run(
+        ["git", "-C", str(src), "merge-base", "--is-ancestor", island, pub],
+        capture_output=True, env={**_GIT_ENV, **os.environ}, check=False,
+    ).returncode
+    assert forged_rc == 0, "the fixture did not actually forge the ancestry"
+
+    rc = _run(monkeypatch, src, _short(island))
+    assert rc == check.EXIT_UNDECIDED
+    assert "replace refs or a grafts file" in capsys.readouterr().out
+
+
+def test_an_irrelevant_forgery_does_not_block_the_answer(monkeypatch, tmp_path):
+    """조작이 있어도 이 SHA들의 조상 관계와 무관하면 그대로 답한다.
+
+    메커니즘을 stat 하던 옛 게이트는 무관한 graft 에도 판정을 포기했다. 효과를 재면
+    거짓 거부가 사라진다 — 같은 안전성에 더 많은 답.
+    """
+    src, pub, local = _published(tmp_path)
+    _git(src, "checkout", "-q", "--orphan", "island")
+    island = _commit(src, "chore: unrelated island")
+    _git(src, "checkout", "-q", "main")
+    # local 의 부모를 island 로 위조한다 — pub 의 조상 관계와는 무관하다.
+    _git(src, "replace", "--graft", local, island)
+
+    assert _run(monkeypatch, src, _short(pub)) == check.EXIT_ALL_ON

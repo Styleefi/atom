@@ -167,7 +167,9 @@ def _signal_group(proc: subprocess.Popen, sig: int) -> None:
             pass
 
 
-def run_git(args: list[str], *, timeout: int) -> tuple[int, str]:
+def run_git(
+    args: list[str], *, timeout: int, neutralized: bool = False
+) -> tuple[int, str]:
     """git을 실행하고 (종료 코드, stdout)을 돌려준다.
 
     모든 git 호출의 유일한 이음매다. `subprocess.run`을 쓰지 않는 이유는 타임아웃 시
@@ -182,6 +184,8 @@ def run_git(args: list[str], *, timeout: int) -> tuple[int, str]:
     Args:
         args: `git` 뒤에 붙일 인자.
         timeout: 초 단위 상한. 네트워크 호출과 로컬 호출이 다르다.
+        neutralized: True면 로컬 그래프 재작성(replace 객체·graft 파일)을 끈 채 실행한다.
+            판정에 쓰는 답이 아니라, 같은 질문의 두 답을 비교하기 위한 것이다.
 
     Returns:
         `(rc, stdout)`. 타임아웃은 rc 124로 돌려준다(셸 관례; git이 내지 않는 값).
@@ -189,7 +193,14 @@ def run_git(args: list[str], *, timeout: int) -> tuple[int, str]:
     argv = ["git"]
     if _repo_dir is not None:
         argv += ["-C", _repo_dir]
+    if neutralized:
+        argv.append("--no-replace-objects")
     argv += ["-c", "credential.helper=", *args]
+
+    env = _isolated_env()
+    if neutralized:
+        env["GIT_GRAFT_FILE"] = os.devnull
+
     try:
         proc = subprocess.Popen(
             argv,
@@ -198,7 +209,7 @@ def run_git(args: list[str], *, timeout: int) -> tuple[int, str]:
             stderr=subprocess.DEVNULL,
             text=True,
             errors="replace",
-            env=_isolated_env(),
+            env=env,
             start_new_session=True,
         )
     except OSError:
@@ -211,7 +222,12 @@ def run_git(args: list[str], *, timeout: int) -> tuple[int, str]:
             proc.communicate(timeout=TERM_GRACE_SECONDS)
         except subprocess.TimeoutExpired:
             _signal_group(proc, signal.SIGKILL)
-            proc.communicate()
+            # 마지막 대기도 유계로 둔다 — killpg 가 실패해 손자가 stdout 파이프를
+            # 붙들고 있으면 무한정 막힌다.
+            try:
+                proc.communicate(timeout=TERM_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                pass
         return 124, ""
     return proc.returncode, out
 
@@ -266,21 +282,20 @@ def _parse_args(argv: list[str]) -> tuple[str | None, str | None, list[str]]:
     return repo, remote, shas
 
 
-def _assert_graph_is_trustworthy() -> None:
-    """로컬 커밋 그래프가 실제 조상 관계를 반영하지 않는 구성을 걸러낸다.
+def _assert_not_shallow() -> None:
+    """얕은 클론이면 네트워크 이전에 판정을 포기한다.
 
-    불변식 하나, 사례 셋. shallow 클론은 **not-on 쪽으로** 거짓말하고(깊이 밖 조상이
-    끊겨 `merge-base`가 1을 낸다) 그 "없다"가 오너를 보호 브랜치 되감기로 보낸다.
-    `git replace` 객체와 `.git/info/grafts`는 **on 쪽으로**, 즉 면죄 방향으로 거짓말한다 —
-    이 도구가 닫으려는 바로 그 부류다. 어느 쪽이든 네트워크 이전에 판정을 포기한다.
+    깊이 밖 조상이 끊겨 `merge-base`가 1을 내므로 shallow 는 **not-on 쪽으로**
+    거짓말하고, 그 "없다"가 오너를 보호 브랜치 되감기로 보낸다. 재현과 실측은
+    #116 코멘트가 보유한다(자식 프로젝트는 코드를 상속하지 이슈를 상속하지 않으므로
+    근거를 여기 남긴다).
 
-    중화하지 않는 이유: `--no-replace-objects`는 grafts를 막지 못해 반쪽 방어가 되고,
-    훅은 중화하지 않으므로 도구만 중화하면 해석 대상과 다른 그래프를 보게 된다.
-    재현과 실측은 #116 코멘트가 보유한다.
+    로컬 그래프 재작성(replace 객체·graft 파일)은 여기서 다루지 않는다 — 경로를
+    열거하는 대신 `judge`가 같은 질문의 두 답을 비교해 감지한다.
 
     Raises:
         _CallerError: 저장소가 아닐 때(cwd 문제는 호출자가 고친다).
-        _Undecided: 그래프를 믿을 수 없을 때.
+        _Undecided: 얕은 클론일 때.
     """
     rc, out = run_git(
         ["rev-parse", "--is-shallow-repository"], timeout=LOCAL_TIMEOUT_SECONDS
@@ -289,21 +304,6 @@ def _assert_graph_is_trustworthy() -> None:
         raise _CallerError("not a git repository (or git is unavailable)")
     if out.strip() == "true":
         raise _Undecided("this repository is a shallow clone")
-
-    rc, out = run_git(["for-each-ref", "refs/replace/"], timeout=LOCAL_TIMEOUT_SECONDS)
-    if rc == 0 and out.strip():
-        raise _Undecided("this repository has replace refs")
-
-    # graft 파일은 세 경로로 지정된다. `--git-path`가 기본 위치와 `GIT_GRAFT_FILE`을
-    # 함께 해석해 주지만 `core.graftsFile`은 반영하지 않으므로(실측), 그쪽은 따로 묻는다.
-    # 하나라도 존재하면 조상 관계가 조작돼 있을 수 있고, graft 는 면죄 방향으로 거짓말한다.
-    for args in (
-        ["rev-parse", "--git-path", "info/grafts"],
-        ["config", "--get", "core.graftsFile"],
-    ):
-        rc, out = run_git(args, timeout=LOCAL_TIMEOUT_SECONDS)
-        if rc == 0 and out.strip() and Path(out.strip()).exists():
-            raise _Undecided("this repository has a grafts file")
 
 
 def _resolve_remote(requested: str | None) -> tuple[str, str]:
@@ -451,6 +451,9 @@ def judge(sha: str, pins: dict[str, str]) -> str | None:
 
     Returns:
         `"on"` / `"not_on"`, 판정할 수 없으면 None.
+
+    Raises:
+        _Undecided: 이 판정이 로컬 그래프 재작성에 의존할 때.
     """
     rc, out = run_git(
         ["rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}"],
@@ -468,10 +471,17 @@ def judge(sha: str, pins: dict[str, str]) -> str | None:
 
     saw_clean_negative = False
     for tip in pins.values():
-        rc, _ = run_git(
-            ["merge-base", "--is-ancestor", full, tip],
-            timeout=LOCAL_TIMEOUT_SECONDS,
-        )
+        args = ["merge-base", "--is-ancestor", full, tip]
+        rc, _ = run_git(args, timeout=LOCAL_TIMEOUT_SECONDS)
+        # 같은 질문을 로컬 그래프 재작성을 끈 채 한 번 더 던진다. 답이 갈리면 이 판정이
+        # replace 객체나 graft 파일에 의존한다는 뜻이고, 그 의존은 면죄 방향으로 작용한다.
+        # 메커니즘을 열거하는 대신 효과를 재므로, 경로를 해석할 필요가 없고 앞으로 생길
+        # 재작성 수단까지 함께 덮인다.
+        rc_plain, _ = run_git(args, timeout=LOCAL_TIMEOUT_SECONDS, neutralized=True)
+        if rc != rc_plain:
+            raise _Undecided(
+                "this repository's ancestry depends on replace refs or a grafts file"
+            )
         if rc == 0:
             return "on"
         if rc == 1:
@@ -550,10 +560,11 @@ def _check(argv: list[str]) -> int:
         global _repo_dir
         repo, requested, shas = _parse_args(argv)
         _repo_dir = repo
-        _assert_graph_is_trustworthy()
+        _assert_not_shallow()
         remote, target = _resolve_remote(requested)
         tips = _pin_tips(remote)
         pins = _usable_pins(remote, tips)
+        verdicts = {sha: judge(sha, pins) for sha in shas}
     except _CallerError as exc:
         print(f"{TAG} {exc.reason}", file=sys.stderr)
         print(_USAGE, file=sys.stderr)
@@ -562,7 +573,6 @@ def _check(argv: list[str]) -> int:
         print(f"{TAG} undecided: {exc.reason}; nothing was compared")
         return EXIT_UNDECIDED
 
-    verdicts = {sha: judge(sha, pins) for sha in shas}
     return _report(target, shas, verdicts)
 
 
