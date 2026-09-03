@@ -501,3 +501,41 @@ def test_main_returns_undecided_on_an_internal_error(monkeypatch, capsys) -> Non
     err = capsys.readouterr().err
     assert "RuntimeError" in err
     assert "secret" not in err
+
+
+def test_the_rule_cites_a_command_this_module_accepts() -> None:
+    """규칙이 인용한 호출 문자열을 파싱해 모듈의 argv 계약과 대조한다.
+
+    grep으로 "명령이 들어 있다"만 보면 인용이 낡아도 초록으로 남는다. 실제로 뜯어서
+    모듈 경로와 옵션이 `_parse_args`가 받는 것인지 확인한다. 그리고 대체된 산문이
+    다시 자라지 않는지도 함께 본다 — 그 절차가 결함 넷을 실었다.
+    """
+    rule = (_REPO_ROOT / "meta" / "rules" / "commit-backstop.md").read_text(
+        encoding="utf-8"
+    )
+    cited = [
+        line.strip()
+        for line in rule.splitlines()
+        if "harness.commit_publication" in line
+    ]
+    assert len(cited) == 1, "the rule must cite the command exactly once"
+
+    tokens = cited[0].split()
+    assert tokens[:5] == [
+        "uv", "run", "--directory", "meta", "python",
+    ], tokens
+    assert tokens[5] == "-m" and tokens[6] == "harness.commit_publication"
+
+    # 인용된 자리표시자를 실제 인자 파서에 통과시킨다.
+    placeholders = tokens[7:]
+    assert placeholders, "the citation must show where the SHAs go"
+    for token in placeholders:
+        stripped = token.strip("[]<>.")
+        if stripped.startswith("--"):
+            assert stripped.split("=")[0] in ("--remote",), stripped
+    remote, shas = check._parse_args(["--remote", "origin", "0" * 40])
+    assert remote == "origin" and shas == ["0" * 40]
+
+    # 대체된 절차가 되살아나지 않았는지 확인한다.
+    for gone in ("merge-base --is-ancestor", "FETCH_HEAD", "HEAD branch"):
+        assert gone not in rule, f"the replaced procedure came back: {gone}"
