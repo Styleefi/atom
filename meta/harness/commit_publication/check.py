@@ -237,8 +237,13 @@ def _parse_args(argv: list[str]) -> tuple[str | None, list[str]]:
     bad = [s for s in shas if not SHA_RE.match(s)]
     if bad:
         raise _CallerError(f"not hex commit SHAs: {' '.join(bad)}")
-    if remote is not None and not remote:
-        raise _CallerError("--remote needs a value")
+    if remote is not None:
+        if not remote:
+            raise _CallerError("--remote needs a value")
+        # 옵션 꼴 값은 git 이 옵션으로 파싱한다 — `--upload-pack=...` 는 임의의 프로그램을
+        # 실행시킨다. SHA 는 hex 검증이 막고 있고, 남은 구멍이 여기였다.
+        if remote.startswith("-"):
+            raise _CallerError(f"--remote must not look like an option: {remote}")
     return remote, shas
 
 

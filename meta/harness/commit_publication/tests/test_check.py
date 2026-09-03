@@ -637,3 +637,16 @@ def test_grafts_are_refused_through_every_path(
     rc = _run(monkeypatch, src, _short(pub))
     assert rc == check.EXIT_UNDECIDED
     assert "grafts" in capsys.readouterr().out
+
+
+def test_option_shaped_remote_values_are_rejected(monkeypatch, tmp_path):
+    """`--remote` 값이 옵션 꼴이면 git 에 닿기 전에 거부한다.
+
+    `--upload-pack=/tmp/x.sh` 는 URL 휴리스틱(`/:@` 포함)을 통과해 bare argv 항목으로
+    `git ls-remote` 에 넘어가고, git 은 그걸 옵션으로 읽어 지정된 프로그램을 실행한다.
+    SHA 는 hex 검증이 이미 막고 있었고 remote 값만 뚫려 있었다.
+    """
+    src, pub, _ = _published(tmp_path)
+    for hostile in ("--upload-pack=/tmp/x.sh", "-o", "--exec=/bin/sh"):
+        assert _run(monkeypatch, src, "--remote", hostile, _short(pub)) == \
+            check.EXIT_CALLER
