@@ -479,10 +479,18 @@ def test_the_runner_isolates_every_git_call(monkeypatch, tmp_path):
         def wait(self):
             return self._p.wait()
 
-    overrides = {
-        k: v for k, v in check._isolated_env().items() if os.environ.get(k) != v
+    # 주변 환경과의 차분으로 뽑지 않는다 — 테스트 프로세스가 이미 같은 값을 export 하고
+    # 있으면 그 키가 조용히 검증에서 빠지고, 넷 다 export 하면 단언 자체가 헛돈다.
+    expected = {
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "/bin/false",
+        "SSH_ASKPASS": "/bin/false",
+        "SSH_ASKPASS_REQUIRE": "force",
     }
-    assert overrides, "the isolation env sets nothing"
+    assert check._isolated_env() | expected == check._isolated_env(), (
+        "the isolation env no longer sets what this test pins"
+    )
+    overrides = expected
 
     src, pub, _ = _published(tmp_path)
     monkeypatch.setattr(check.subprocess, "Popen", _Spy)
@@ -571,6 +579,9 @@ def test_the_rule_cites_a_command_this_module_accepts() -> None:
     # 인용된 자리표시자를 실제 인자 파서에 통과시킨다.
     placeholders = tokens[7:]
     assert placeholders, "the citation must show where the SHAs go"
+    # -C 는 허용이 아니라 **요구**한다. docstring 이 서브모듈 보고에 -C 를 쓰라고 하는데
+    # 인용에 없으면 에이전트가 읽는 자리에서 그 경로가 보이지 않는다(라운드 2 지적).
+    assert any(tok.strip("[]<>.").startswith("-C") for tok in placeholders), tokens
     for token in placeholders:
         stripped = token.strip("[]<>.")
         if stripped.startswith("-"):

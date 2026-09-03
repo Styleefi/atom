@@ -32,6 +32,8 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
       `rev-parse`가 ref를 먼저 보므로 객체를 되찾을 방법이 없어, 면죄가 아니라 판정 불가
       쪽으로 떨어뜨린다.
     - fetch가 해석 가능하던 축약을 모호하게 만들 수 있다(그 SHA는 판정 불가가 된다).
+    - `--no-write-fetch-head`는 git 2.29 이상을 요구한다. 그 미만에서는 fetch가 미지 옵션
+      오류로 실패하고, 사유는 stderr와 함께 버려져 "the fetch failed"만 남는다.
     - 도구가 남기는 것은 fetch가 refspec에 따라 갱신하는 추적 ref뿐이다. `FETCH_HEAD`는
       쓰지 않고, 타임아웃은 SIGTERM 유예를 두어 git이 lock 파일을 치울 기회를 준다.
     - 카운트는 argv 항목 기준이다. 같은 커밋을 축약형과 전체 SHA로 두 번 넘기면 둘로 센다.
@@ -562,8 +564,12 @@ def _check(argv: list[str]) -> int:
     Returns:
         종료 코드.
     """
+    global _repo_dir
+    # 파싱이 실패해도 직전 실행의 값이 남지 않도록 먼저 지운다. 프로덕션에서는 프로세스당
+    # 한 번이라 무해하지만, 테스트는 한 프로세스에서 여러 번 부르므로 사라진 tmp_path 를
+    # 가리킨 채 다음 테스트가 돌 수 있다.
+    _repo_dir = None
     try:
-        global _repo_dir
         repo, requested, shas = _parse_args(argv)
         _repo_dir = repo
         _assert_not_shallow()
