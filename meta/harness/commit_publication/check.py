@@ -116,6 +116,10 @@ def _isolated_env() -> dict[str, str]:
     넣는다)라야 멈춘다 — osxkeychain·libsecret·git-credential-manager가 전부 그 채널이고
     마지막 것은 브라우저를 열어 분 단위로 대기한다. askpass 변수들은 GUI 경로를 막는다.
 
+    `SSH_ASKPASS_REQUIRE`는 `never`가 아니라 `force`다 — `never`는 "제어 tty가 없다"에
+    기대지만 `force`는 tty 유무와 무관하게 askpass를 쓰게 만들고(man ssh), `/bin/false`와
+    짝지으면 passphrase도 미지 호스트 확인도 결정적으로 즉시 실패한다.
+
     `GIT_SSH_COMMAND`는 **건드리지 않는다.** ssh는 첫 `-o` 값을 취하므로 덧붙이기가 통하지
     않고, 무조건 설정하면 `core.sshCommand`에 커스텀 키·프록시를 잡아 둔 오너의 fetch를
     깨뜨려 도구가 만든 회귀를 "환경 문제"로 보고하게 된다. 대신 stdin 차단과 새 세션,
@@ -129,7 +133,7 @@ def _isolated_env() -> dict[str, str]:
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_ASKPASS"] = "/bin/false"
     env["SSH_ASKPASS"] = "/bin/false"
-    env["SSH_ASKPASS_REQUIRE"] = "never"
+    env["SSH_ASKPASS_REQUIRE"] = "force"
     return env
 
 
@@ -158,6 +162,7 @@ def run_git(args: list[str], *, timeout: int) -> tuple[int, str]:
             stderr=subprocess.DEVNULL,
             text=True,
             errors="replace",
+            env=_isolated_env(),
             start_new_session=True,
         )
     except OSError:

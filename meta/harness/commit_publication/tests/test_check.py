@@ -452,6 +452,11 @@ def test_the_runner_isolates_every_git_call(monkeypatch, tmp_path):
         def wait(self):
             return self._p.wait()
 
+    overrides = {
+        k: v for k, v in check._isolated_env().items() if os.environ.get(k) != v
+    }
+    assert overrides, "the isolation env sets nothing"
+
     src, pub, _ = _published(tmp_path)
     monkeypatch.setattr(check.subprocess, "Popen", _Spy)
     _run(monkeypatch, src, _short(pub))
@@ -462,6 +467,11 @@ def test_the_runner_isolates_every_git_call(monkeypatch, tmp_path):
         assert call["stdin"] is subprocess.DEVNULL
         assert call["stderr"] is subprocess.DEVNULL
         assert call["start_new_session"] is True
+        # env 단언은 _isolated_env() 에서 파생시킨다 — 손으로 열거하면 그 함수에 항목이
+        # 늘어도 테스트가 따라가지 못한다. 실제로 러너가 env= 를 넘기지 않아 격리가 통째로
+        # 꺼져 있던 것을 이 단언의 부재가 놓쳤다(라운드 1).
+        for key, value in overrides.items():
+            assert call["env"][key] == value
 
 
 def test_credential_helpers_do_not_run(monkeypatch, tmp_path):
