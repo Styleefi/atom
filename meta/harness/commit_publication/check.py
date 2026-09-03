@@ -22,8 +22,14 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
       `uv run --directory meta ...`는 cwd를 `meta/`로 바꾸므로 기본 판정 대상은 **`meta/`를
       담은 저장소**다(실측). 훅은 payload cwd 기준으로 보고하므로, 서브모듈이나 다른
       worktree의 보고는 `-C <경로>`로 그 저장소를 가리켜야 한다.
-    - ls-remote와 fetch 사이에 push가 들어오면 not-on으로 보고된다(안전한 방향). 반대
-      방향의 되감기는 fetch 뒤 tip 재확인으로 닫혀 있다 — 그때는 판정 불가가 된다.
+    - **로컬 그래프 재작성(replace 객체·graft 파일)을 중화하지 않는다.** 같은 질문의 두 답이
+      갈릴 때만 판정을 거부하므로, 재작성이 이 SHA들의 조상 관계와 무관하면 그대로 답한다.
+      덮이는 범위는 `--no-replace-objects`와 `GIT_GRAFT_FILE=/dev/null`이 무력화하는
+      것까지다 — 메커니즘을 열거하지 않으므로 앞으로 생길 수단도 함께 덮인다. 훅은
+      중화하지 않으므로 도구도 하지 않는다(해석 대상과 같은 그래프를 본다).
+    - ls-remote와 fetch 사이에 원격 tip이 움직이면 한 번 더 고정한다. 전진이든 되감기든
+      **현재** tip 기준으로 답하므로, 되감긴 커밋은 그때 not-on이 된다. 연속으로 움직이면
+      판정하지 않는다.
     - **fetch의 추적 ref 갱신은 훅의 사각지대를 치유하지 않는다.** 설정된 refspec이 일치할
       때만 일어나므로 `--single-branch`/pruned 클론과 URL 형태에서는 아무 ref도 만들지
       않는다. 일치할 때는 forced 갱신이라 추적 ref를 되감을 수도 있고, 그러면 훅이 전에
@@ -85,6 +91,10 @@ PROTECTED_BRANCHES = ("main", "master")
 NETWORK_TIMEOUT_SECONDS = 60
 LOCAL_TIMEOUT_SECONDS = 10
 
+# tip 이 읽는 사이에 움직이면 한 번 더 고정해 본다. 무한 재시도는 활발한 원격에서 끝나지
+# 않고, 한 번도 재시도하지 않으면 전진 push 하나에 답을 통째로 버린다(라운드 3).
+PIN_ATTEMPTS = 2
+
 # 타임아웃 시 SIGTERM 을 먼저 보내고 이만큼 기다린 뒤에야 SIGKILL 한다. git 은 SIGTERM
 # 에서 *.lock 과 임시 packfile 을 지우지만 SIGKILL 은 잡지 못하고, 그러면 오너의 다음
 # git 명령이 이유를 알 수 없는 "Unable to create '...lock'" 으로 죽는다 — 이 도구는
@@ -98,6 +108,12 @@ PIN_RE = re.compile(r"^[0-9a-f]{40}$|^[0-9a-f]{64}$")
 
 # URL 형태를 인쇄할 때 쓰는 고정 문구. URL은 자격 증명을 담을 수 있다.
 URL_TARGET_LABEL = "the remote given on the command line"
+
+# judge 의 반환값. 판정 불가도 값이다 — 예외로 만들면 실행 단위 조건이 되어 이미 판정한
+# 결과를 배치째 버린다(라운드 3).
+ON = "on"
+NOT_ON = "not_on"
+FORGED = "forged"
 
 # `-C` 로 받은 판정 대상 저장소. 러너가 모든 git 호출에 실어 준다.
 _repo_dir: str | None = None
@@ -403,13 +419,13 @@ def _usable_pins(remote: str, tips: dict[str, str]) -> dict[str, str]:
 
     Args:
         remote: git에 넘길 remote 값.
-        tips: `_pin_tips`가 고정한 tip.
+        tips: 고정된 tip.
 
     Returns:
         사용 가능한 `{브랜치 이름: tip SHA}`.
 
     Raises:
-        _Undecided: fetch가 실패했거나, 남는 pin이 없거나, 읽는 사이 원격이 움직였을 때.
+        _Undecided: fetch가 실패했거나 남는 pin이 없을 때.
     """
     refs = [f"refs/heads/{name}" for name in tips]
     # --no-write-fetch-head: 이 도구는 FETCH_HEAD 를 읽지 않으면서 덮어쓰기만 한다.
@@ -431,14 +447,35 @@ def _usable_pins(remote: str, tips: dict[str, str]) -> dict[str, str]:
             usable[name] = tip
     if not usable:
         raise _Undecided("the fetched tips did not arrive")
-
-    # 되감기 경쟁을 닫는다. 3단계와 4단계 사이에 원격 main 이 되감기면, 로컬에 이미 있던
-    # 옛 tip 이 pin 이 되어 cat-file 을 통과하고 "on" 으로 — 면죄 방향으로 — 보고된다.
-    # fetch 뒤에 tip 을 한 번 더 확인해 그 창을 닫는다. 이 확인 뒤의 이동은 상관없다:
-    # 답은 "이 fetch 시점"에 대한 것이고 그 시점에는 참이었다.
-    if _pin_tips(remote) != tips:
-        raise _Undecided("the remote moved while it was being read")
     return usable
+
+
+def _stable_pins(remote: str) -> dict[str, str]:
+    """읽는 동안 움직이지 않은 tip에 대해서만 pin을 확정한다.
+
+    되감기 경쟁이 여기서 닫힌다. ls-remote와 fetch 사이에 원격 main이 되감기면, 로컬에
+    이미 있던 옛 tip이 pin이 되어 `cat-file`을 통과하고 "on"으로 — 면죄 방향으로 —
+    보고된다. fetch 뒤에 tip을 다시 읽어 그 창을 닫는다.
+
+    움직였다고 곧바로 포기하지는 않는다. 한 번 더 현재 tip으로 고정하고 받아온다 —
+    전진이면 답을 버릴 이유가 없고, 되감기여도 **현재** tip 기준으로 답하는 것이 옳다
+    (되감긴 커밋은 그때 not-on이 된다). 거부는 원격이 두 번 연속 움직였을 때뿐이다.
+
+    Args:
+        remote: git에 넘길 remote 값.
+
+    Returns:
+        사용 가능한 `{브랜치 이름: tip SHA}`.
+
+    Raises:
+        _Undecided: 원격이 계속 움직이거나, 읽기·fetch가 실패했을 때.
+    """
+    for _ in range(PIN_ATTEMPTS):
+        tips = _pin_tips(remote)
+        usable = _usable_pins(remote, tips)
+        if _pin_tips(remote) == tips:
+            return usable
+    raise _Undecided("the remote kept moving while it was being read")
 
 
 def judge(sha: str, pins: dict[str, str]) -> str | None:
@@ -453,15 +490,17 @@ def judge(sha: str, pins: dict[str, str]) -> str | None:
     --is-ancestor`는 같은 입력에 128을 낸다. 공통 규약을 쓰면 해석 불가 SHA가 rc 1을 타고
     "not on"으로 둔갑한다.
 
+    판정 불가는 **값으로** 돌려준다. 예외로 던지면 실행 단위 조건이 되어, 이미 판정한
+    not-on SHA 들이 배치와 함께 사라지고 "nothing was compared" 라는 거짓 문장이 나간다 —
+    라운드 3 실측. SHA 단위 사실은 SHA 단위 채널로 나가야 한다.
+
     Args:
         sha: 판정할 커밋(축약형 가능).
         pins: 사용 가능한 `{브랜치 이름: tip SHA}`.
 
     Returns:
-        `"on"` / `"not_on"`, 판정할 수 없으면 None.
-
-    Raises:
-        _Undecided: 이 판정이 로컬 그래프 재작성에 의존할 때.
+        `ON` / `NOT_ON` / `FORGED`(이 판정이 로컬 그래프 재작성에 의존) /
+        None(SHA 를 해석할 수 없음).
     """
     rc, out = run_git(
         ["rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}"],
@@ -486,17 +525,18 @@ def judge(sha: str, pins: dict[str, str]) -> str | None:
         # 메커니즘을 열거하는 대신 효과를 재므로, 경로를 해석할 필요가 없고 앞으로 생길
         # 재작성 수단까지 함께 덮인다.
         rc_plain, _ = run_git(args, timeout=LOCAL_TIMEOUT_SECONDS, neutralized=True)
-        if rc != rc_plain:
-            raise _Undecided(
-                "this repository's ancestry depends on replace refs or a grafts file"
-            )
-        if rc == 0:
-            return "on"
-        if rc == 1:
-            saw_clean_negative = True
-        else:
+        # 두 답이 **모두** 판정값이어야 어느 쪽이든 신뢰할 수 있다. 중화 호출이 실패하면
+        # 평문 답이 위조에 의존하는지 알 수 없으므로, 그 답을 그대로 쓰면 면죄 방향으로
+        # 새는 길이 된다. 124(타임아웃)·127(OSError)를 "조작됐다"로 읽는 것도 확신에 찬
+        # 오진이라 안 된다 — 둘 중 하나라도 판정값이 아니면 판정 불가다.
+        if rc not in (0, 1) or rc_plain not in (0, 1):
             return None
-    return "not_on" if saw_clean_negative else None
+        if rc != rc_plain:
+            return FORGED
+        if rc == 0:
+            return ON
+        saw_clean_negative = True
+    return NOT_ON if saw_clean_negative else None
 
 
 def _report(target: str, shas: list[str], verdicts: dict[str, str | None]) -> int:
@@ -504,8 +544,11 @@ def _report(target: str, shas: list[str], verdicts: dict[str, str | None]) -> in
 
     판정하지 못한 SHA가 하나라도 있으면 전체가 판정 불가다. `N of M` 형식은 "M 중 k개만
     판정했다"를 표현할 수 없어, 그대로 두면 판정된 적 없는 SHA를 면죄하는 인쇄된 거짓이
-    된다 — 네 번째 결함과 같은 부류다. 그때도 not-on 줄은 인쇄해 보고에서 사라지지 않게
-    하고, 분모는 실제 판정 수를 밝힌다.
+    된다 — 네 번째 결함과 같은 부류다.
+
+    **그때도 not-on 줄은 인쇄한다.** 판정 불가 SHA가 섞였다고 이미 판정한 not-on 을 보고에서
+    지우면, 오너는 조치가 필요한 커밋을 보지 못한 채 "판정 불가"만 받는다(라운드 3 실측).
+    분모는 실제 판정 수를 밝히고, 판정하지 못한 것은 사유별로 나눠 이름을 부른다.
 
     Args:
         target: 출력에 쓸 remote 표기.
@@ -515,14 +558,15 @@ def _report(target: str, shas: list[str], verdicts: dict[str, str | None]) -> in
     Returns:
         종료 코드.
     """
-    judged = [s for s in shas if verdicts[s] is not None]
+    judged = [s for s in shas if verdicts[s] in (ON, NOT_ON)]
+    not_on = [s for s in judged if verdicts[s] == NOT_ON]
+    forged = [s for s in shas if verdicts[s] == FORGED]
     unresolved = [s for s in shas if verdicts[s] is None]
-    not_on = [s for s in judged if verdicts[s] == "not_on"]
 
     def _verb(n: int) -> str:
         return "is" if n == 1 else "are"
 
-    if unresolved:
+    if forged or unresolved:
         head = (
             f"{TAG} {len(judged)} of {len(shas)} listed commits were judged "
             f"as of this fetch"
@@ -535,9 +579,16 @@ def _report(target: str, shas: list[str], verdicts: dict[str, str | None]) -> in
             )
         else:
             print(f"{head}.")
-        print(
-            f"  {len(unresolved)} could not be resolved: {' '.join(unresolved)}"
-        )
+        if unresolved:
+            print(
+                f"  {len(unresolved)} could not be resolved: "
+                f"{' '.join(unresolved)}"
+            )
+        if forged:
+            print(
+                f"  {len(forged)} could not be judged — ancestry there depends "
+                f"on replace refs or a grafts file: {' '.join(forged)}"
+            )
         return EXIT_UNDECIDED
 
     if not_on:
@@ -574,8 +625,7 @@ def _check(argv: list[str]) -> int:
         _repo_dir = repo
         _assert_not_shallow()
         remote, target = _resolve_remote(requested)
-        tips = _pin_tips(remote)
-        pins = _usable_pins(remote, tips)
+        pins = _stable_pins(remote)
         verdicts = {sha: judge(sha, pins) for sha in shas}
     except _CallerError as exc:
         print(f"{TAG} {exc.reason}", file=sys.stderr)

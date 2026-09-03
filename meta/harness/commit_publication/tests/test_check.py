@@ -621,6 +621,8 @@ def test_option_shaped_remote_values_are_rejected(monkeypatch, tmp_path):
     for hostile in ("--upload-pack=/tmp/x.sh", "-o", "--exec=/bin/sh"):
         assert _run(monkeypatch, src, "--remote", hostile, _short(pub)) == \
             check.EXIT_CALLER
+    # 옵션 꼴 토큰이 SHA 자리에 오는 경우도 같은 lane 이다.
+    assert _run(monkeypatch, src, "--upload-pack=/tmp/x.sh") == check.EXIT_CALLER
 
 
 def test_dash_c_judges_the_repository_it_points_at(monkeypatch, tmp_path):
@@ -709,32 +711,118 @@ def test_an_irrelevant_forgery_does_not_block_the_answer(monkeypatch, tmp_path):
     assert _run(monkeypatch, src, _short(pub)) == check.EXIT_ALL_ON
 
 
-def test_a_remote_that_moves_while_being_read_yields_no_verdict(
-    monkeypatch, capsys, tmp_path
-):
-    """ls-remote 와 fetch 사이에 원격이 되감기면 판정하지 않는다.
+def test_a_rewind_is_answered_against_the_current_tip(monkeypatch, tmp_path):
+    """읽는 사이 원격이 되감기면, 거부하지 말고 현재 tip 기준으로 답한다.
 
-    그 창이 열려 있으면, 로컬에 이미 있던 옛 tip 이 pin 이 되어 `cat-file` 을 통과하고
-    "on" 으로 — **면죄 방향으로** — 보고된다. 도구의 비주장 중 유일하게 위험 방향이던
-    항목이고, fetch 뒤 tip 재확인으로 닫았다.
+    그 창이 닫혀 있지 않으면 로컬에 이미 있던 옛 tip 이 pin 이 되어 `cat-file` 을 통과하고
+    "on" 으로 — **면죄 방향으로** — 보고된다. 재고정하면 되감긴 커밋이 올바르게 not-on 이
+    되고, 전진 push 였다면 답을 버리지 않는다.
     """
     src, pub, _ = _published(tmp_path)
     x = _commit(src, "chore: also published")
     _git(src, "push", "-q", "origin", "main")
 
-    real_fetch_done = {"n": 0}
+    fetches = {"n": 0}
     real_run = check.run_git
 
-    def _rewind_after_fetch(args, **kw):
+    def _rewind_once_after_fetch(args, **kw):
         result = real_run(args, **kw)
         if args and args[0] == "fetch":
-            # fetch 직후 원격을 x 이전으로 되감는다.
-            real_fetch_done["n"] += 1
-            _git(src, "push", "-q", "-f", "origin", f"{pub}:refs/heads/main")
+            fetches["n"] += 1
+            if fetches["n"] == 1:
+                _git(src, "push", "-q", "-f", "origin", f"{pub}:refs/heads/main")
         return result
 
-    monkeypatch.setattr(check, "run_git", _rewind_after_fetch)
+    monkeypatch.setattr(check, "run_git", _rewind_once_after_fetch)
     rc = _run(monkeypatch, src, _short(x))
-    assert real_fetch_done["n"] == 1, "the fixture never reached the fetch"
+    assert fetches["n"] >= 2, "the fixture never triggered a re-pin"
+    assert rc == check.EXIT_SOME_NOT_ON, "a settled rewind must be answered, not refused"
+
+
+def test_a_remote_that_keeps_moving_yields_no_verdict(monkeypatch, capsys, tmp_path):
+    """원격이 연속으로 움직이면 판정하지 않는다 — 재시도는 유계다."""
+    src, pub, _ = _published(tmp_path)
+    x = _commit(src, "chore: also published")
+    _git(src, "push", "-q", "origin", "main")
+
+    real_run = check.run_git
+
+    def _move_after_every_fetch(args, **kw):
+        result = real_run(args, **kw)
+        if args and args[0] == "fetch":
+            _commit(src, "chore: another")
+            _git(src, "push", "-q", "origin", "main")
+        return result
+
+    monkeypatch.setattr(check, "run_git", _move_after_every_fetch)
+    rc = _run(monkeypatch, src, _short(x))
     assert rc == check.EXIT_UNDECIDED
-    assert "moved while it was being read" in capsys.readouterr().out
+    assert "kept moving" in capsys.readouterr().out
+
+
+def test_a_forged_sha_never_erases_the_not_on_shas(monkeypatch, capsys, tmp_path):
+    """판정 불가 SHA 가 섞여도 이미 판정한 not-on 은 보고에서 사라지지 않는다.
+
+    라운드 3 실측: judge 가 판정 불가를 **예외로** 던지자 배치 전체가 중단돼, 조치가
+    필요한 미발행 커밋이 출력에서 사라지고 "nothing was compared" 라는 거짓 문장이 나갔다.
+    SHA 단위 사실은 SHA 단위 채널로 나가야 한다.
+    """
+    src, pub, local = _published(tmp_path)
+    _git(src, "checkout", "-q", "--orphan", "island")
+    island = _commit(src, "chore: unrelated island")
+    _git(src, "checkout", "-q", "main")
+    _git(src, "replace", "--graft", pub, island)
+
+    rc = _run(monkeypatch, src, _short(local), _short(island))
+    out = capsys.readouterr().out
+    assert rc == check.EXIT_UNDECIDED
+    assert _short(local) in out, "the not-on SHA vanished from the report"
+    assert _short(island) in out, "the unjudgeable SHA was not named"
+    assert "nothing was compared" not in out, "comparisons were made"
+
+
+@pytest.mark.parametrize("n", range(1, 4))
+def test_every_not_on_sha_always_appears_in_the_output(capsys, n: int):
+    """**출력 불변식**: not-on 으로 판정된 SHA 는 어떤 조합에서도 출력에 이름이 불린다.
+
+    이 불변식은 `_report` 의 docstring 문장으로만 존재했고, 라운드 2 의 변경이 그걸 조용히
+    어겼다(라운드 3 이 적발). 규약은 테스트로 옮겨갈 때에야 닫힌다 — 이 PR 이 존재하는
+    이유와 같은 수다. 판정 조합을 전수로 돌린다.
+    """
+    import itertools
+
+    states = [check.ON, check.NOT_ON, check.FORGED, None]
+    for combo in itertools.product(states, repeat=n):
+        shas = [f"{i:012x}" for i in range(n)]
+        verdicts = dict(zip(shas, combo))
+        check._report("origin", shas, verdicts)
+        out = capsys.readouterr().out
+        for sha, verdict in verdicts.items():
+            if verdict == check.NOT_ON:
+                assert sha in out, f"{combo}: a not-on SHA is missing from the output"
+            if verdict is None or verdict == check.FORGED:
+                assert sha in out, f"{combo}: an unjudged SHA is not named"
+
+
+def test_a_runner_failure_is_not_diagnosed_as_forged_ancestry(monkeypatch, tmp_path):
+    """한쪽 호출만 실패하면 "조작됐다" 가 아니라 판정 불가다.
+
+    `run_git` 은 타임아웃에 124, OSError 에 127 을 낸다. 두 rc 를 무조건 비교하면 그런
+    전이적 실패가 "이 저장소의 조상 관계는 replace/grafts 에 의존한다" 는 확신에 찬
+    오진으로 오너에게 전달된다 — 사실이 아니고, 사유가 틀리면 오너의 다음 행동도 틀린다.
+    """
+    src, pub, _ = _published(tmp_path)
+    real_run = check.run_git
+
+    def _neutralized_times_out(args, **kw):
+        if args and args[0] == "merge-base" and kw.get("neutralized"):
+            return 124, ""
+        return real_run(args, **kw)
+
+    monkeypatch.setattr(check, "run_git", _neutralized_times_out)
+    monkeypatch.chdir(src)
+    pins = {"main": _git(src, "rev-parse", "refs/remotes/origin/main")} \
+        if (src / ".git" / "refs" / "remotes").exists() else {"main": pub}
+    verdict = check.judge(_short(pub), pins)
+    assert verdict is not check.FORGED, "a runner failure was diagnosed as forgery"
+    assert verdict is None, "an undecidable comparison must not produce a verdict"
