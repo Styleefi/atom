@@ -31,6 +31,8 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
       `rev-parse`가 ref를 먼저 보므로 객체를 되찾을 방법이 없어, 면죄가 아니라 판정 불가
       쪽으로 떨어뜨린다.
     - fetch가 해석 가능하던 축약을 모호하게 만들 수 있다(그 SHA는 판정 불가가 된다).
+    - 도구가 남기는 것은 fetch가 refspec에 따라 갱신하는 추적 ref뿐이다. `FETCH_HEAD`는
+      쓰지 않고, 타임아웃은 SIGTERM 유예를 두어 git이 lock 파일을 치울 기회를 준다.
     - 카운트는 argv 항목 기준이다. 같은 커밋을 축약형과 전체 SHA로 두 번 넘기면 둘로 센다.
     - 자식 프로젝트가 이 하네스를 제거하면 규칙이 존재하지 않는 명령을 인용하게 된다.
 
@@ -79,6 +81,12 @@ PROTECTED_BRANCHES = ("main", "master")
 # 반드시 잘못 맞춘다.
 NETWORK_TIMEOUT_SECONDS = 60
 LOCAL_TIMEOUT_SECONDS = 10
+
+# 타임아웃 시 SIGTERM 을 먼저 보내고 이만큼 기다린 뒤에야 SIGKILL 한다. git 은 SIGTERM
+# 에서 *.lock 과 임시 packfile 을 지우지만 SIGKILL 은 잡지 못하고, 그러면 오너의 다음
+# git 명령이 이유를 알 수 없는 "Unable to create '...lock'" 으로 죽는다 — 이 도구는
+# git 의 stderr 를 지워 놓으므로 그 원인을 아무도 설명해 주지 않는다.
+TERM_GRACE_SECONDS = 3
 
 # 보고문이 12자 축약을 싣고, 오너가 손으로 전체 SHA를 넘길 수도 있다. 상한 64는
 # SHA-256 저장소를 배제하지 않기 위한 것이다.
@@ -139,6 +147,21 @@ def _isolated_env() -> dict[str, str]:
     return env
 
 
+def _signal_group(proc: subprocess.Popen, sig: int) -> None:
+    """자식의 프로세스 그룹에 신호를 보낸다 (전송 손자까지 닿게).
+
+    `start_new_session=True` 로 띄웠으므로 자식이 그룹 리더이고 pid == pgid 다.
+    이미 죽은 뒤면 조용히 지나간다.
+    """
+    try:
+        os.killpg(proc.pid, sig)
+    except (OSError, ProcessLookupError):
+        try:
+            proc.send_signal(sig)
+        except (OSError, ProcessLookupError):
+            pass
+
+
 def run_git(args: list[str], *, timeout: int) -> tuple[int, str]:
     """git을 실행하고 (종료 코드, stdout)을 돌려준다.
 
@@ -172,11 +195,12 @@ def run_git(args: list[str], *, timeout: int) -> tuple[int, str]:
     try:
         out, _ = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
+        _signal_group(proc, signal.SIGTERM)
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (OSError, ProcessLookupError):
-            proc.kill()
-        proc.wait()
+            proc.communicate(timeout=TERM_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            _signal_group(proc, signal.SIGKILL)
+            proc.communicate()
         return 124, ""
     return proc.returncode, out
 
@@ -363,8 +387,12 @@ def _usable_pins(remote: str, tips: dict[str, str]) -> dict[str, str]:
         _Undecided: fetch가 실패했거나 남는 pin이 없을 때.
     """
     refs = [f"refs/heads/{name}" for name in tips]
+    # --no-write-fetch-head: 이 도구는 FETCH_HEAD 를 읽지 않으면서 덮어쓰기만 한다.
+    # 오너가 `git fetch origin some-branch` 뒤 `git merge FETCH_HEAD` 를 하려던 참에
+    # 이 검사를 돌리면 엉뚱한 커밋을 머지하게 된다.
     rc, _ = run_git(
-        ["fetch", "--no-tags", remote, *refs], timeout=NETWORK_TIMEOUT_SECONDS
+        ["fetch", "--no-tags", "--no-write-fetch-head", remote, *refs],
+        timeout=NETWORK_TIMEOUT_SECONDS,
     )
     if rc != 0:
         raise _Undecided("the fetch failed; nothing was compared")

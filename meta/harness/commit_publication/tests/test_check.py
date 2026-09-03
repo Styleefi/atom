@@ -356,13 +356,62 @@ def test_no_arguments_exits_caller_error_without_touching_git(monkeypatch, capsy
     assert check.TAG in capsys.readouterr().err
 
 
-def test_local_branches_and_head_are_untouched(monkeypatch, tmp_path):
-    # refs/remotes/* 는 fetch가 정당하게 갱신하므로 범위에서 뺀다.
+def test_local_branches_head_and_fetch_head_are_untouched(monkeypatch, tmp_path):
+    """도구가 남기는 것은 추적 ref 하나뿐이다.
+
+    refs/remotes/* 는 fetch 가 refspec 에 따라 정당하게 갱신하므로 범위에서 뺀다.
+    FETCH_HEAD 는 다르다 — 도구는 그걸 읽지도 않으면서 덮어쓰기만 했고, 오너가
+    `git fetch origin some-branch` 뒤 `git merge FETCH_HEAD` 를 하려던 참이면 엉뚱한
+    커밋을 머지하게 만든다.
+    """
     src, pub, _ = _published(tmp_path)
+    fetch_head = src / ".git" / "FETCH_HEAD"
+    sentinel = f"{pub}\t\tbranch 'someone-elses' of somewhere\n"
+    fetch_head.write_text(sentinel, encoding="utf-8")
+
     before = _git(src, "for-each-ref", "refs/heads/"), _git(src, "rev-parse", "HEAD")
     _run(monkeypatch, src, _short(pub))
     after = _git(src, "for-each-ref", "refs/heads/"), _git(src, "rev-parse", "HEAD")
     assert before == after
+    assert fetch_head.read_text(encoding="utf-8") == sentinel
+
+
+def test_a_timed_out_call_leaves_no_lock_behind(monkeypatch, tmp_path):
+    """타임아웃은 SIGTERM 유예를 거쳐야 git 이 lock 을 치울 수 있다.
+
+    SIGKILL 만 보내면 git 의 정리 훅이 돌지 못해 `*.lock` 이 남고, 오너의 다음 git
+    명령이 이유 없는 "Unable to create '...lock'" 으로 죽는다 — 이 도구는 git 의
+    stderr 를 지워 놓으므로 원인을 아무도 설명해 주지 않는다.
+
+    실제 git 을 느리게 만들 수 없으므로, 신호가 SIGTERM → (유예) → SIGKILL 순서로
+    나가는지를 신호 자체로 확인한다.
+    """
+    import signal as _signal
+
+    sent: list[int] = []
+    real_signal_group = check._signal_group
+
+    def _record(proc, sig):
+        sent.append(sig)
+        real_signal_group(proc, sig)  # 실제로도 보낸다 — 안 그러면 자식이 끝까지 잔다.
+
+    monkeypatch.setattr(check, "_signal_group", _record)
+    monkeypatch.setattr(check, "TERM_GRACE_SECONDS", 0.2)
+
+    # 진짜 Popen 을 먼저 붙잡는다 — check.subprocess 는 subprocess 모듈 자체라,
+    # 그 안에서 subprocess.Popen 을 부르면 패치된 자기 자신을 부르게 된다.
+    real_popen = subprocess.Popen
+    script = "import time; time.sleep(30)"
+    monkeypatch.setattr(
+        check.subprocess, "Popen",
+        lambda argv, **kw: real_popen(
+            [sys.executable, "-c", script],
+            **{k: v for k, v in kw.items() if k != "env"},
+        ),
+    )
+    rc, _ = check.run_git(["ls-remote", "nowhere"], timeout=0.2)
+    assert rc == 124
+    assert sent and sent[0] == _signal.SIGTERM, "SIGTERM must come first"
 
 
 def test_default_remote_selection(monkeypatch, tmp_path):
