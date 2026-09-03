@@ -564,3 +564,27 @@ def test_a_hex_named_ref_cannot_shadow_a_reported_sha(monkeypatch, tmp_path):
 
     rc = _run(monkeypatch, src, _short(local))
     assert rc == check.EXIT_UNDECIDED, "a shadowing ref must not produce a verdict"
+
+
+@pytest.mark.parametrize("mechanism", ["core.graftsFile", "GIT_GRAFT_FILE"])
+def test_grafts_are_refused_through_every_path(
+    monkeypatch, capsys, tmp_path, mechanism: str
+):
+    """기본 위치가 아닌 graft 파일도 판정을 거부시킨다.
+
+    git 은 graft 파일을 `<git-dir>/info/grafts` 외에 `core.graftsFile` 과
+    `GIT_GRAFT_FILE` 로도 받는다. 기본 경로만 stat 하면 나머지 둘을 쓰는 저장소가
+    게이트를 통과해 조작된 그래프로 판정된다 — 그리고 graft 는 면죄 방향이다.
+    """
+    src, pub, local = _published(tmp_path)
+    elsewhere = tmp_path / "grafts-elsewhere"
+    elsewhere.write_text(f"{local} {pub}\n", encoding="utf-8")
+
+    if mechanism == "core.graftsFile":
+        _git(src, "config", "core.graftsFile", str(elsewhere))
+    else:
+        monkeypatch.setenv("GIT_GRAFT_FILE", str(elsewhere))
+
+    rc = _run(monkeypatch, src, _short(pub))
+    assert rc == check.EXIT_UNDECIDED
+    assert "grafts" in capsys.readouterr().out

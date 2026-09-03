@@ -246,9 +246,16 @@ def _assert_graph_is_trustworthy() -> None:
     if rc == 0 and out.strip():
         raise _Undecided("this repository has replace refs")
 
-    rc, out = run_git(["rev-parse", "--git-common-dir"], timeout=LOCAL_TIMEOUT_SECONDS)
-    if rc == 0 and (Path(out.strip()) / "info" / "grafts").exists():
-        raise _Undecided("this repository has a grafts file")
+    # graft 파일은 세 경로로 지정된다. `--git-path`가 기본 위치와 `GIT_GRAFT_FILE`을
+    # 함께 해석해 주지만 `core.graftsFile`은 반영하지 않으므로(실측), 그쪽은 따로 묻는다.
+    # 하나라도 존재하면 조상 관계가 조작돼 있을 수 있고, graft 는 면죄 방향으로 거짓말한다.
+    for args in (
+        ["rev-parse", "--git-path", "info/grafts"],
+        ["config", "--get", "core.graftsFile"],
+    ):
+        rc, out = run_git(args, timeout=LOCAL_TIMEOUT_SECONDS)
+        if rc == 0 and out.strip() and Path(out.strip()).exists():
+            raise _Undecided("this repository has a grafts file")
 
 
 def _resolve_remote(requested: str | None) -> tuple[str, str]:
