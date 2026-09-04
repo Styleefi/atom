@@ -887,6 +887,29 @@ def test_report_is_closed_world_over_verdicts(capsys, n: int):
 
 
 
+def test_every_declared_verdict_has_a_named_phrase(capsys):
+    """선언된 판정값 전부가 **자기 문구**로 렌더된다 — 총체성만 본다.
+
+    단사성이나 "이것이 rev-parse 의 rc 분리를 고정한다" 는 주장은 뺐다. 실측: `None` 과
+    `UNAVAILABLE` 의 문구를 맞바꿔도 map 은 총체적이고 단사이며 스위트는 초록이었다.
+    어떤 rc 가 어떤 판정을 내는지는 `judge` 에 있지 `_report` 에 없고, 그 성질은 호출
+    지점 표가 지킨다.
+
+    남는 값은 하나이고 그것으로 충분하다 — 판정값이 하나 더 늘었을 때 이름 없는 통으로
+    떨어지지 않게 하는 것. 닫힌 세계 테스트는 "이름이 불린다" 까지만 보고, 그 통에
+    떨어져도 초록이다.
+    """
+    for verdict in check.VERDICTS:
+        if verdict in (check.ON, check.NOT_ON):
+            continue
+        sha = "0" * 12
+        check._report("origin", [sha], {sha: verdict})
+        out = capsys.readouterr().out
+        assert "could not be judged: " not in out, (
+            f"{verdict!r} rendered into the unnamed bucket"
+        )
+
+
 def test_a_runner_failure_is_reported_as_unavailable(monkeypatch, tmp_path):
     """한쪽 호출만 실패하면 "조작됐다" 도 "해석 불가" 도 아니라 "git 이 답하지 않음" 이다.
 
