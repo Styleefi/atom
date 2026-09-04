@@ -1081,34 +1081,108 @@ def test_a_stable_but_failing_attempt_does_not_claim_the_remote_moved(
     assert out.count("nothing was compared") == 1, "the phrase is doubled"
 
 
+# 사이트는 **argv 전체**에 대한 술어로 고른다. `args[0]` 로 고르면 `rev-parse` 두 곳이 한
+# 칸으로 뭉치고, 얕은 클론 검사가 먼저 단락시켜 `judge` 의 `rev-parse` 는 한 번도 강제되지
+# 않는다(실측: 호출 1 회, exit 2). 게다가 그 칸이 기록하게 되는 값은
+# ("rev-parse", 128) → exit 2 로, F1 이 없앤 바로 그 혼동을 테스트로 굳히는 것이 된다.
+_SITES = {
+    "shallow-probe": lambda a: a[:2] == ["rev-parse", "--is-shallow-repository"],
+    "remote-list": lambda a: a == ["remote"],
+    "ls-remote": lambda a: a[0] == "ls-remote",
+    "fetch": lambda a: a[0] == "fetch",
+    "cat-file": lambda a: a[0] == "cat-file",
+    "resolve-sha": lambda a: a[:3] == ["rev-parse", "--verify", "--quiet"],
+    "merge-base": lambda a: a[:2] == ["merge-base", "--is-ancestor"],
+}
+
+# 이 도구가 만나는 rc 전부. 124 와 127 은 `run_git` 이 스스로 만들고(타임아웃·OSError),
+# 1·128 은 git 이 내며, 129 는 "우리가 모르는 코드" 자리다.
+_RCS = (1, 124, 127, 128, 129)
+
+_UND = check.EXIT_UNDECIDED
+_GIT_SILENT = "could not be compared — git did not answer"
+
+
+def _cells():
+    """(사이트, rc) → (종료 코드, 인쇄돼야 할 사유).
+
+    **칸에 lane 만 적으면 안 된다.** 이 라운드가 닫는 결함 둘은 전부 "같은 종료 코드에
+    틀린 사유" 였고, lane 만 보는 표는 둘 다 초록으로 지나친다.
+    """
+    for rc in _RCS:
+        # 128 만 "여기가 저장소가 아니다" 이고 나머지는 "git 이 답하지 않았다" 이다.
+        # 섞으면 타임아웃이 잘못된 cwd 탓으로 보고되고, 에이전트가 고칠 수 없는 것을
+        # 고치려 든다.
+        yield "shallow-probe", rc, (
+            (check.EXIT_CALLER, "not a git repository") if rc == 128
+            else (_UND, "git did not answer when asked about this repository")
+        )
+    for rc in _RCS:
+        yield "remote-list", rc, (_UND, "`git remote` failed")
+    for rc in _RCS:
+        yield "ls-remote", rc, (_UND, "could not reach the remote")
+    for rc in _RCS:
+        yield "fetch", rc, (_UND, "the fetch failed")
+    for rc in _RCS:
+        # 128 은 git 이 "그런 커밋이 여기 없다" 고 답한 것(실측: `^{commit}` peel 이 붙으면
+        # 미지 객체는 1 이 아니라 128 이다). 나머지는 답이 아니므로 tip 을 빼지 않는다.
+        yield "cat-file", rc, (
+            (_UND, "the fetched tips did not arrive") if rc == 128
+            else (_UND, "git did not answer whether the fetched tips arrived")
+        )
+    for rc in _RCS:
+        # `rev-parse --verify --quiet` 는 미지 SHA·잘못된 타입·모호한 축약에 **전부 1** 을
+        # 낸다. 1 만이 "이 저장소가 그 커밋을 모른다" 이고, 나머지는 git 이 답하지 않은
+        # 것이다. 섞으면 오너가 멀쩡한 SHA 를 오타로 읽고 엉뚱한 곳을 뒤진다.
+        yield "resolve-sha", rc, (
+            (_UND, "could not be resolved in this repository") if rc == 1
+            else (_UND, _GIT_SILENT)
+        )
+    for rc in _RCS:
+        # 여기서는 1 이 git 의 답이다 — "조상이 아니다". 평문과 중화 호출이 같은 1 을
+        # 내므로 깨끗한 부정이고, 그러면 not-on 이 정답이다.
+        yield "merge-base", rc, (
+            (check.EXIT_SOME_NOT_ON, "not on main/master at") if rc == 1
+            else (_UND, _GIT_SILENT)
+        )
+
+
 @pytest.mark.parametrize(
-    "step", ["rev-parse", "remote", "ls-remote", "fetch", "cat-file", "merge-base"]
+    "site,rc,expected", list(_cells()), ids=lambda v: str(v).replace(" ", "")[:34]
 )
-def test_every_git_call_site_fails_into_undecided(
-    monkeypatch, capsys, tmp_path, step: str
+def test_every_call_site_pins_its_exit_code_and_reason(
+    monkeypatch, capsys, tmp_path, site: str, rc: int, expected: tuple[int, str]
 ):
-    """어느 git 호출이 타임아웃해도 판정이 아니라 판정 불가로 떨어진다.
+    """git 호출 지점 하나가 각 rc 로 실패할 때의 **종료 코드와 사유**를 전수로 고정한다.
 
     ledger 의 부류 B bound("git 실패가 exit 5 로 렌더돼 오너를 `branch -f` 로 보내면 안
-    된다")를 **선언에서 기계로** 옮긴 것이다. 커밋 전에 호출 지점을 하나씩 124 로 강제하는
-    의례 대신, 그 성질을 파라미터로 돈다 — 의례는 기억에 기대고 테스트는 기대지 않는다.
+    된다")를 선언에서 기계로 옮긴 것이다. 커밋 전에 호출 지점을 하나씩 손으로 강제하는
+    의례는 기억에 기대고, 표는 기대지 않는다.
+
+    앞선 형태는 `args[0]` 로 사이트를 골랐고 rc 는 124 하나였다. 그래서 `rev-parse` 두
+    곳이 한 칸으로 뭉쳐 `judge` 쪽은 강제된 적이 없었고, 칸에 lane 만 적어 "같은 종료
+    코드에 틀린 사유" 부류 전체가 보이지 않았다.
     """
     b, _a, _base, tip, _local = _behind(tmp_path)
+    exit_code, phrase = expected
+    matches = _SITES[site]
     real_run = check.run_git
     hit = {"n": 0}
 
-    def _step_times_out(args, **kw):
-        if args and args[0] == step:
+    def _site_fails(args, **kw):
+        if args and matches(args):
             hit["n"] += 1
-            return 124, ""
+            return rc, ""
         return real_run(args, **kw)
 
-    monkeypatch.setattr(check, "run_git", _step_times_out)
-    rc = _run(monkeypatch, b, _short(tip))
-    assert hit["n"] > 0, f"{step} was never called; the parametrisation is stale"
-    assert rc in (check.EXIT_UNDECIDED, check.EXIT_CALLER), (
-        f"a timeout at {step} produced {rc}, not a refusal"
-    )
-    assert rc != check.EXIT_ALL_ON and rc != check.EXIT_SOME_NOT_ON
+    monkeypatch.setattr(check, "run_git", _site_fails)
+    got = _run(monkeypatch, b, _short(tip))
     captured = capsys.readouterr()
-    assert check.TAG in captured.out + captured.err
+    printed = captured.out + captured.err
+
+    assert hit["n"] > 0, f"{site} was never called; the table is stale"
+    assert got == exit_code, f"{site} at rc {rc} gave {got}, not {exit_code}"
+    assert check.TAG in printed
+    assert phrase in printed, f"{site} at rc {rc} did not print {phrase!r}"
+    # 면죄는 어떤 칸에서도 나오지 않는다.
+    assert got != check.EXIT_ALL_ON
