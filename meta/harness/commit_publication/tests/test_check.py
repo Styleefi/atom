@@ -337,15 +337,62 @@ def test_abbreviated_shas_are_accepted(monkeypatch, tmp_path):
     assert _run(monkeypatch, src, pub[:12]) == check.EXIT_ALL_ON
 
 
-def test_no_arguments_exits_caller_error_without_touching_git(monkeypatch, capsys):
-    # 진입점 테스트가 인자 없이 빈 stdin으로 실행하므로, 네트워크에 닿기 전에 끝나야 한다.
+# 각 행은 (argv, 인쇄돼야 할 사유)다. `<missing>` 은 테스트가 없는 경로로 치환한다.
+_REJECTED_ARGV = [
+    ([], "no commit SHAs given"),
+    (["-C"], "-C needs a path"),
+    (["--remote"], "--remote needs a value"),
+    (["--remote=", "0" * 40], "--remote needs a value"),
+    (["--zzz", "0" * 40], "unknown option: --zzz"),
+    (["zzzz"], "not hex commit SHAs: zzzz"),
+    (["-C", "<missing>", "0" * 40], "-C is not a directory"),
+    (
+        ["--remote", "--upload-pack=/tmp/x.sh", "0" * 40],
+        "--remote must not look like an option",
+    ),
+]
+
+
+@pytest.mark.parametrize("argv,phrase", _REJECTED_ARGV, ids=lambda v: str(v)[:40])
+def test_rejected_argv_names_its_reason_and_never_calls_git(
+    monkeypatch, capsys, tmp_path, argv: list[str], phrase: str
+):
+    """거부되는 argv 전수에 대해 **lane·사유·git 무접촉**을 함께 고정한다.
+
+    셋을 함께 봐야 하는 이유가 각각 있다. lane 만 보면 사유가 뒤바뀌어도 초록이고 — 이
+    모듈의 above-bar 둘이 정확히 그 모양이었다 — 사유만 보면 종료 코드가 3 으로 새도
+    모르며, git 무접촉을 빼면 진입점 테스트가 인자 없이 도구를 돌릴 때 네트워크에 닿는
+    회귀가 보이지 않는다.
+
+    앞선 형태는 인자 없음 한 행뿐이었다. 나머지 일곱 행은 이 스위트가 한 번도 실행한 적
+    없는 argv 이고, 그중 넷은 `_parse_args` 의 raise 문 자체가 미실행이었다.
+    """
     calls: list[list[str]] = []
     monkeypatch.setattr(
         check, "run_git", lambda args, **kw: calls.append(args) or (0, "")
     )
-    assert check._check([]) == check.EXIT_CALLER
-    assert calls == []
-    assert check.TAG in capsys.readouterr().err
+    argv = [str(tmp_path / "nope") if a == "<missing>" else a for a in argv]
+
+    assert check._check(argv) == check.EXIT_CALLER
+    assert calls == [], f"{argv} reached git before being rejected"
+    err = capsys.readouterr().err
+    assert check.TAG in err
+    assert phrase in err, f"{argv} was rejected without naming {phrase!r}"
+
+
+def test_a_registered_remote_name_is_used_as_given(monkeypatch, capsys, tmp_path):
+    """`--remote <등록된 이름>` 의 성공 경로 — 규칙이 인용하는 옵션의 정상 사용이다.
+
+    스위트는 이 옵션을 URL·미등록 이름·옵션 꼴로만 돌렸다. 즉 규칙이 에이전트에게 쓰라고
+    적어 둔 형태만 실행된 적이 없었고, `_resolve_remote` 의 그 반환은 미실행 줄이었다.
+    표기가 URL 고정 문구로 새지 않는 것까지 함께 본다.
+    """
+    src, pub, _ = _published(tmp_path)
+    assert _run(monkeypatch, src, "--remote", "origin", _short(pub)) == \
+        check.EXIT_ALL_ON
+    out = capsys.readouterr().out
+    assert "on main/master at origin as of this fetch." in out
+    assert check.URL_TARGET_LABEL not in out
 
 
 def test_local_branches_head_and_fetch_head_are_untouched(monkeypatch, tmp_path):
