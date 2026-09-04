@@ -807,10 +807,13 @@ def test_report_is_closed_world_over_verdicts(capsys, n: int):
         # 종료 코드는 세 갈래뿐이고, 미판정이 하나라도 있으면 절대 4·5 가 아니다.
         if unjudged:
             assert rc == check.EXIT_UNDECIDED, f"{combo}: unjudged yielded {rc}"
-            assert "of the listed commits are on" not in out
-            assert not out.rstrip().endswith(
-                "on main/master at origin as of this fetch."
-            ) or not_on, f"{combo}: an all-on sentence with unjudged SHAs"
+            # 면죄 문장은 **어디에도** 없어야 한다. 앞선 형태는 `endswith` 였고 not_on 이
+            # 있으면 통째로 vacuous 였다 — 미판정과 not-on 이 섞인 조합에서 아무것도
+            # 지키지 않았다. 함께 있던 `"of the listed commits are on"` 은 어떤 출력에도
+            # 나오지 않는 문구였다(실측). 부분 문자열 부재가 그 두 구멍을 닫는다.
+            assert "on main/master at origin as of this fetch." not in out, (
+                f"{combo}: an all-on sentence with unjudged SHAs"
+            )
         elif not_on:
             assert rc == check.EXIT_SOME_NOT_ON, f"{combo}: {rc}"
         else:
