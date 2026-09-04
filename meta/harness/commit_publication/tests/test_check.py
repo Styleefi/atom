@@ -887,6 +887,26 @@ def test_report_is_closed_world_over_verdicts(capsys, n: int):
 
 
 
+def test_a_runner_oserror_lands_outside_the_verdict_range(monkeypatch):
+    """프로세스를 띄우지 못했을 때의 rc 는 git 의 답과 겹치면 안 된다.
+
+    부류 A다. 이 값이 0 이 되면 `merge-base` 자리에서 평문과 중화 호출이 나란히 0 이 되어
+    조상 관계가 **확인된** 것으로 읽히고, 결과는 exit 4 — 거짓 면죄다. 1 이 되면 깨끗한
+    부정으로 읽혀 exit 5 가 된다. fork 고갈·ENOMEM·PATH 에 git 이 없는 구성으로 우연히
+    닿는 경로라 가정이 아니다.
+
+    호출 지점 표는 이 rc 가 판정 밖으로 떨어진 **뒤** 무슨 일이 일어나는지를 고정한다.
+    여기서는 그 rc 를 만드는 자리 자체를 고정한다.
+    """
+    def _no_process(*args, **kwargs):
+        raise OSError("cannot fork")
+
+    monkeypatch.setattr(check.subprocess, "Popen", _no_process)
+    rc, out = check.run_git(["status"], timeout=check.LOCAL_TIMEOUT_SECONDS)
+    assert rc not in (0, 1), "a runner failure must not read as a git answer"
+    assert (rc, out) == (127, "")
+
+
 def test_every_declared_verdict_has_a_named_phrase(capsys):
     """선언된 판정값 전부가 **자기 문구**로 렌더된다 — 총체성만 본다.
 
