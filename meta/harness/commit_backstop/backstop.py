@@ -103,7 +103,8 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
       쓰므로, published 커밋이 그 밖에 있으면 보고가 난다. 훅 자신은 이를
       가려낼 수 없다 — 선언된 범위 경계다(PR #114 라운드 4 오너 결정).
       published 여부 판별은 commit_publication 하네스가 맡는다(규칙 파일이
-      명령을 인용한다) — 단 그 도구도 remote 하나만 확인하고, 원격에
+      명령을 인용한다) — 단 그 도구는 등록된 remote 하나만 확인하므로 URL
+      pull로만 받은 이력은 `git remote add` 뒤에야 물을 수 있고, 원격에
       main/master가 없는 배치는 규칙 밖으로 보고 판정하지 않는다. 브랜치
       보고는 사실과 오너 라우팅만 내보내므로 최악 결과는 불필요한 보고
       한 번이다.

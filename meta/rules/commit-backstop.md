@@ -85,12 +85,12 @@ compares only against remote `main`/`master` refs that exist locally; the
 configurations where that view is incomplete are declared in its module
 docstring, which is the SSOT for them. What is on the remote now is decidable:
 
-    uv run --directory meta python -m harness.commit_publication [-C <repo>] <sha>...
+    uv run --directory meta python -m harness.commit_publication [--remote <name>] <sha>...
 
-That command judges the repository holding `meta/`; pass `-C` when the report
-came from another one, such as a submodule. Run it when the owner asks for it,
-not before: it fetches, and the report tells the agent to wait for their
-decision.
+That command judges the repository holding `meta/`. Reports from another
+repository, such as a submodule, are outside this tool's scope. Run it when the
+owner asks for it, not before: it fetches, and the report tells the agent to
+wait for their decision.
 
 Exit 4 states only that every listed commit is on the remote's `main`/`master`
 now — it does not clear the report, because a push between the report and the
