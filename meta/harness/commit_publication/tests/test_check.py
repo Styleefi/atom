@@ -75,6 +75,20 @@ def _short(sha: str) -> str:
     return sha[:12]
 
 
+@pytest.fixture(autouse=True)
+def _reset_repo_dir():
+    """모든 테스트를 `-C` 잔여물 없는 상태에서 시작시킨다.
+
+    `_repo_dir` 은 모듈 전역이고 지우는 것은 `_check` 뿐이다. `judge` 나 `_report` 를 직접
+    부르는 테스트는 앞 테스트가 남긴 — 이미 사라진 — tmp_path 를 가리킨 채 돌 수 있다.
+    한 테스트가 손으로 지우고 있었지만, 손으로 지우는 방어는 다음에 **추가되는** 테스트를
+    덮지 않는다. 잊는 것이 가능한 자리를 없앤다.
+    """
+    check._repo_dir = None
+    yield
+    check._repo_dir = None
+
+
 # --------------------------------------------------------------------------
 # T0 — 불변식: 비교 대상 브랜치 집합이 훅의 상수와 같다
 # --------------------------------------------------------------------------
@@ -833,7 +847,6 @@ def test_a_runner_failure_is_reported_as_unavailable(monkeypatch, tmp_path):
     전이적 실패가 위조로 오진되고, `None` 에 넣으면 오너가 멀쩡한 SHA 를 잘못된 것으로
     읽고 엉뚱한 곳을 뒤진다 — 사유가 틀리면 다음 행동도 틀린다.
     """
-    monkeypatch.setattr(check, "_repo_dir", None)   # 앞 테스트의 -C 를 물려받지 않는다
     src, pub, _ = _published(tmp_path)
     real_run = check.run_git
 
