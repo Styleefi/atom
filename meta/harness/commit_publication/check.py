@@ -429,7 +429,13 @@ def _usable_pins(
     통째로 뛰어넘어, 재시도가 존재 이유인 경우에 정작 재시도하지 못한다(라운드 4 실측).
 
     `cat-file -e`가 확인하는 것은 배달이 아니라 **존재**다 — 이전 clone에 이미 있던 객체도
-    통과한다. `^{commit}` peel은 필수다(없으면 blob도 rc 0을 낸다).
+    통과한다. `^{commit}` peel은 필수다(없으면 blob도 rc 0을 낸다). 그리고 **없다는 답은
+    rc 128이다** — peel이 붙으면 미지 객체도 비커밋도 128이다(실측). 그 답이 아닌
+    nonzero(124·127)에서 tip을 빼면 판정이 더 작은 pin 집합 위에서 이뤄져 발행된 커밋을
+    not-on으로 만들므로, 그때는 판정하지 않는다.
+
+    128이 "없다"와 "로컬 git이 깨졌다"를 함께 싣는 것은 남는다 — git이 그 둘에 같은 코드를
+    쓴다. 구분 가능한 쪽(우리가 만드는 124·127)만 가른다.
 
     Args:
         remote: git에 넘길 remote 값.
@@ -456,6 +462,15 @@ def _usable_pins(
         )
         if rc == 0:
             usable[name] = tip
+        elif rc != 128:
+            # 128 은 git 이 "그런 커밋 객체가 여기 없다"고 **답한** 것이다(실측, git 2.53:
+            # `^{commit}` peel 이 붙으면 없는 객체도 blob 도 1 이 아니라 128 이다). 그
+            # 답이라야 이 tip 을 빼도 된다. 우리가 만들어 낸 124(타임아웃)·127(OSError)
+            # 은 답이 아니고, 그런데도 tip 을 빼면 `judge` 의 전칭 명제("어느 pin 에도
+            # 없다")가 더 작은 집합 위에서 성립해 **발행된 커밋이 not-on** 이 된다
+            # (실측: 두 pin 중 하나만 124 로 만들면 exit 5). 사유도 여기서 갈린다 —
+            # 로컬 실패를 "원격이 배달하지 않았다"로 보고하면 오너가 원격을 뒤진다.
+            return {}, "git did not answer whether the fetched tips arrived"
     if not usable:
         return {}, "the fetched tips did not arrive"
     return usable, None

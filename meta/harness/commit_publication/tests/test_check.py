@@ -969,6 +969,48 @@ def test_a_fetch_that_delivers_nothing_yields_no_verdict(monkeypatch, capsys, tm
     assert "did not arrive" in capsys.readouterr().out
 
 
+def test_a_local_cat_file_failure_never_shrinks_the_pins(
+    monkeypatch, capsys, tmp_path
+):
+    """`cat-file` 이 하드 실패한 tip 을 조용히 빼면 발행된 커밋이 not-on 이 된다.
+
+    `judge` 의 "없다" 는 사용 가능한 **모든** pin 에 대한 전칭 명제다. rc 1 만이 "그 객체가
+    없다" 는 답이고, 124(타임아웃)·127(OSError)·128 은 git 이 답하지 않은 것이다. 후자를
+    전자로 읽으면 전칭이 더 작은 집합 위에서 성립한다.
+
+    실측(수정 전): main·master 두 pin 중 master 의 cat-file 만 124 로 만들면, master 에
+    발행돼 있는 커밋이 **exit 5 — not on main/master** 로 나왔다. 이 도구가 존재하는 이유인
+    바로 그 방향(오너를 보호 브랜치 되감기로 보내는 방향)의 거짓 판정이다.
+
+    사유도 함께 본다. 로컬 git 실패가 "원격이 배달하지 않았다" 로 보고되고 있었다 — F1·F2
+    와 같은 부류의 셋째 자리다.
+    """
+    remote = _bare(tmp_path, "remote", branch="main")
+    src = _work(tmp_path, "src", branch="main")
+    _git(src, "remote", "add", "origin", str(remote))
+    _commit(src, "chore: base")
+    _git(src, "push", "-q", "-u", "origin", "main")
+    _git(src, "checkout", "-q", "-b", "master")
+    only = _commit(src, "chore: on master only")
+    _git(src, "push", "-q", "origin", "master")
+    _git(src, "checkout", "-q", "main")
+
+    master_tip = _git(src, "rev-parse", "master")
+    real_run = check.run_git
+
+    def _cat_file_hard_fails_for_master(args, **kw):
+        if args and args[0] == "cat-file" and master_tip in args[-1]:
+            return 124, ""
+        return real_run(args, **kw)
+
+    monkeypatch.setattr(check, "run_git", _cat_file_hard_fails_for_master)
+    rc = _run(monkeypatch, src, _short(only))
+    out = capsys.readouterr().out
+    assert rc == check.EXIT_UNDECIDED, "a published commit was judged not-on"
+    assert "did not arrive" not in out, "a local failure blamed on the remote"
+    assert "git did not answer" in out
+
+
 def test_a_rewind_between_pin_and_fetch_is_answered(monkeypatch, tmp_path):
     """고정과 fetch 사이의 되감기에서도 답한다 — 로컬에 옛 tip 이 없어도.
 
