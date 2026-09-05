@@ -47,8 +47,10 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
     5 하나 이상 not on / 4 전부 on / 3 판정 불가 / 2 호출자 잘못 /
     1 도구가 돌지 못함(uv·import 실패 — 의도적으로 내지 않는다).
 
-    **4와 5만 모든 SHA에 대해 답한 것이고, 나머지는 답이 아니다.** 실질 판정을 1이 아니라
-    5에 둔 이유는 파이썬이 잡히지 않은 예외에서 1을, uv가 실패 시 1이나 2를 내기 때문이다.
+    **5는 하나라도 not-on이면 난다. 4는 모든 SHA가 on일 때만 난다.** 판정 불가 SHA가 섞이면
+    5는 그대로 5이고(별도 줄로 이름을 부른다), 4는 3이 된다 — "하나 이상 not-on"은 존재
+    명제이고 "전부 on"은 전칭 명제이기 때문이다. 실질 판정을 1이 아니라 5에 둔 이유는
+    파이썬이 잡히지 않은 예외에서 1을, uv가 실패 시 1이나 2를 내기 때문이다.
     2와 3의 경계: **2는 에이전트가 스스로 고칠 수 있고 3은 못 고친다.**
 """
 
@@ -298,8 +300,9 @@ def judge(sha: str, tips: dict[str, str]) -> str | None:
 def _report(remote: str, shas: list[str], verdicts: dict[str, str | None]) -> int:
     """판정 결과를 인쇄하고 종료 코드를 돌려준다.
 
-    분기는 "판정되지 않은 것이 있는가"가 정한다. 판정 불가가 섞여도 not-on 줄은 인쇄한다 —
-    지우면 오너가 조치가 필요한 커밋을 보지 못한 채 "판정 불가"만 받는다.
+    not-on이 하나라도 있으면 exit 5다. "하나 이상 not-on"은 SHA에 대한 존재 명제라 다른
+    SHA가 판정 불가여도 성립한다. "전부 on"은 전칭 명제라 하나라도 판정 불가면 exit 4를
+    낼 수 없고, 그때는 exit 3이다. 판정 불가 SHA는 어느 경우든 별도 줄로 이름을 부른다.
 
     Args:
         remote: 출력에 쓸 remote 이름.
@@ -309,30 +312,27 @@ def _report(remote: str, shas: list[str], verdicts: dict[str, str | None]) -> in
     Returns:
         종료 코드.
     """
-    judged = [s for s in shas if verdicts[s] in (ON, NOT_ON)]
     unjudged = [s for s in shas if verdicts[s] not in (ON, NOT_ON)]
-    not_on = [s for s in judged if verdicts[s] == NOT_ON]
+    not_on = [s for s in shas if verdicts[s] == NOT_ON]
 
     def _verb(n: int) -> str:
         return "is" if n == 1 else "are"
 
-    if unjudged:
-        head = f"{TAG} {len(judged)} of {len(shas)} listed commits were judged as of this fetch"
-        if not_on:
-            print(
-                f"{head}; {len(not_on)} of those {len(judged)} {_verb(len(not_on))} "
-                f"not on main/master at {remote}: {' '.join(not_on)}"
-            )
-        else:
-            print(f"{head}.")
-        print(f"  {len(unjudged)} could not be judged: {' '.join(unjudged)}")
-        return EXIT_UNDECIDED
     if not_on:
         print(
             f"{TAG} {len(not_on)} of {len(shas)} listed commits {_verb(len(not_on))} "
             f"not on main/master at {remote} as of this fetch: {' '.join(not_on)}"
         )
+        if unjudged:
+            print(f"  {len(unjudged)} could not be judged: {' '.join(unjudged)}")
         return EXIT_SOME_NOT_ON
+    if unjudged:
+        print(
+            f"{TAG} {len(shas) - len(unjudged)} of {len(shas)} listed commits were judged "
+            f"as of this fetch; none of those is not on main/master at {remote}."
+        )
+        print(f"  {len(unjudged)} could not be judged: {' '.join(unjudged)}")
+        return EXIT_UNDECIDED
     print(
         f"{TAG} {len(shas)} of {len(shas)} listed commits {_verb(len(shas))} "
         f"on main/master at {remote} as of this fetch."

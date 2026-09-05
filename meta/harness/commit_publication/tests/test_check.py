@@ -179,19 +179,23 @@ def test_mixed_list_reports_the_unpublished_sha(monkeypatch, capsys, tmp_path):
     assert "1 of 2" in out
 
 
-def test_unresolvable_sha_in_a_mixed_run_makes_the_whole_run_undecided(
+def test_unresolvable_sha_in_a_mixed_run_does_not_make_it_undecided(
     monkeypatch, capsys, tmp_path
 ):
-    # on / not-on / 해석 불가가 섞이면 exit 5가 아니라 exit 3이다. `N of M` 형식은
-    # "M 중 k개만 판정했다"를 표현할 수 없어, 그대로 두면 판정된 적 없는 SHA를 면죄하는
-    # 인쇄된 거짓이 된다. merge-base 의 rc 128 을 not-on 으로 읽는 구현은 여기서 5 를 낸다.
+    # on / not-on / 해석 불가가 섞이면 exit 5다. "하나 이상 not-on" 은 존재 명제라 다른
+    # SHA 가 판정 불가여도 성립한다. 미해석 SHA 는 not-on 줄이 아니라 별도 줄에 이름이
+    # 불려야 한다 — merge-base 의 rc 128 을 not-on 으로 읽는 구현은 여기서 not-on 줄에
+    # deadbeef 를 싣는다.
     src, pub, local = _published(tmp_path)
     rc = _run(monkeypatch, src, _short(pub), _short(local), "deadbeefdead")
     out = capsys.readouterr().out
-    assert rc == check.EXIT_UNDECIDED
-    assert "2 of 3 listed commits were judged" in out
-    assert _short(local) in out          # not-on 줄은 사라지지 않는다
-    assert "deadbeefdead" in out         # 미해석 SHA도 이름이 불린다
+    lines = out.splitlines()
+    assert rc == check.EXIT_SOME_NOT_ON
+    assert len(lines) == 2, out
+    not_on_line, unjudged_line = lines
+    assert "1 of 3" in not_on_line and _short(local) in not_on_line
+    assert "deadbeefdead" not in not_on_line
+    assert "could not be judged" in unjudged_line and "deadbeefdead" in unjudged_line
 
 
 def test_single_branch_clone_of_another_branch_still_answers(
@@ -331,16 +335,17 @@ def test_failed_fetch_yields_no_verdict(monkeypatch, capsys, tmp_path):
 
 
 def test_an_unjudged_sha_never_erases_the_not_on_shas(monkeypatch, capsys, tmp_path):
-    # 판정 불가 SHA 가 섞여도 이미 판정한 not-on 은 보고에서 사라지지 않는다. PR #152
-    # 라운드 3 실측: 판정 불가를 예외로 던지자 배치가 중단돼 조치가 필요한 미발행 커밋이
-    # 출력에서 사라졌다. SHA 단위 사실은 SHA 단위 채널로 나가야 한다.
+    # 판정 불가 SHA 가 섞여도 이미 판정한 not-on 은 보고에서 사라지지 않고 exit 는 5다.
+    # PR #152 라운드 3 실측: 판정 불가를 예외로 던지자 배치가 중단돼 조치가 필요한 미발행
+    # 커밋이 출력에서 사라졌다. SHA 단위 사실은 SHA 단위 채널로 나가야 한다.
     src, _pub, local = _published(tmp_path)
     rc = _run(monkeypatch, src, _short(local), "deadbeefdead")
-    out = capsys.readouterr().out
-    assert rc == check.EXIT_UNDECIDED
-    assert _short(local) in out, "the not-on SHA vanished from the report"
-    assert "deadbeefdead" in out, "the unjudgeable SHA was not named"
-    assert "nothing was compared" not in out, "comparisons were made"
+    lines = capsys.readouterr().out.splitlines()
+    assert rc == check.EXIT_SOME_NOT_ON
+    assert _short(local) in lines[0], "the not-on SHA vanished from the report"
+    assert "deadbeefdead" not in lines[0], "an unjudged SHA was listed as not on"
+    assert "deadbeefdead" in lines[1], "the unjudgeable SHA was not named"
+    assert "nothing was compared" not in "\n".join(lines), "comparisons were made"
 
 
 # --------------------------------------------------------------------------
@@ -439,6 +444,16 @@ def test_unregistered_remote_name_is_caller_error_not_undecided(
     # 에이전트의 오타가 "환경 문제"로 오너에게 보고된다.
     src, pub, _ = _published(tmp_path)
     assert _run(monkeypatch, src, "--remote", "orign", _short(pub)) == check.EXIT_CALLER
+
+
+def test_malformed_sha_is_caller_error_and_unresolvable_is_undecided(
+    monkeypatch, tmp_path
+):
+    # 형식 위반은 exit 2, 형식은 맞지만 이 저장소가 모르는 SHA 하나는 exit 3. not-on 이
+    # 없으므로 5 가 아니다 — 미해석을 not-on 으로 읽는 구현은 여기서 5 를 낸다.
+    src, pub, _ = _published(tmp_path)
+    assert _run(monkeypatch, src, "zzzz") == check.EXIT_CALLER
+    assert _run(monkeypatch, src, "deadbeefdead") == check.EXIT_UNDECIDED
 
 
 def test_outside_a_repository_is_caller_error(monkeypatch, tmp_path):
