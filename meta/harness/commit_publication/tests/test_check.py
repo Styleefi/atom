@@ -494,7 +494,9 @@ def test_local_branches_head_and_fetch_head_are_untouched(monkeypatch, tmp_path)
     fetch_head.write_text(sentinel, encoding="utf-8")
 
     before = _git(src, "for-each-ref", "refs/heads/"), _git(src, "rev-parse", "HEAD")
-    _run(monkeypatch, src, _short(pub))
+    # 종료 코드를 함께 고정한다 — fetch 이전에 물러나는 회귀가 생기면 아래 단언은 전부
+    # 참인 채로 초록이 되고, 이 테스트가 드는 보증은 실행되지 않는다.
+    assert _run(monkeypatch, src, _short(pub)) == check.EXIT_ALL_ON
     after = _git(src, "for-each-ref", "refs/heads/"), _git(src, "rev-parse", "HEAD")
     assert before == after
     assert fetch_head.read_text(encoding="utf-8") == sentinel
