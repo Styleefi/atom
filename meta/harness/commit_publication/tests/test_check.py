@@ -474,6 +474,10 @@ def test_the_runner_isolates_every_git_call(monkeypatch, tmp_path):
         assert call["stdin"] is subprocess.DEVNULL
         assert call["stderr"] is subprocess.DEVNULL
         assert call["env"]["GIT_TERMINAL_PROMPT"] == "0"
+        # askpass 채널은 helper 와 별개다.
+        assert call["env"]["GIT_ASKPASS"] == "/bin/false"
+        assert call["env"]["SSH_ASKPASS"] == "/bin/false"
+        assert call["env"]["SSH_ASKPASS_REQUIRE"] == "force"
         assert call["timeout"] > 0
 
 

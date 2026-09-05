@@ -104,7 +104,10 @@ def run_git(args: list[str], *, timeout: int) -> tuple[int, str]:
 
     `-c credential.helper=`는 자격 증명 helper 채널을 닫는다 — `GIT_TERMINAL_PROMPT`는
     git 자신의 tty 프롬프트만 막고 helper는 막지 못하며, osxkeychain·libsecret·
-    git-credential-manager가 전부 그 채널이다. stderr는 돌려주지 않는다(모듈 docstring의
+    git-credential-manager가 전부 그 채널이다. askpass 변수 셋은 GUI·에디터 프롬프트
+    경로를 막는다(VS Code는 `GIT_ASKPASS`를 export한다). `SSH_ASKPASS_REQUIRE`는 `force`다 —
+    `never`는 제어 tty가 없다는 데 기대지만 `force`는 tty 유무와 무관하게 askpass를 쓰게
+    하고, `/bin/false`와 짝지으면 즉시 실패한다. stderr는 돌려주지 않는다(모듈 docstring의
     출력 채널 항목).
 
     Args:
@@ -122,7 +125,13 @@ def run_git(args: list[str], *, timeout: int) -> tuple[int, str]:
             stderr=subprocess.DEVNULL,
             text=True,
             errors="replace",
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            env={
+                **os.environ,
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_ASKPASS": "/bin/false",
+                "SSH_ASKPASS": "/bin/false",
+                "SSH_ASKPASS_REQUIRE": "force",
+            },
             timeout=timeout,
         )
     except (subprocess.TimeoutExpired, OSError):
