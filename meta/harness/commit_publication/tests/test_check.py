@@ -361,11 +361,14 @@ def test_report_is_closed_world_over_verdicts(capsys, n: int):
     확인하지 않아 생겼다. 순수 함수라 전수 검사가 싸다.
     """
     kinds = {"on": check.ON, "not": check.NOT_ON, "none": None}
+    # 어떤 리터럴에도 우연히 들어 있지 않은 이름이라, 인자가 실제로 출력에 흘러야만
+    # 아래 단언이 통과한다.
+    remote = "zeta-under-test"
     for combo in itertools.product(kinds, repeat=n):
         shas = [f"{'abcdef'[i] * 6}{i:06d}" for i in range(n)]
         verdicts = {s: kinds[k] for s, k in zip(shas, combo)}
         capsys.readouterr()
-        rc = check._report("origin", shas, verdicts)
+        rc = check._report(remote, shas, verdicts)
         out = capsys.readouterr().out
         lines = out.rstrip("\n").split("\n")
         head = lines[0]
@@ -391,6 +394,14 @@ def test_report_is_closed_world_over_verdicts(capsys, n: int):
         for s in unjudged:
             assert s not in head and lines[1].count(s) == 1, (combo, out)
         assert (len(lines) == 2) == bool(unjudged), (combo, out)
+        if unjudged:
+            assert lines[1].startswith(
+                f"  {len(unjudged)} could not be judged: "
+            ), (combo, out)
+
+        # 어느 판정이든 무엇에 대고 물었는지 말한다 — 보고를 이슈에 붙이면 remote 이름이
+        # 없는 줄은 어느 원격에 대한 답인지 구분되지 않는다.
+        assert f"main/master at {remote}" in head, (combo, out)
 
         # 머리줄의 주장: not-on 문구는 exit 5 에만, on 주장은 exit 4 에만.
         assert ("not on main/master" in head) == bool(not_on), (combo, out)

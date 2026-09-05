@@ -344,7 +344,7 @@ def _report(remote: str, shas: list[str], verdicts: dict[str, str | None]) -> in
     if unjudged:
         print(
             f"{TAG} {len(judged)} of {len(shas)} listed commits were judged "
-            f"as of this fetch."
+            f"against main/master at {remote} as of this fetch."
         )
         print(f"  {len(unjudged)} could not be judged: {' '.join(unjudged)}")
         return EXIT_UNDECIDED
