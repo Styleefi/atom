@@ -8,7 +8,9 @@ bare remote(필요하면 `file://`)를 만들어 검증한다.
 
 from __future__ import annotations
 
+import itertools
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -349,6 +351,62 @@ def test_an_unjudged_sha_never_erases_the_not_on_shas(monkeypatch, capsys, tmp_p
     assert "deadbeefdead" not in lines[0], "an unjudged SHA was listed as not on"
     assert "deadbeefdead" in lines[1], "the unjudgeable SHA was not named"
     assert "nothing was compared" not in "\n".join(lines), "comparisons were made"
+
+
+@pytest.mark.parametrize("n", (1, 2, 3))
+def test_report_is_closed_world_over_verdicts(capsys, n: int):
+    """`_report` 의 입력 공간 전체를 오라클과 대조한다 — SHA n 개 × 판정 3종의 모든 조합.
+
+    PR #152 라운드 7·8 의 결함은 둘 다 이 함수의 문장이나 분기를 바꾸면서 조합 일부를
+    확인하지 않아 생겼다. 순수 함수라 전수 검사가 싸다.
+    """
+    kinds = {"on": check.ON, "not": check.NOT_ON, "none": None}
+    for combo in itertools.product(kinds, repeat=n):
+        shas = [f"{'abcdef'[i] * 6}{i:06d}" for i in range(n)]
+        verdicts = {s: kinds[k] for s, k in zip(shas, combo)}
+        capsys.readouterr()
+        rc = check._report("origin", shas, verdicts)
+        out = capsys.readouterr().out
+        lines = out.rstrip("\n").split("\n")
+        head = lines[0]
+        on = [s for s, k in zip(shas, combo) if k == "on"]
+        not_on = [s for s, k in zip(shas, combo) if k == "not"]
+        unjudged = [s for s, k in zip(shas, combo) if k == "none"]
+        judged = n - len(unjudged)
+
+        # 종료 코드: not-on 은 존재 명제, 전부 on 은 전칭 명제.
+        expected = (
+            check.EXIT_SOME_NOT_ON if not_on
+            else check.EXIT_UNDECIDED if unjudged
+            else check.EXIT_ALL_ON
+        )
+        assert rc == expected, (combo, out)
+
+        # 이름: on 은 싣지 않고, not-on 은 머리줄에 한 번, 미판정은 둘째 줄에 한 번.
+        # 둘째 줄은 미판정이 있을 때만 있다.
+        for s in on:
+            assert s not in out, (combo, out)
+        for s in not_on:
+            assert head.count(s) == 1 and out.count(s) == 1, (combo, out)
+        for s in unjudged:
+            assert s not in head and lines[1].count(s) == 1, (combo, out)
+        assert (len(lines) == 2) == bool(unjudged), (combo, out)
+
+        # 머리줄의 주장: not-on 문구는 exit 5 에만, on 주장은 exit 4 에만.
+        assert ("not on main/master" in head) == bool(not_on), (combo, out)
+        assert bool(re.search(r"\b(is|are) on main/master", head)) == (
+            expected == check.EXIT_ALL_ON
+        ), (combo, out)
+
+        # 머리줄의 숫자: 비교한 적 없는 SHA 를 판정에 든 것처럼 세지 않는다.
+        m = re.search(r"\] (\d+) of (\d+) (listed|judged) commits", head)
+        assert m, (combo, out)
+        numbers = (int(m[1]), int(m[2]), m[3])
+        assert numbers == {
+            check.EXIT_SOME_NOT_ON: (len(not_on), judged, "judged"),
+            check.EXIT_UNDECIDED: (judged, n, "listed"),
+            check.EXIT_ALL_ON: (n, n, "listed"),
+        }[expected], (combo, out)
 
 
 # --------------------------------------------------------------------------
