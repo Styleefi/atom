@@ -443,10 +443,10 @@ def test_exit_four_states_a_fact_and_exit_five_names_the_shas(
     src, pub, local = _published(tmp_path)
     _run(monkeypatch, src, _short(pub))
     on_out = capsys.readouterr().out
-    assert "are on main/master at origin as of this fetch" in on_out or \
-           "is on main/master at origin as of this fetch" in on_out
+    assert "are on main/master at origin as of this run" in on_out or \
+           "is on main/master at origin as of this run" in on_out
     _run(monkeypatch, src, _short(local))
-    assert "as of this fetch" in capsys.readouterr().out
+    assert "as of this run" in capsys.readouterr().out
 
 
 # --------------------------------------------------------------------------
@@ -492,7 +492,7 @@ def test_a_registered_remote_name_is_used_as_given(monkeypatch, capsys, tmp_path
     src, pub, _ = _published(tmp_path)
     assert _run(monkeypatch, src, "--remote", "origin", _short(pub)) == \
         check.EXIT_ALL_ON
-    assert "on main/master at origin as of this fetch." in capsys.readouterr().out
+    assert "on main/master at origin as of this run." in capsys.readouterr().out
 
 
 def test_default_remote_selection(monkeypatch, capsys, tmp_path):

@@ -1,4 +1,4 @@
-# 보고된 커밋이 원격 main/master에 실제로 있는지 갓 fetch한 상태로 판정하는 오너 실행 도구
+# 보고된 커밋이 원격 main/master에 실제로 있는지 원격에 직접 물어 판정하는 오너 실행 도구
 """commit-publication: 보고된 커밋의 발행 여부를 원격에 직접 물어 판정한다 (#116).
 
 commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제외 집합으로 쓰므로,
@@ -336,7 +336,7 @@ def _report(remote: str, shas: list[str], verdicts: dict[str, str | None]) -> in
     if not_on:
         print(
             f"{TAG} {len(not_on)} of {len(judged)} judged commits {_verb(len(not_on))} "
-            f"not on main/master at {remote} as of this fetch: {' '.join(not_on)}"
+            f"not on main/master at {remote} as of this run: {' '.join(not_on)}"
         )
         if unjudged:
             print(f"  {len(unjudged)} could not be judged: {' '.join(unjudged)}")
@@ -344,13 +344,13 @@ def _report(remote: str, shas: list[str], verdicts: dict[str, str | None]) -> in
     if unjudged:
         print(
             f"{TAG} {len(judged)} of {len(shas)} listed commits were judged "
-            f"against main/master at {remote} as of this fetch."
+            f"against main/master at {remote} as of this run."
         )
         print(f"  {len(unjudged)} could not be judged: {' '.join(unjudged)}")
         return EXIT_UNDECIDED
     print(
         f"{TAG} {len(shas)} of {len(shas)} listed commits {_verb(len(shas))} "
-        f"on main/master at {remote} as of this fetch."
+        f"on main/master at {remote} as of this run."
     )
     return EXIT_ALL_ON
 
