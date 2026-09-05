@@ -279,19 +279,21 @@ def test_no_main_or_master_on_the_remote_hides_the_remote_branch_name(
     # 풋프린트도 함께 든다: 비교할 tip 이 없으면 fetch 자체가 나가지 않아야 한다. `_tips`
     # 의 빈 결과 검사를 지우면 refspec 없는 `git fetch` 가 설정된 추적 ref 를 전부
     # 갱신하고, 사유가 "원격에 보호 브랜치가 없다" 에서 "SHA 를 판정할 수 없다" 로 바뀐다.
+    # 등록명을 `origin` 이 아닌 것으로 두어, 사유에 담긴 이름이 하드코딩이 아니라 실제
+    # remote 인자에서 온 것임을 함께 본다(단일 remote 라 기본 선택 경로도 지난다).
     remote = _bare(tmp_path, "remote", branch="trunk")
     src = _work(tmp_path, "src", branch="trunk")
-    _git(src, "remote", "add", "origin", str(remote))
+    _git(src, "remote", "add", "zeta", str(remote))
     tip = _commit(src, "chore: base")
-    _git(src, "push", "-q", "origin", "trunk")
-    _git(src, "update-ref", "-d", "refs/remotes/origin/trunk")
-    tracking = src / ".git" / "refs" / "remotes" / "origin" / "trunk"
+    _git(src, "push", "-q", "zeta", "trunk")
+    _git(src, "update-ref", "-d", "refs/remotes/zeta/trunk")
+    tracking = src / ".git" / "refs" / "remotes" / "zeta" / "trunk"
     assert not tracking.exists()
     rc = _run(monkeypatch, src, _short(tip))
     out = capsys.readouterr().out
     assert rc == check.EXIT_UNDECIDED
     assert "trunk" not in out
-    assert "neither main nor master" in out
+    assert "zeta has neither main nor master" in out
     assert not tracking.exists(), "a fetch went out with nothing to compare against"
 
 
@@ -319,7 +321,8 @@ def test_a_remote_only_commit_is_found_which_proves_the_fetch_delivers(
 
 def test_failed_fetch_yields_no_verdict(monkeypatch, capsys, tmp_path):
     # fetch가 실패하면 아무것도 비교되지 않는다. FETCH_HEAD를 미리 심어 두어, 그 파일을
-    # 읽는 구현이 판정을 만들어내지 못함을 함께 고정한다.
+    # 읽는 구현이 판정을 만들어내지 못함을 함께 고정한다. 사유는 어느 원격에서 막혔는지도
+    # 말한다 — 이 줄은 판정을 싣지 않지만 오너의 다음 행동은 그 이름에 달렸다.
     src, pub, _ = _published(tmp_path)
     (src / ".git" / "FETCH_HEAD").write_text(
         f"{pub}\t\tbranch 'main' of somewhere\n", encoding="utf-8"
@@ -336,6 +339,7 @@ def test_failed_fetch_yields_no_verdict(monkeypatch, capsys, tmp_path):
     out = capsys.readouterr().out
     assert rc == check.EXIT_UNDECIDED
     assert "on main/master" not in out
+    assert "the fetch from origin failed" in out
 
 
 def test_an_unjudged_sha_never_erases_the_not_on_shas(monkeypatch, capsys, tmp_path):
@@ -544,6 +548,22 @@ def test_malformed_sha_is_caller_error_and_unresolvable_is_undecided(
     out = capsys.readouterr().out
     assert "0 of 1 listed commits were judged" in out
     assert "not on main/master" not in out
+
+
+def test_an_unreachable_remote_is_undecided_and_names_itself(
+    monkeypatch, capsys, tmp_path
+):
+    # 등록은 됐는데 닿지 않는 원격. 오타(exit 2)와 달리 호출자가 고칠 수 없으므로 exit 3
+    # 이고, 사유는 어느 원격이었는지 말한다. 이 경로를 도는 테스트가 없어서, 사유에서
+    # 이름을 빼는 변이가 스위트를 통과했다.
+    src, pub, _ = _published(tmp_path)
+    _git(src, "remote", "set-url", "origin", str(tmp_path / "gone.git"))
+    _git(src, "remote", "rename", "origin", "zeta")
+    rc = _run(monkeypatch, src, _short(pub))
+    out = capsys.readouterr().out
+    assert rc == check.EXIT_UNDECIDED
+    assert "could not reach zeta" in out
+    assert "on main/master" not in out
 
 
 def test_outside_a_repository_is_caller_error(monkeypatch, tmp_path):

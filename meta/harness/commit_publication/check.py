@@ -248,7 +248,7 @@ def _tips(remote: str) -> dict[str, str]:
     patterns = [f"refs/heads/{name}" for name in PROTECTED_BRANCHES]
     rc, out = run_git(["ls-remote", remote, *patterns], timeout=NETWORK_TIMEOUT_SECONDS)
     if rc != 0:
-        raise _Undecided("could not reach the remote")
+        raise _Undecided(f"could not reach {remote}")
     tips: dict[str, str] = {}
     for line in out.splitlines():
         fields = line.split("\t")
@@ -259,7 +259,7 @@ def _tips(remote: str) -> dict[str, str]:
             if ref == f"refs/heads/{name}":
                 tips[name] = sha
     if not tips:
-        raise _Undecided("the remote has neither main nor master")
+        raise _Undecided(f"{remote} has neither main nor master")
     return tips
 
 
@@ -283,7 +283,7 @@ def _fetch(remote: str, names: list[str]) -> None:
         timeout=NETWORK_TIMEOUT_SECONDS,
     )
     if rc != 0:
-        raise _Undecided("the fetch failed")
+        raise _Undecided(f"the fetch from {remote} failed")
 
 
 def judge(sha: str, tips: dict[str, str]) -> str | None:
@@ -376,6 +376,9 @@ def _check(argv: list[str]) -> int:
         print(_USAGE, file=sys.stderr)
         return EXIT_CALLER
     except _Undecided as exc:
+        # remote 가 관련된 사유는 그 이름을 사유 안에 담는다 — 이 줄은 판정을 싣지 않지만,
+        # 보고를 이슈에 붙였을 때 어느 원격에서 막혔는지가 다음 행동을 가른다. 이름이 없는
+        # 사유(얕은 클론 등)는 로컬 저장소에 대한 것이라 담을 이름이 없다.
         print(f"{TAG} undecided: {exc.reason}; nothing was compared")
         return EXIT_UNDECIDED
     return _report(remote, shas, verdicts)
