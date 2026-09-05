@@ -423,7 +423,7 @@ def test_a_registered_remote_name_is_used_as_given(monkeypatch, capsys, tmp_path
     assert "on main/master at origin as of this fetch." in capsys.readouterr().out
 
 
-def test_default_remote_selection(monkeypatch, tmp_path):
+def test_default_remote_selection(monkeypatch, capsys, tmp_path):
     # 단일 remote면 그것, origin이 있으면 그것, 둘 다 아니면 호출자 잘못.
     src, pub, _ = _published(tmp_path)
     _git(src, "remote", "rename", "origin", "only")
@@ -432,9 +432,20 @@ def test_default_remote_selection(monkeypatch, tmp_path):
     other = _bare(tmp_path, "other", branch="main")
     _git(src, "remote", "add", "second", str(other))
     assert _run(monkeypatch, src, _short(pub)) == check.EXIT_CALLER
+    assert "name one with --remote" in capsys.readouterr().err
 
     _git(src, "remote", "rename", "only", "origin")
     assert _run(monkeypatch, src, _short(pub)) == check.EXIT_ALL_ON
+
+    # remote 가 하나도 없으면 "--remote 로 고르라" 는 실행 불가능한 조언이다. 그 상태는
+    # 대개 잘못된 저장소에서 실행한 것이므로 exit 2 는 맞고, 사유는 상태를 그대로 말한다.
+    _git(src, "remote", "remove", "origin")
+    _git(src, "remote", "remove", "second")
+    capsys.readouterr()
+    assert _run(monkeypatch, src, _short(pub)) == check.EXIT_CALLER
+    err = capsys.readouterr().err
+    assert "no remote is registered" in err
+    assert "name one with --remote" not in err
 
 
 def test_unregistered_remote_name_is_caller_error_not_undecided(

@@ -214,6 +214,8 @@ def _resolve_remote(requested: str | None) -> str:
     if rc != 0:
         raise _Undecided("`git remote` failed")
     names = [line.strip() for line in out.splitlines() if line.strip()]
+    if not names:
+        raise _CallerError("no remote is registered in this repository")
     if requested is None:
         if len(names) == 1:
             return names[0]
