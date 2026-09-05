@@ -36,6 +36,7 @@ ENTRY_POINTS = {
     "answer_first_reminder": (True, "[answer-first-reminder]"),
     "commit_backstop": (True, "[commit-backstop]"),
     "commit_guard": (True, "[commit-guard]"),
+    "commit_publication": (True, "[commit-publication]"),
     "issue_duplicate_guard": (True, "[issue-duplicate-guard]"),
     "rules_checker": (False, "rules_checker:"),
 }
@@ -45,9 +46,13 @@ ENTRY_POINTS = {
 #
 # 뺄셈이 아니라 명시 목록이다 — 뺄셈으로 두면 새로 추가되는 진입점이 아무도
 # 판단하지 않은 관용을 물려받는다. 여기 없는 진입점은 부재가 곧 실패다.
+# commit_publication 은 commit_backstop 의 보고를 해석하는 도구이므로 그 훅과 함께
+# 제거된다. 디렉터리를 지우는 자식은 meta/README.md 의 행도 같이 지워야 한다
+# (check_inventory 가 양방향으로 검증한다).
 REMOVABLE = {
     "answer_first_reminder",
     "commit_backstop",
+    "commit_publication",
     "commit_guard",
     "issue_duplicate_guard",
 }

@@ -4,7 +4,7 @@
 
 This file is the **owner-facing inventory**: what the meta layer ships, how each piece engages, and how the owner invokes or overrides it. Its purpose is to keep that interface surface from being forgotten as it grows — so the tables below are verified mechanically by the rules checker, not maintained on trust.
 
-Cross-forge CI parity — the same `harness` job image on both forges, image Python matching `meta/.python-version`, command lists pinned to the canonical harness commands — is enforced mechanically by the `ci_contract` harness tests. Rules and harnesses are auto-discovered, so adding one usually needs no CI edit; but a harness that introduces a new external binary or network dependency changes the execution-environment contract — update the shared job image and re-verify with `cd meta/infra/gitlab && ./run.sh ./verify_ci.sh`. The `gitlab`-marked integration tests self-skip in CI and run only against that on-demand stack.
+Cross-forge CI parity — the same `harness` job image on both forges, image Python matching `meta/.python-version`, command lists pinned to the canonical harness commands — is enforced mechanically by the `ci_contract` harness tests. Rules and harnesses are auto-discovered, so adding one usually needs no CI edit; but a harness that introduces a new external binary or network dependency changes the execution-environment contract (`commit_publication` is the meta layer's first production network path, but its tests reach only local bare remotes and no CI step runs the tool, so the job image is unchanged) — update the shared job image and re-verify with `cd meta/infra/gitlab && ./run.sh ./verify_ci.sh`. The `gitlab`-marked integration tests self-skip in CI and run only against that on-demand stack.
 
 ## Format contract (machine-checked)
 
@@ -62,6 +62,7 @@ Python packages under `meta/harness/`, run as modules from the meta uv project.
 | name | engagement | owner interface | behavior |
 |---|---|---|---|
 | `rules_checker` | on demand, and on every CI run | `uv run --directory meta python -m harness.rules_checker` | Verifies that every rule is deployed as declared (for hook rules: the command matches the canonical fail-open wrapper), that harness hook commands pass the reverse wiring sweep, that the child template's import list matches root `CLAUDE.md`, and that this inventory matches reality. |
+| `commit_publication` | on demand, when a commit-backstop protected-branch report needs deciding | `uv run --directory meta python -m harness.commit_publication [--remote <name>] <sha>...` | Fetches the remote's `main`/`master` and reports, per listed SHA, whether it is on one of them as of that fetch. States facts only — it never labels a report a blind spot (a push between the report and the fetch is indistinguishable from an incomplete hook view) and never prescribes anything about history. Exit 4 = all on, 5 = at least one not on, 3 = undecided, 2 = caller error; there is no exit 0, because no result of it clears the hook's report. |
 
 ### Test-enforced harnesses
 
