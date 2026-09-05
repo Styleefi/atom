@@ -193,7 +193,9 @@ def test_unresolvable_sha_in_a_mixed_run_does_not_make_it_undecided(
     assert rc == check.EXIT_SOME_NOT_ON
     assert len(lines) == 2, out
     not_on_line, unjudged_line = lines
-    assert "1 of 3" in not_on_line and _short(local) in not_on_line
+    # 분모는 판정한 수(2)다. 나열한 수(3)를 쓰면 비교된 적 없는 SHA 까지 판정에 든 것처럼
+    # 읽혀, 그 SHA 가 on 이라고 오해하게 만든다.
+    assert "1 of 2 judged commits" in not_on_line and _short(local) in not_on_line
     assert "deadbeefdead" not in not_on_line
     assert "could not be judged" in unjudged_line and "deadbeefdead" in unjudged_line
 
@@ -342,6 +344,7 @@ def test_an_unjudged_sha_never_erases_the_not_on_shas(monkeypatch, capsys, tmp_p
     rc = _run(monkeypatch, src, _short(local), "deadbeefdead")
     lines = capsys.readouterr().out.splitlines()
     assert rc == check.EXIT_SOME_NOT_ON
+    assert "1 of 1 judged commits" in lines[0]
     assert _short(local) in lines[0], "the not-on SHA vanished from the report"
     assert "deadbeefdead" not in lines[0], "an unjudged SHA was listed as not on"
     assert "deadbeefdead" in lines[1], "the unjudgeable SHA was not named"
@@ -458,13 +461,20 @@ def test_unregistered_remote_name_is_caller_error_not_undecided(
 
 
 def test_malformed_sha_is_caller_error_and_unresolvable_is_undecided(
-    monkeypatch, tmp_path
+    monkeypatch, capsys, tmp_path
 ):
     # 형식 위반은 exit 2, 형식은 맞지만 이 저장소가 모르는 SHA 하나는 exit 3. not-on 이
     # 없으므로 5 가 아니다 — 미해석을 not-on 으로 읽는 구현은 여기서 5 를 낸다.
     src, pub, _ = _published(tmp_path)
     assert _run(monkeypatch, src, "zzzz") == check.EXIT_CALLER
+    capsys.readouterr()
     assert _run(monkeypatch, src, "deadbeefdead") == check.EXIT_UNDECIDED
+    # 판정한 것이 하나도 없으면 판정 집합에 대해 아무 주장도 하지 않는다. 공집합 위의
+    # "그중 미발행은 없다" 는 참이지만 면죄로 읽히고, exit 5 줄과 같은 문구를 담아
+    # 보고를 훑는 눈에 걸린다.
+    out = capsys.readouterr().out
+    assert "0 of 1 listed commits were judged" in out
+    assert "not on main/master" not in out
 
 
 def test_outside_a_repository_is_caller_error(monkeypatch, tmp_path):

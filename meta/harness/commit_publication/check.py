@@ -326,6 +326,7 @@ def _report(remote: str, shas: list[str], verdicts: dict[str, str | None]) -> in
         종료 코드.
     """
     unjudged = [s for s in shas if verdicts[s] not in (ON, NOT_ON)]
+    judged = [s for s in shas if verdicts[s] in (ON, NOT_ON)]
     not_on = [s for s in shas if verdicts[s] == NOT_ON]
 
     def _verb(n: int) -> str:
@@ -333,7 +334,7 @@ def _report(remote: str, shas: list[str], verdicts: dict[str, str | None]) -> in
 
     if not_on:
         print(
-            f"{TAG} {len(not_on)} of {len(shas)} listed commits {_verb(len(not_on))} "
+            f"{TAG} {len(not_on)} of {len(judged)} judged commits {_verb(len(not_on))} "
             f"not on main/master at {remote} as of this fetch: {' '.join(not_on)}"
         )
         if unjudged:
@@ -341,8 +342,8 @@ def _report(remote: str, shas: list[str], verdicts: dict[str, str | None]) -> in
         return EXIT_SOME_NOT_ON
     if unjudged:
         print(
-            f"{TAG} {len(shas) - len(unjudged)} of {len(shas)} listed commits were judged "
-            f"as of this fetch; none of those is not on main/master at {remote}."
+            f"{TAG} {len(judged)} of {len(shas)} listed commits were judged "
+            f"as of this fetch."
         )
         print(f"  {len(unjudged)} could not be judged: {' '.join(unjudged)}")
         return EXIT_UNDECIDED
