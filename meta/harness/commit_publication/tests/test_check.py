@@ -624,6 +624,101 @@ def test_the_runner_isolates_every_git_call(monkeypatch, tmp_path):
         assert call["timeout"] > 0
 
 
+def test_the_runner_separates_a_timeout_from_a_failure_to_run(monkeypatch):
+    """이음매는 두 실패를 **다른 rc**로, 그리고 **던지지 않고** 돌려준다.
+
+    rc 로 나눈 것은 취향이 아니다. `run_git` 이 대신 예외를 던지면 `judge` 안의
+    `merge-base` 호출도 던져서 `_check` 의 판정 컴프리헨션이 중단되고, 이미 확정된
+    not-on SHA 가 보고에서 사라진다 — PR #152 라운드 3 실측이며 그 성질은
+    `test_an_unjudged_sha_never_erases_the_not_on_shas` 가 지킨다. 다만 **그 테스트는
+    이 결정을 지키지 못한다**: rc 128 경로만 돌아서, `OSError` 에서만 던지는 설계를
+    그대로 통과시킨다(실측). 그래서 파수꾼은 여기다. 반환값 단언 자체가 "던지지
+    않는다"를 담고 있다.
+
+    두 값이 **서로 달라야** 하는 이유는 #153 이다. 뭉개면 호출부가 로컬 고장을 원격
+    탓으로 보고한다.
+    """
+    def _always_raise(exc):
+        def _run(_argv, **_kwargs):
+            raise exc
+        return _run
+
+    monkeypatch.setattr(
+        check.subprocess, "run",
+        _always_raise(subprocess.TimeoutExpired(cmd=["git"], timeout=1)),
+    )
+    assert check.run_git(["remote"], timeout=1) == (124, "")
+
+    # FileNotFoundError 는 OSError 의 하위 — PATH 에서 git 이 사라진 경우다.
+    monkeypatch.setattr(
+        check.subprocess, "run", _always_raise(FileNotFoundError("git"))
+    )
+    assert check.run_git(["remote"], timeout=1) == (127, "")
+
+
+# 사이트는 **argv 전체**에 대한 술어로 고른다(`f902cc7` 의 교훈: `args[0]` 로 고르면
+# 이름이 겹치는 자리가 한 칸으로 뭉친다).
+_SPAWN_SITES = {
+    "rev-parse": lambda a: a[:2] == ["rev-parse", "--is-shallow-repository"],
+    "remote": lambda a: a == ["remote"],
+    "ls-remote": lambda a: a[0] == "ls-remote",
+    "fetch": lambda a: a[0] == "fetch",
+    "merge-base": lambda a: a[:2] == ["merge-base", "--is-ancestor"],
+}
+
+# (주입 시작 자리, rc, 출력에 있어야 할 것, 출력에 없어야 할 것). 일곱 칸 모두 exit 3 이다 —
+# 이 변경은 lane 을 바꾸지 않고 **사유만** 바꾼다.
+_SPAWN_CELLS = (
+    ("rev-parse", 127, (), ("could not reach",)),
+    ("remote", 127, (), ("could not reach",)),
+    ("ls-remote", 127, ("git could not be run",), ("could not reach", "origin")),
+    ("ls-remote", 124, ("could not reach",), ("git could not be run",)),
+    ("fetch", 127, ("git could not be run",), ("the fetch from", "origin")),
+    ("fetch", 124, ("the fetch from",), ("git could not be run",)),
+    ("merge-base", 127, (), ("not on main/master",)),
+)
+
+
+@pytest.mark.parametrize("site,rc,present,absent", _SPAWN_CELLS,
+                         ids=lambda v: str(v).replace(" ", "")[:28])
+def test_a_local_git_failure_is_never_reported_as_a_remote_one(
+    monkeypatch, capsys, tmp_path, site: str, rc: int, present, absent
+):
+    """spawn 실패(127)는 **어느 자리에서도** 원격을 탓하는 사유를 내지 않는다.
+
+    불변식이 자리를 가리지 않으므로 호출 자리 다섯을 전부 돈다. `_tips`·`_fetch` 두
+    자리만 127 을 매핑하지만, 나머지 셋도 이미 로컬을 가리키고 있다는 것이 결정 2이고
+    산문으로만 붙들려 있었다 — 여기서 기계로 옮긴다.
+
+    **124 대조군이 없으면 안 된다.** 127 에서 로컬 사유가 '나온다'만 보면
+    `rc in (127, 124)` 로 넓히는 변이가 통과하고, 그러면 진짜 타임아웃이 로컬 실패로
+    보고돼 #153 의 거울상이 된다. 사유가 갈리는 두 네트워크 자리는 양쪽을 함께 돈다.
+
+    `merge-base` 칸은 새 값이 판정 lane 을 바꾸지 않음을 적는다. `rcs == {1}` 을
+    `rcs <= {1, 127}` 로 넓히면 spawn 실패가 exit 5 + not-on 으로 렌더되고,
+    `commit-backstop.md` 의 복구 절은 그 판정을 받은 오너를 보호 브랜치 되감기로 보낸다.
+    """
+    src, _pub, local = _published(tmp_path)
+    real = check.run_git
+    hit = {"on": False}
+
+    def _injected(args, **kwargs):
+        if _SPAWN_SITES[site](args):
+            hit["on"] = True
+        return (rc, "") if hit["on"] else real(args, **kwargs)
+
+    monkeypatch.setattr(check, "run_git", _injected)
+    exit_code = _run(monkeypatch, src, _short(local))
+    out = capsys.readouterr().out
+
+    assert hit["on"], f"the {site} call site was never reached"
+    assert exit_code == check.EXIT_UNDECIDED
+    for text in present:
+        assert text in out, f"{text!r} missing from: {out!r}"
+    for text in absent:
+        assert text not in out, f"{text!r} should not appear in: {out!r}"
+
+
 def test_the_command_is_not_copied_into_always_loaded_context() -> None:
     # 이 도구의 명령은 규칙 파일과 meta/README.md 에만 산다. rules_checker 는
     # @meta/rules/ import 만 동기 검증하므로 CLAUDE.md·템플릿의 사본은 아무도 감시하지
