@@ -463,6 +463,22 @@ def test_outside_a_repository_is_caller_error(monkeypatch, tmp_path):
     assert _run(monkeypatch, plain, "deadbeefdead") == check.EXIT_CALLER
 
 
+def test_local_branches_head_and_fetch_head_are_untouched(monkeypatch, tmp_path):
+    # 도구가 갱신하는 ref 는 refspec 이 일치하는 추적 ref 뿐이다. FETCH_HEAD 는 읽지도 않으면서
+    # 덮어쓰기만 했었고, 오너가 `git fetch origin x` 뒤 `git merge FETCH_HEAD` 를 하려던
+    # 참이면 엉뚱한 커밋을 머지하게 만든다. 심어 둔 값이 그대로 남아야 한다.
+    src, pub, _ = _published(tmp_path)
+    fetch_head = src / ".git" / "FETCH_HEAD"
+    sentinel = f"{pub}\t\tbranch 'someone-elses' of somewhere\n"
+    fetch_head.write_text(sentinel, encoding="utf-8")
+
+    before = _git(src, "for-each-ref", "refs/heads/"), _git(src, "rev-parse", "HEAD")
+    _run(monkeypatch, src, _short(pub))
+    after = _git(src, "for-each-ref", "refs/heads/"), _git(src, "rev-parse", "HEAD")
+    assert before == after
+    assert fetch_head.read_text(encoding="utf-8") == sentinel
+
+
 # --------------------------------------------------------------------------
 # 러너·규칙·진입점
 # --------------------------------------------------------------------------

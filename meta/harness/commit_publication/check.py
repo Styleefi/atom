@@ -28,7 +28,9 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
     - fetch는 설정된 refspec이 일치하면 추적 ref를 forced 갱신하므로 되감을 수도 있고,
       그러면 훅이 전에 제외하던 커밋을 새로 보고하거나 유예된 판정이 push 없이 녹을 수
       있다. `--single-branch` 클론에서는 일치하는 refspec이 없어 아무 ref도 만들지
-      않는다. FETCH_HEAD는 쓴다.
+      않는다.
+    - `--no-write-fetch-head`는 git 2.29 이상을 요구한다. 그 미만에서는 fetch가 미지 옵션으로
+      실패해 exit 3이 된다.
     - 판정 대상은 프로세스 cwd가 속한 저장소다. 규칙이 인용하는 `uv run --directory meta ...`는
       cwd를 `meta/`로 바꾸므로 `meta/`를 담은 저장소를 본다. 다른 저장소(서브모듈 등)의
       보고는 범위 밖이다 — 선언된 경계. 불변식: 이 도구는 cwd가 속한 저장소의 원격에
@@ -259,6 +261,10 @@ def _tips(remote: str) -> dict[str, str]:
 def _fetch(remote: str, names: list[str]) -> None:
     """보호명 브랜치의 객체를 한 번 받아온다. 실패하면 아무것도 판정하지 않는다.
 
+    `--no-write-fetch-head`: 도구는 FETCH_HEAD를 읽지 않으므로 쓰지도 않는다. 오너가
+    `git fetch origin x` 뒤 `git merge FETCH_HEAD`를 하려던 참이면 덮어쓴 값이 엉뚱한
+    머지가 된다.
+
     Args:
         remote: 등록된 remote 이름.
         names: ls-remote가 존재를 확인한 브랜치 이름들.
@@ -267,7 +273,10 @@ def _fetch(remote: str, names: list[str]) -> None:
         _Undecided: fetch가 0이 아닌 코드로 끝났을 때.
     """
     refs = [f"refs/heads/{name}" for name in names]
-    rc, _ = run_git(["fetch", "--no-tags", remote, *refs], timeout=NETWORK_TIMEOUT_SECONDS)
+    rc, _ = run_git(
+        ["fetch", "--no-tags", "--no-write-fetch-head", remote, *refs],
+        timeout=NETWORK_TIMEOUT_SECONDS,
+    )
     if rc != 0:
         raise _Undecided("the fetch failed")
 
