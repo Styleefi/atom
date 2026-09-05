@@ -8,6 +8,7 @@ bare remote(필요하면 `file://`)를 만들어 검증한다.
 
 from __future__ import annotations
 
+import ast
 import itertools
 import os
 import re
@@ -625,19 +626,7 @@ def test_the_runner_isolates_every_git_call(monkeypatch, tmp_path):
 
 
 def test_the_runner_separates_a_timeout_from_a_failure_to_run(monkeypatch):
-    """이음매는 두 실패를 **다른 rc**로, 그리고 **던지지 않고** 돌려준다.
-
-    rc 로 나눈 것은 취향이 아니다. `run_git` 이 대신 예외를 던지면 `judge` 안의
-    `merge-base` 호출도 던져서 `_check` 의 판정 컴프리헨션이 중단되고, 이미 확정된
-    not-on SHA 가 보고에서 사라진다 — PR #152 라운드 3 실측이며 그 성질은
-    `test_an_unjudged_sha_never_erases_the_not_on_shas` 가 지킨다. 다만 **그 테스트는
-    이 결정을 지키지 못한다**: rc 128 경로만 돌아서, `OSError` 에서만 던지는 설계를
-    그대로 통과시킨다(실측). 그래서 파수꾼은 여기다. 반환값 단언 자체가 "던지지
-    않는다"를 담고 있다.
-
-    두 값이 **서로 달라야** 하는 이유는 #153 이다. 뭉개면 호출부가 로컬 고장을 원격
-    탓으로 보고한다.
-    """
+    """`run_git` 은 타임아웃에 124, 실행 실패에 127 을 **돌려준다** — 던지지 않는다."""
     def _always_raise(exc):
         def _run(_argv, **_kwargs):
             raise exc
@@ -649,15 +638,13 @@ def test_the_runner_separates_a_timeout_from_a_failure_to_run(monkeypatch):
     )
     assert check.run_git(["remote"], timeout=1) == (124, "")
 
-    # FileNotFoundError 는 OSError 의 하위 — PATH 에서 git 이 사라진 경우다.
     monkeypatch.setattr(
         check.subprocess, "run", _always_raise(FileNotFoundError("git"))
     )
     assert check.run_git(["remote"], timeout=1) == (127, "")
 
 
-# 사이트는 **argv 전체**에 대한 술어로 고른다(`f902cc7` 의 교훈: `args[0]` 로 고르면
-# 이름이 겹치는 자리가 한 칸으로 뭉친다).
+# 호출 자리 술어. `check.py` 의 `run_git` 호출 노드와 일대일이어야 한다(아래 테스트가 잰다).
 _SPAWN_SITES = {
     "rev-parse": lambda a: a[:2] == ["rev-parse", "--is-shallow-repository"],
     "remote": lambda a: a == ["remote"],
@@ -666,17 +653,85 @@ _SPAWN_SITES = {
     "merge-base": lambda a: a[:2] == ["merge-base", "--is-ancestor"],
 }
 
-# (주입 시작 자리, rc, 출력에 있어야 할 것, 출력에 없어야 할 것). 일곱 칸 모두 exit 3 이다 —
-# 이 변경은 lane 을 바꾸지 않고 **사유만** 바꾼다.
+# (주입 시작 자리, rc, 있어야 할 것, 없어야 할 것). 뒤의 두 열은 124 칸만 쓴다 — 127 칸은
+# `_SPAWN_REASONS` 와 `_REMOTE_PHRASES` 로 본다.
 _SPAWN_CELLS = (
-    ("rev-parse", 127, (), ("could not reach",)),
-    ("remote", 127, (), ("could not reach",)),
-    ("ls-remote", 127, ("git could not be run",), ("could not reach", "origin")),
+    ("rev-parse", 127, (), ()),
+    ("remote", 127, (), ()),
+    ("ls-remote", 127, (), ()),
     ("ls-remote", 124, ("could not reach",), ("git could not be run",)),
-    ("fetch", 127, ("git could not be run",), ("the fetch from", "origin")),
+    ("fetch", 127, (), ()),
     ("fetch", 124, ("the fetch from",), ("git could not be run",)),
-    ("merge-base", 127, (), ("not on main/master",)),
+    ("merge-base", 127, (), ()),
 )
+
+# 사유 경로 127 칸의 사유. 여기 없는 자리는 `_report` 경로로 본다.
+_SPAWN_REASONS = {
+    "rev-parse": "git did not answer when asked about this repository",
+    "remote": "`git remote` failed",
+    "ls-remote": "git could not be run",
+    "fetch": "git could not be run",
+}
+
+# 이 모듈이 원격을 가리킬 때 쓰는 문구(`55c53dd`). 127 칸의 stdout 어디에도 없어야 한다.
+_REMOTE_PHRASES = ("could not reach", "the fetch from", "has neither main nor master")
+
+
+def _run_git_call_sites() -> list[tuple[str, list[str]]]:
+    """소스에서 `run_git` 이라는 이름으로 호출된 노드마다 (위치, argv 리터럴 접두)를 낸다.
+
+    argv 는 첫 위치 인자 또는 `args=` 키워드에서 읽는다. 리스트 리터럴이 아니면 접두는 빈
+    리스트이고, 그 자리도 목록에 남는다.
+    """
+    package = Path(check.__file__).resolve().parent
+    sites: list[tuple[str, list[str]]] = []
+    for path in sorted(package.rglob("*.py")):
+        if "tests" in path.relative_to(package).parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            if name != "run_git":
+                continue
+            argv = node.args[0] if node.args else next(
+                (kw.value for kw in node.keywords if kw.arg == "args"), None
+            )
+            prefix: list[str] = []
+            if isinstance(argv, ast.List):
+                for element in argv.elts:
+                    if isinstance(element, ast.Constant) and isinstance(element.value, str):
+                        prefix.append(element.value)
+                    else:
+                        break
+            where = f"{path.name}:{node.lineno}:{node.col_offset}"
+            sites.append((where, prefix))
+    return sites
+
+
+def test_every_run_git_call_site_has_exactly_one_cell_in_the_table() -> None:
+    """`run_git` 호출 노드 ↔ `_SPAWN_SITES` 술어 ↔ 127 칸이 일대일이다."""
+    sites = _run_git_call_sites()
+    assert sites, "no run_git call site was found in the package source"
+
+    covered: dict[str, list[str]] = {name: [] for name in _SPAWN_SITES}
+    for where, prefix in sites:
+        matched = [n for n, pred in _SPAWN_SITES.items() if prefix and pred(prefix)]
+        assert len(matched) == 1, f"{where} argv={prefix} matched {matched}"
+        covered[matched[0]].append(where)
+
+    for name, wheres in covered.items():
+        assert len(wheres) == 1, f"{name} covers {len(wheres)} call sites: {wheres}"
+
+    cells_with_127 = {site for site, rc, _p, _a in _SPAWN_CELLS if rc == 127}
+    assert cells_with_127 == set(_SPAWN_SITES), (
+        f"predicates without a 127 cell: {set(_SPAWN_SITES) - cells_with_127}"
+    )
+    assert set(_SPAWN_REASONS) <= set(_SPAWN_SITES), (
+        f"reasons for sites that do not exist: {set(_SPAWN_REASONS) - set(_SPAWN_SITES)}"
+    )
 
 
 @pytest.mark.parametrize("site,rc,present,absent", _SPAWN_CELLS,
@@ -684,19 +739,9 @@ _SPAWN_CELLS = (
 def test_a_local_git_failure_is_never_reported_as_a_remote_one(
     monkeypatch, capsys, tmp_path, site: str, rc: int, present, absent
 ):
-    """spawn 실패(127)는 **어느 자리에서도** 원격을 탓하는 사유를 내지 않는다.
+    """127 칸의 stdout 은 원격 문구도 remote 이름도 담지 않고 기대 문자열과 같다.
 
-    불변식이 자리를 가리지 않으므로 호출 자리 다섯을 전부 돈다. `_tips`·`_fetch` 두
-    자리만 127 을 매핑하지만, 나머지 셋도 이미 로컬을 가리키고 있다는 것이 결정 2이고
-    산문으로만 붙들려 있었다 — 여기서 기계로 옮긴다.
-
-    **124 대조군이 없으면 안 된다.** 127 에서 로컬 사유가 '나온다'만 보면
-    `rc in (127, 124)` 로 넓히는 변이가 통과하고, 그러면 진짜 타임아웃이 로컬 실패로
-    보고돼 #153 의 거울상이 된다. 사유가 갈리는 두 네트워크 자리는 양쪽을 함께 돈다.
-
-    `merge-base` 칸은 새 값이 판정 lane 을 바꾸지 않음을 적는다. `rcs == {1}` 을
-    `rcs <= {1, 127}` 로 넓히면 spawn 실패가 exit 5 + not-on 으로 렌더되고,
-    `commit-backstop.md` 의 복구 절은 그 판정을 받은 오너를 보호 브랜치 되감기로 보낸다.
+    124 칸은 대조군이다 — 타임아웃은 원격 사유를 유지해야 한다.
     """
     src, _pub, local = _published(tmp_path)
     real = check.run_git
@@ -709,10 +754,30 @@ def test_a_local_git_failure_is_never_reported_as_a_remote_one(
 
     monkeypatch.setattr(check, "run_git", _injected)
     exit_code = _run(monkeypatch, src, _short(local))
-    out = capsys.readouterr().out
+    out, err = capsys.readouterr()
 
     assert hit["on"], f"the {site} call site was never reached"
     assert exit_code == check.EXIT_UNDECIDED
+    if rc == 127:
+        # 경로는 칸으로 정한다. 판정 줄은 remote 이름을 담는 것이 옳으므로 이름 검사는
+        # 사유 경로에만 건다. (remote 이름이 사유의 낱말과 겹치면 오탐한다 — 픽스처는 `origin`.)
+        remotes = _git(src, "remote").splitlines()
+        if site in _SPAWN_REASONS:
+            expected = f"{check.TAG} undecided: {_SPAWN_REASONS[site]}; nothing was compared\n"
+            for name in remotes:
+                assert not re.search(rf"\b{re.escape(name)}\b", out), (
+                    f"a spawn-failure reason named the remote {name!r}: {out!r}"
+                )
+        else:
+            expected = (
+                f"{check.TAG} 0 of 1 listed commits were judged against main/master "
+                f"at {remotes[0]} as of this run.\n"
+                f"  1 could not be judged: {_short(local)}\n"
+            )
+        for phrase in _REMOTE_PHRASES:
+            assert phrase not in out, f"a spawn failure blamed the remote: {out!r}"
+        assert out == expected, f"spawn-failure output drifted:\n{out!r}\n!=\n{expected!r}"
+        assert err == "", f"a spawn failure wrote to stderr: {err!r}"
     for text in present:
         assert text in out, f"{text!r} missing from: {out!r}"
     for text in absent:
