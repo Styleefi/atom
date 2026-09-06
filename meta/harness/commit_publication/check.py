@@ -40,6 +40,11 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
     - 도구 자신의 타임아웃은 git을 SIGKILL로 끝낸다. 그때 전송 프로세스(remote helper·ssh)는
       원격 연결이 닫힐 때까지 남을 수 있다.
     - 호출자가 도구를 죽이면 git 자식 프로세스의 정리는 보장하지 않는다.
+    - `subprocess.run`이 내는 `OSError`를 하위 타입으로 가르지 않고 전부 "git을 실행하지
+      못했다"로 읽는다 — 선언된 경계. 불변식: 소스에 `run_git`이라는 이름이 나타나는 호출
+      자리에서 그 실패가 사유를 낼 때, 사유는 원격의 이름을 담지 않는다. 실패 방향: 파이프 IO
+      오류처럼 git이 실제로 떴던 경우에도 같은 사유를 내므로 그때 문구는 엄밀히 거짓이다.
+      인용: 오너 결정 2026-09-05, PR #154.
     - 카운트는 argv 항목 기준이다. 같은 커밋을 두 번 넘기면 둘로 센다.
     - 자식 프로젝트가 이 하네스를 제거하면 규칙 인용도 함께 제거해야 한다.
 
@@ -122,7 +127,9 @@ def run_git(args: list[str], *, timeout: int) -> tuple[int, str]:
         timeout: 초 단위 상한.
 
     Returns:
-        `(rc, stdout)`. 타임아웃과 실행 실패는 rc 124로 돌려준다(git이 내지 않는 값).
+        `(rc, stdout)`. 타임아웃은 rc 124, 실행 실패는 rc 127로 돌려준다 — 둘 다 git이
+        내지 않는 값이고, **서로 달라야 한다.** 뭉개면 호출부가 "원격이 답하지 않았다"와
+        "git이 돌지도 않았다"를 구분할 수 없어 로컬 고장을 원격 탓으로 보고한다(#153).
     """
     try:
         proc = subprocess.run(
@@ -141,8 +148,10 @@ def run_git(args: list[str], *, timeout: int) -> tuple[int, str]:
             },
             timeout=timeout,
         )
-    except (subprocess.TimeoutExpired, OSError):
+    except subprocess.TimeoutExpired:
         return 124, ""
+    except OSError:
+        return 127, ""
     return proc.returncode, proc.stdout
 
 
@@ -243,10 +252,12 @@ def _tips(remote: str) -> dict[str, str]:
         `{브랜치 이름: tip SHA}`. 존재하는 브랜치만 담기며 비어 있지 않다.
 
     Raises:
-        _Undecided: 접속 실패, 또는 main·master가 둘 다 없을 때.
+        _Undecided: git을 실행하지 못했을 때, 접속 실패, 또는 main·master가 둘 다 없을 때.
     """
     patterns = [f"refs/heads/{name}" for name in PROTECTED_BRANCHES]
     rc, out = run_git(["ls-remote", remote, *patterns], timeout=NETWORK_TIMEOUT_SECONDS)
+    if rc == 127:
+        raise _Undecided("git could not be run")
     if rc != 0:
         raise _Undecided(f"could not reach {remote}")
     tips: dict[str, str] = {}
@@ -275,13 +286,15 @@ def _fetch(remote: str, names: list[str]) -> None:
         names: ls-remote가 존재를 확인한 브랜치 이름들.
 
     Raises:
-        _Undecided: fetch가 0이 아닌 코드로 끝났을 때.
+        _Undecided: git을 실행하지 못했거나, fetch가 0이 아닌 코드로 끝났을 때.
     """
     refs = [f"refs/heads/{name}" for name in names]
     rc, _ = run_git(
         ["fetch", "--no-tags", "--no-write-fetch-head", remote, *refs],
         timeout=NETWORK_TIMEOUT_SECONDS,
     )
+    if rc == 127:
+        raise _Undecided("git could not be run")
     if rc != 0:
         raise _Undecided(f"the fetch from {remote} failed")
 
@@ -290,7 +303,8 @@ def judge(sha: str, tips: dict[str, str]) -> str | None:
     """SHA 하나를 tip들에 대해 판정한다.
 
     **있다**는 어느 tip에서든 조상이면 확정이다. **없다**는 전칭 명제라 모든 tip이 rc 1로
-    답해야 성립한다. 그 밖의 rc(128 = 미지 SHA·모호한 축약·미도착 tip, 124 = 타임아웃)는
+    답해야 성립한다. 그 밖의 rc(128 = 미지 SHA·모호한 축약·미도착 tip, 124 = 타임아웃,
+    127 = git 실행 실패)는
     판정 불가다 — 그것을 "없다"로 읽는 것이 산문 시절부터의 함정이었다.
 
     Args:
@@ -376,9 +390,9 @@ def _check(argv: list[str]) -> int:
         print(_USAGE, file=sys.stderr)
         return EXIT_CALLER
     except _Undecided as exc:
-        # remote 가 관련된 사유는 그 이름을 사유 안에 담는다 — 이 줄은 판정을 싣지 않지만,
+        # 원격에 대한 사유는 그 이름을 사유 안에 담는다 — 이 줄은 판정을 싣지 않지만,
         # 보고를 이슈에 붙였을 때 어느 원격에서 막혔는지가 다음 행동을 가른다. 이름이 없는
-        # 사유(얕은 클론 등)는 로컬 저장소에 대한 것이라 담을 이름이 없다.
+        # 사유는 로컬에 대한 것이다 — 원격 대면 자리에서 난 spawn 실패도 그렇다(#153).
         print(f"{TAG} undecided: {exc.reason}; nothing was compared")
         return EXIT_UNDECIDED
     return _report(remote, shas, verdicts)
