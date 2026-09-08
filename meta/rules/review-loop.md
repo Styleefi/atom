@@ -216,7 +216,12 @@ state, in its own terms; the failure direction there (the artifact
 over-acts, under-acts, or stays silent); and, last, a citation of the
 accepting decision (PR or issue link) — and not, within that declaration, as
 a list of the triggers that reach the state or of the outcome per branch
-(Origin: #125; PR #126 round 2). Later findings of the class close at triage
+(Origin: #125; PR #126 round 2). That declaration is authored once, through
+the Rounds section's attack, then frozen: a later finding against its failure
+direction is closed by deleting the clause, never by rewriting — the
+declaration stays in force with the clause gone; a later finding against its
+invariant or its citation, or an attack that falsifies either, returns the
+boundary to the owner. Later findings of the class close at triage
 on the Ledger section's terms only when that citation is present; new
 evidence makes them normal findings again. (PR #86 chased one class down
 four layers — regex boundary → token → shell control flow → YAML
