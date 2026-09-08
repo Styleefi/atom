@@ -148,9 +148,11 @@ One ledger comment per PR, created before round 1 and updated every round.
 It is the loop's single source of truth — a later session resumes from it
 alone. It records: the bar declaration; the review procedure in use
 (changing it needs owner approval, recorded here); per round, the verified
-findings → matched class → assigned lane, the above-bar count, and the class
-names each fix addresses; owner-accepted trade-offs (one-line rationale,
-recorded at decision time); links to filed issues.
+findings → matched class → assigned lane, the above-bar count, the class
+names each fix addresses, and per commit the attacking model, whether the
+message was attacked, and the sentences falsified, each with its disposal;
+owner-accepted trade-offs (one-line rationale, recorded at decision time);
+links to filed issues.
 
 Trade-off acceptance is the owner's decision — the agent only proposes. A
 finding matching a recorded trade-off is closed at triage (not counted, not
