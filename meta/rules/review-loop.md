@@ -116,19 +116,31 @@ loop, never the owner.
 - A fix commit stays within every declared bound, each per its own wording;
   a fix that cannot is remade, or the bound is relaxed with owner approval.
   (Origin: #113.)
-- A commit in this loop that writes or rewrites a declarative sentence
-  commits no such sentence the diff changes — including one written in place
-  of a falsified claim — until a reviewer that did not write it has tried
-  and failed to falsify it: against what it describes, or, for a sentence
+- A commit in this loop may delete a declarative sentence or its overclaiming
+  clause, relocate one verbatim, or rename an identifier. It authors or
+  rewrites a declarative sentence — including one written in place of a
+  falsified claim — only after a fresh-context subagent (not a fork; given the
+  diff, the files it touches and the commit message, never the session's
+  framing) has tried and failed to falsify the exact working-tree text and
+  message body to be committed: against what it describes, or, for a sentence
   that requires something, by a situation in which following it leaves no
-  compliant action or two different ones. What the attempt falsifies is
-  disposed of per the next bullet. (Origin: #125; PR #126 round 2.)
+  compliant action or two different ones. What the attack falsifies is
+  disposed of per the next bullet; a replacement is attacked once more, and
+  one falsified then is deleted, not rewritten — two attacks per commit at
+  most. (Origin: #125; #139.)
 - A prose claim falsified in this loop — by a finding fixed in this PR or by
-  the attempt above — is deleted (whole, or its overclaiming clause) or
-  moved to where it is held (a test, a constant, the one place that already
-  states it); it is not kept by adding a qualifier. Text written in its
-  place or at a move's destination — not the falsified claim under a
-  condition — is new text under the bullet above. (Origin: #125.)
+  the attack above — is deleted (whole, or its overclaiming clause) or moved
+  to where it is held (a test, a constant, the one place that already states
+  it); it is not kept by adding a qualifier. Text written in its place or at a
+  move's destination — not the falsified claim under a condition — is a new
+  sentence, authored only through the bullet above. (Origin: #125.)
+- Every commit the agent makes in this loop — fix, fold, revert or amend —
+  carries two git trailers, `Review-loop: PR #<n> round <k>` and `Prose: none`
+  or `Prose: <n> new; attacked [twice] by fresh <model> subagent; <m>
+  falsified` — `none` when no attack ran; `<n>` counts diff sentences only. A
+  commit missing either, or authoring a diff sentence no attack covered, is a
+  self-violation the next pass records; an unattacked sentence is deleted
+  there, not fixed.
 
 ## Ledger
 
