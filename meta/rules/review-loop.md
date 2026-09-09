@@ -88,7 +88,8 @@ loop, never the owner.
   current scope. A pass whose above-bar findings get fixed is a fix round —
   one round no matter how many commits the fix splits into. A pass with zero
   above-bar findings is the exit observation; there is no separate ceremony.
-- Scope: every pass reviews the full PR diff.
+- Scope: every pass reviews the PR — its diff, its title and body, and
+  its commits' messages.
 - Reviewers may read anything; a finding enters the loop iff its causal
   chain includes the new diff — including new code that triggers or exposes
   a latent defect ("the root cause is pre-existing" is not an exemption)
@@ -239,9 +240,10 @@ Exactly two endings:
    with the procedure recorded in the ledger, finds zero above-bar findings,
    with no unresolved borderline or pending-decision case and no above-bar
    backlog (including findings returned by a bar raise). The observation is
-   valid only if the reviewed HEAD is still the PR's HEAD when the pass
-   completes — any new commit, whoever pushed it, invalidates the
-   observation (not the pass) and requires a new pass. Below-bar findings
+   valid only if the HEAD, title and body the pass reviewed are still the
+   PR's when the pass completes — any new commit, whoever pushed it, or any
+   edit to the title or body, invalidates the observation (not the pass)
+   and requires a new pass. Below-bar findings
    from this pass are filed or recorded in the ledger per Triage lanes,
    then the loop ends.
 2. **Owner decision** — at any point, typically in response to a checkpoint
