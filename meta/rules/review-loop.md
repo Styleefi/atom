@@ -92,12 +92,11 @@ loop, never the owner.
 - Reviewers may read anything; a finding enters the loop iff its causal
   chain includes the new diff — including new code that triggers or exposes
   a latent defect ("the root cause is pre-existing" is not an exemption)
-  and a sentence the new diff leaves untouched and makes false.
-  Whether a fix commit actually removed its target finding is always in
-  scope for the next pass. Defects unrelated to the new diff do not block
-  this PR and are never fixed in it: one worth fixing per the Triage lanes'
-  first question is filed as an issue immediately, even an above-bar-grade
-  one.
+  and a sentence the new diff leaves untouched and makes false. Whether a
+  fix commit actually removed its target finding is always in scope for the
+  next pass. Defects unrelated to the new diff do not block this PR and are
+  never fixed in it: one worth fixing per the Triage lanes' first question
+  is filed as an issue immediately, even an above-bar-grade one.
 - A fix that changes a documented behavior or semantic — or the wording
   that describes one — must, in the same commit, align every live copy
   of that description repo-wide. The sweep is a grep, not a full read:
@@ -213,12 +212,11 @@ direction is closed by deleting the clause, never by rewriting — the
 declaration stays in force with the clause gone; a later finding against its
 invariant or its citation, or an attack that falsifies either, stops the loop
 before its next fix commit and returns the boundary to the owner. Later
-findings of the class close at triage
-on the Ledger section's terms only when that citation is present; new
-evidence makes them normal findings again. (PR #86 chased one class down
-four layers — regex boundary → token → shell control flow → YAML
-conditionals — and closed it only this way.) The trigger mandates the
-diagnosis, never a particular remedy.
+findings of the class close at triage on the Ledger section's terms only when
+that citation is present; new evidence makes them normal findings again. (PR
+#86 chased one class down four layers — regex boundary → token → shell control
+flow → YAML conditionals — and closed it only this way.) The trigger mandates
+the diagnosis, never a particular remedy.
 
 ## Checkpoint
 
