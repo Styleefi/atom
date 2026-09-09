@@ -88,11 +88,7 @@ loop, never the owner.
   current scope. A pass whose above-bar findings get fixed is a fix round —
   one round no matter how many commits the fix splits into. A pass with zero
   above-bar findings is the exit observation; there is no separate ceremony.
-- Scope: round 1 reviews the full PR diff; round N reviews the diff since
-  the HEAD of the last completed pass. A completed pass moves this baseline
-  even when its exit observation was invalidated; an interrupted pass does
-  not. After a rebase or force-push, the next pass reviews the full PR diff
-  again (round and checkpoint counters keep running).
+- Scope: every pass reviews the full PR diff.
 - Reviewers may read anything; a finding enters the loop iff its causal
   chain includes the new diff — including new code that triggers or exposes
   a latent defect ("the root cause is pre-existing" is not an exemption).
@@ -186,11 +182,7 @@ job.
 Stop before the next fix commit and escalate to the owner when either:
 
 - **(a) quantity** — a fix round's above-bar count does not decrease versus
-  the previous comparable fix round. A comparison is valid only when the
-  round's scope is equal to or narrower than its predecessor's; a
-  scope-widening round (post-rebase full diff, resumption after a revert)
-  restarts the comparison instead of being judged by it. Findings returned
-  by a bar raise do not count here.
+  the previous fix round. Findings returned by a bar raise do not count here.
 - **(b) recurrence** — a defect class recorded as fixed in the ledger is
   found again in a later round.
 
