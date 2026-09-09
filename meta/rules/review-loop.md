@@ -91,7 +91,8 @@ loop, never the owner.
 - Scope: every pass reviews the full PR diff.
 - Reviewers may read anything; a finding enters the loop iff its causal
   chain includes the new diff — including new code that triggers or exposes
-  a latent defect ("the root cause is pre-existing" is not an exemption).
+  a latent defect ("the root cause is pre-existing" is not an exemption)
+  and a sentence the new diff leaves untouched and makes false.
   Whether a fix commit actually removed its target finding is always in
   scope for the next pass. Defects unrelated to the new diff do not block
   this PR and are never fixed in it: one worth fixing per the Triage lanes'
