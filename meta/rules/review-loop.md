@@ -17,12 +17,11 @@ comment there.)
 
 ## Scope
 
-Applies to every PR review loop — any review whose findings lead to fix
-commits on the PR, regardless of review method (multi-agent or single
-reviewer). One loop per PR at a time. The loop's review procedure must
-include a verification step; "verified" below means a finding passed it
-(test reproduction is not required). This rule binds the agent running the
-loop, never the owner.
+Applies to every PR review loop — any review whose findings lead to fixes on
+the PR, regardless of review method (multi-agent or single reviewer). One loop
+per PR at a time. The loop's review procedure must include a verification
+step; "verified" below means a finding passed it (test reproduction is not
+required). This rule binds the agent running the loop, never the owner.
 
 ## Severity bar
 
@@ -79,14 +78,15 @@ loop, never the owner.
   divergence count). Lowering the bar, or relaxing a declared bound,
   requires owner approval. Uncertain matches escalate to the owner.
 - If a review ran before any declaration, that pass counts retroactively as
-  round 1, but the bar and ledger must exist before the first fix commit,
-  with round 1's records back-filled.
+  round 1, but the bar and ledger must exist before the first fix, with round
+  1's records back-filled.
 
 ## Rounds
 
 - A round = one review pass (discovery → verification → triage) over the
-  current scope. A pass whose above-bar findings get fixed is a fix round —
-  one round no matter how many commits the fix splits into. A pass with zero
+  current scope. A fix may be a commit or an edit the agent makes to the
+  PR title or body. A pass whose above-bar findings get fixed is a fix
+  round — one round no matter how many fixes it takes. A pass with zero
   above-bar findings is the exit observation; there is no separate ceremony.
 - Scope: every pass reviews the PR — its diff, its title and body, and
   its commits' messages.
@@ -109,7 +109,7 @@ loop, never the owner.
   sibling copy is a recurrence waiting to happen. (Measured: PR #86
   fixed one README line while a second copy in the same file returned as
   the next round's finding.)
-- A fix commit stays within every declared bound, each per its own wording;
+- A fix stays within every declared bound, each per its own wording;
   a fix that cannot is remade, or the bound is relaxed with owner approval.
   (Origin: #113.)
 - A commit in this loop may delete a sentence or its overclaiming clause,
@@ -121,7 +121,7 @@ loop, never the owner.
   something, by a situation in which following it leaves no compliant action
   or two different ones. What the attack falsifies is disposed of per the next
   bullet; a replacement is attacked once more, and one falsified then is
-  deleted, not rewritten — two attacks per commit at most. Text the agent
+  deleted, not rewritten — two attacks per fix at most. Text the agent
   writes into the PR title or body in this loop passes the same attack
   before it is posted. (Origin: #125; #139.)
 - A prose claim falsified in this loop — by a finding fixed in this PR or by
@@ -181,7 +181,7 @@ job.
 
 ## Divergence trigger
 
-Stop before the next fix commit and escalate to the owner when either:
+Stop before the next fix and escalate to the owner when either:
 
 - **(a) quantity** — a fix round's above-bar count does not decrease versus
   the previous fix round. Findings returned by a bar raise do not count here.
@@ -213,7 +213,7 @@ the Rounds section's attack, then frozen: a later finding against its failure
 direction is closed by deleting the clause, never by rewriting — the
 declaration stays in force with the clause gone; a later finding against its
 invariant or its citation, or an attack that falsifies either, stops the loop
-before its next fix commit and returns the boundary to the owner. Later
+before its next fix and returns the boundary to the owner. Later
 findings of the class close at triage on the Ledger section's terms only when
 that citation is present; new evidence makes them normal findings again. (PR
 #86 chased one class down four layers — regex boundary → token → shell control
@@ -222,30 +222,29 @@ the diagnosis, never a particular remedy.
 
 ## Checkpoint
 
-When a pass yields above-bar findings after three fix rounds have already
-run — it would start a fourth — stop before its first fix commit and report
-to the owner: the per-round
-above-bar trend, remaining above-bar findings, filed issues, rough cost so
-far, and the options — continue (optionally scoped, e.g. "fix these two and
-stop"), stop and file the residue, or rethink the fix altitude — with a
-recommendation. After a "continue", every subsequent fix round needs the
-same approval before its fixes begin. If the divergence trigger fires in the same round, merge
-both into one report.
+When a pass yields above-bar findings after three fix rounds have already run
+— it would start a fourth — stop before its first fix and report to the owner:
+the per-round above-bar trend, remaining above-bar findings, filed issues,
+rough cost so far, and the options — continue (optionally scoped, e.g. "fix
+these two and stop"), stop and file the residue, or rethink the fix altitude —
+with a recommendation. After a "continue", every subsequent fix round needs
+the same approval before its fixes begin. If the divergence trigger fires in
+the same round, merge both into one report.
 
 ## Ending the loop
 
 Exactly two endings:
 
-1. **Observed exit** — never declared. A pass scoped per the Rounds
-   section — so every fix commit has been covered by a completed pass — run
-   with the procedure recorded in the ledger, finds zero above-bar findings,
-   with no unresolved borderline or pending-decision case and no above-bar
-   backlog (including findings returned by a bar raise). The observation is
-   valid only if the HEAD, title and body the pass reviewed are still the
-   PR's when the pass completes — any new commit, whoever pushed it, or any
-   edit to the title or body, invalidates the observation (not the pass) and
-   requires a new pass. Below-bar findings from this pass are filed or
-   recorded in the ledger per Triage lanes, then the loop ends.
+1. **Observed exit** — never declared. A pass scoped per the Rounds section
+   — so every fix has been covered by a completed pass — run with the
+   procedure recorded in the ledger, finds zero above-bar findings, with no
+   unresolved borderline or pending-decision case and no above-bar backlog
+   (including findings returned by a bar raise). The observation is valid only
+   if the HEAD, title and body the pass reviewed are still the PR's when the
+   pass completes — any new commit, whoever pushed it, or any edit to the
+   title or body, invalidates the observation (not the pass) and requires a
+   new pass. Below-bar findings from this pass are filed or recorded in the
+   ledger per Triage lanes, then the loop ends.
 2. **Owner decision** — at any point, typically in response to a checkpoint
    or escalation report.
 
