@@ -91,12 +91,12 @@ loop, never the owner.
 - Scope: every pass reviews the PR — its diff, its title and body, and
   its commits' messages.
 - Reviewers may read anything; a finding enters the loop iff its causal
-  chain includes the new diff — including new code that triggers or exposes
-  a latent defect ("the root cause is pre-existing" is not an exemption)
-  and a sentence the new diff leaves untouched and makes false. Defects
-  unrelated to the new diff do not block this PR and are never fixed in it:
-  one worth fixing per the Triage lanes' first question is filed as an
-  issue immediately, even an above-bar-grade one.
+  chain includes the PR — including new code that triggers or exposes a
+  latent defect ("the root cause is pre-existing" is not an exemption) and
+  a sentence the PR's diff leaves untouched and makes false. Defects
+  unrelated to the PR do not block this PR and are never fixed in it: one
+  worth fixing per the Triage lanes' first question is filed as an issue
+  immediately, even an above-bar-grade one.
 - A fix that changes a documented behavior or semantic — or the wording
   that describes one — must, in the same commit, align every live copy
   of that description repo-wide. The sweep is a grep, not a full read:
@@ -168,7 +168,7 @@ comment bundled into a PR #86 fix commit became the next round's finding.)
 Two questions, answered in order and recorded in the ledger with their
 reasons, decide what happens to a below-bar finding; the second is asked
 only of one worth fixing that does not ride, and the first alone applies to
-a defect unrelated to the new diff. (1) **Is it worth fixing?** A verified
+a defect unrelated to the PR. (1) **Is it worth fixing?** A verified
 failure scenario or a concrete improvement is necessary, not sufficient;
 style preferences and speculation count as neither. One not worth fixing is
 recorded with that answer. (2) **How large is the fix?** Fold-sized (above)
