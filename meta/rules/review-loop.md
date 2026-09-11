@@ -88,19 +88,15 @@ loop, never the owner.
   current scope. A pass whose above-bar findings get fixed is a fix round —
   one round no matter how many commits the fix splits into. A pass with zero
   above-bar findings is the exit observation; there is no separate ceremony.
-- Scope: round 1 reviews the full PR diff; round N reviews the diff since
-  the HEAD of the last completed pass. A completed pass moves this baseline
-  even when its exit observation was invalidated; an interrupted pass does
-  not. After a rebase or force-push, the next pass reviews the full PR diff
-  again (round and checkpoint counters keep running).
+- Scope: every pass reviews the PR — its diff, its title and body, and
+  its commits' messages.
 - Reviewers may read anything; a finding enters the loop iff its causal
-  chain includes the new diff — including new code that triggers or exposes
-  a latent defect ("the root cause is pre-existing" is not an exemption).
-  Whether a fix commit actually removed its target finding is always in
-  scope for the next pass. Defects unrelated to the new diff do not block
-  this PR and are never fixed in it: one worth fixing per the Triage lanes'
-  first question is filed as an issue immediately, even an above-bar-grade
-  one.
+  chain includes the PR — including new code that triggers or exposes a
+  latent defect ("the root cause is pre-existing" is not an exemption) and
+  a sentence the PR's diff leaves untouched and makes false. Defects
+  unrelated to the PR do not block this PR and are never fixed in it: one
+  worth fixing per the Triage lanes' first question is filed as an issue
+  immediately, even an above-bar-grade one.
 - A fix that changes a documented behavior or semantic — or the wording
   that describes one — must, in the same commit, align every live copy
   of that description repo-wide. The sweep is a grep, not a full read:
@@ -125,8 +121,9 @@ loop, never the owner.
   something, by a situation in which following it leaves no compliant action
   or two different ones. What the attack falsifies is disposed of per the next
   bullet; a replacement is attacked once more, and one falsified then is
-  deleted, not rewritten — two attacks per commit at most. (Origin: #125;
-  #139.)
+  deleted, not rewritten — two attacks per commit at most. Text the agent
+  writes into the PR title or body in this loop passes the same attack
+  before it is posted. (Origin: #125; #139.)
 - A prose claim falsified in this loop — by a finding fixed in this PR or by
   the attack above — is deleted (whole, or its overclaiming clause) or moved
   to where it is held (a test, a constant, the one place that already states
@@ -148,7 +145,8 @@ findings → matched class → assigned lane, the above-bar count, the class
 names each fix addresses, and per commit the attacking model, whether the
 message was attacked, and the sentences falsified, each with its disposal;
 owner-accepted trade-offs (one-line rationale, recorded at decision time);
-links to filed issues.
+links to filed issues. An edit the agent makes to the PR title or body is
+recorded like a commit.
 
 Trade-off acceptance is the owner's decision — the agent only proposes. A
 finding matching a recorded trade-off is closed at triage (not counted, not
@@ -170,7 +168,7 @@ comment bundled into a PR #86 fix commit became the next round's finding.)
 Two questions, answered in order and recorded in the ledger with their
 reasons, decide what happens to a below-bar finding; the second is asked
 only of one worth fixing that does not ride, and the first alone applies to
-a defect unrelated to the new diff. (1) **Is it worth fixing?** A verified
+a defect unrelated to the PR. (1) **Is it worth fixing?** A verified
 failure scenario or a concrete improvement is necessary, not sufficient;
 style preferences and speculation count as neither. One not worth fixing is
 recorded with that answer. (2) **How large is the fix?** Fold-sized (above)
@@ -186,11 +184,7 @@ job.
 Stop before the next fix commit and escalate to the owner when either:
 
 - **(a) quantity** — a fix round's above-bar count does not decrease versus
-  the previous comparable fix round. A comparison is valid only when the
-  round's scope is equal to or narrower than its predecessor's; a
-  scope-widening round (post-rebase full diff, resumption after a revert)
-  restarts the comparison instead of being judged by it. Findings returned
-  by a bar raise do not count here.
+  the previous fix round. Findings returned by a bar raise do not count here.
 - **(b) recurrence** — a defect class recorded as fixed in the ledger is
   found again in a later round.
 
@@ -220,12 +214,11 @@ direction is closed by deleting the clause, never by rewriting — the
 declaration stays in force with the clause gone; a later finding against its
 invariant or its citation, or an attack that falsifies either, stops the loop
 before its next fix commit and returns the boundary to the owner. Later
-findings of the class close at triage
-on the Ledger section's terms only when that citation is present; new
-evidence makes them normal findings again. (PR #86 chased one class down
-four layers — regex boundary → token → shell control flow → YAML
-conditionals — and closed it only this way.) The trigger mandates the
-diagnosis, never a particular remedy.
+findings of the class close at triage on the Ledger section's terms only when
+that citation is present; new evidence makes them normal findings again. (PR
+#86 chased one class down four layers — regex boundary → token → shell control
+flow → YAML conditionals — and closed it only this way.) The trigger mandates
+the diagnosis, never a particular remedy.
 
 ## Checkpoint
 
@@ -248,11 +241,11 @@ Exactly two endings:
    with the procedure recorded in the ledger, finds zero above-bar findings,
    with no unresolved borderline or pending-decision case and no above-bar
    backlog (including findings returned by a bar raise). The observation is
-   valid only if the reviewed HEAD is still the PR's HEAD when the pass
-   completes — any new commit, whoever pushed it, invalidates the
-   observation (not the pass) and requires a new pass. Below-bar findings
-   from this pass are filed or recorded in the ledger per Triage lanes,
-   then the loop ends.
+   valid only if the HEAD, title and body the pass reviewed are still the
+   PR's when the pass completes — any new commit, whoever pushed it, or any
+   edit to the title or body, invalidates the observation (not the pass) and
+   requires a new pass. Below-bar findings from this pass are filed or
+   recorded in the ledger per Triage lanes, then the loop ends.
 2. **Owner decision** — at any point, typically in response to a checkpoint
    or escalation report.
 
