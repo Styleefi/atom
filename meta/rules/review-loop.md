@@ -145,7 +145,8 @@ findings → matched class → assigned lane, the above-bar count, the class
 names each fix addresses, and per commit the attacking model, whether the
 message was attacked, and the sentences falsified, each with its disposal;
 owner-accepted trade-offs (one-line rationale, recorded at decision time);
-links to filed issues.
+links to filed issues. An edit the agent makes to the PR title or body is
+recorded like a commit.
 
 Trade-off acceptance is the owner's decision — the agent only proposes. A
 finding matching a recorded trade-off is closed at triage (not counted, not
