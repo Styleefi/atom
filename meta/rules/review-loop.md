@@ -93,11 +93,10 @@ loop, never the owner.
 - Reviewers may read anything; a finding enters the loop iff its causal
   chain includes the new diff — including new code that triggers or exposes
   a latent defect ("the root cause is pre-existing" is not an exemption)
-  and a sentence the new diff leaves untouched and makes false. Whether a
-  fix commit actually removed its target finding is always in scope for the
-  next pass. Defects unrelated to the new diff do not block this PR and are
-  never fixed in it: one worth fixing per the Triage lanes' first question
-  is filed as an issue immediately, even an above-bar-grade one.
+  and a sentence the new diff leaves untouched and makes false. Defects
+  unrelated to the new diff do not block this PR and are never fixed in it:
+  one worth fixing per the Triage lanes' first question is filed as an
+  issue immediately, even an above-bar-grade one.
 - A fix that changes a documented behavior or semantic — or the wording
   that describes one — must, in the same commit, align every live copy
   of that description repo-wide. The sweep is a grep, not a full read:
@@ -122,8 +121,9 @@ loop, never the owner.
   something, by a situation in which following it leaves no compliant action
   or two different ones. What the attack falsifies is disposed of per the next
   bullet; a replacement is attacked once more, and one falsified then is
-  deleted, not rewritten — two attacks per commit at most. (Origin: #125;
-  #139.)
+  deleted, not rewritten — two attacks per commit at most. Text the agent
+  writes into the PR title or body in this loop passes the same attack
+  before it is posted. (Origin: #125; #139.)
 - A prose claim falsified in this loop — by a finding fixed in this PR or by
   the attack above — is deleted (whole, or its overclaiming clause) or moved
   to where it is held (a test, a constant, the one place that already states
