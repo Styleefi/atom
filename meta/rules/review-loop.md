@@ -243,10 +243,9 @@ Exactly two endings:
    backlog (including findings returned by a bar raise). The observation is
    valid only if the HEAD, title and body the pass reviewed are still the
    PR's when the pass completes — any new commit, whoever pushed it, or any
-   edit to the title or body, invalidates the observation (not the pass)
-   and requires a new pass. Below-bar findings
-   from this pass are filed or recorded in the ledger per Triage lanes,
-   then the loop ends.
+   edit to the title or body, invalidates the observation (not the pass) and
+   requires a new pass. Below-bar findings from this pass are filed or
+   recorded in the ledger per Triage lanes, then the loop ends.
 2. **Owner decision** — at any point, typically in response to a checkpoint
    or escalation report.
 
