@@ -116,7 +116,7 @@ required). This rule binds the agent running the loop, never the owner.
   relocate one verbatim, or rename an identifier. It authors or rewrites a
   sentence — including one written in place of a falsified claim — only after
   a fresh-context subagent (not a fork; never the session's framing) has tried
-  and failed to falsify the exact working-tree text and message body to be
+  and failed to falsify the exact working-tree text and message to be
   committed: against what it describes, or, for a sentence that requires
   something, by a situation in which following it leaves no compliant action
   or two different ones. What the attack falsifies is disposed of per the next
