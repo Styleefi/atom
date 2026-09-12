@@ -135,6 +135,8 @@ required). This rule binds the agent running the loop, never the owner.
   falsified` — `none` when no attack ran; `<n>` counts diff sentences only. A
   commit missing either, or authoring a diff sentence no attack covered, is a
   self-violation the next pass records.
+- A commit the agent makes in this loop carries no message body beyond its
+  trailers.
 
 ## Ledger
 
