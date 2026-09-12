@@ -121,11 +121,10 @@ required). This rule binds the agent running the loop, never the owner.
   something, by a situation in which following it leaves no compliant action
   or two different ones. What the attack falsifies is disposed of per the next
   bullet; a replacement is attacked once more, and one falsified then is
-  deleted, not rewritten — two attacks per fix at most. Text the agent writes
-  into the PR title or body in this loop passes the same attack before it is
-  posted. A PR title falsified on its second attack with no clause left
-  standing stops the loop before its next fix and returns to the owner.
-  (Origin: #125; #139.)
+  deleted, not rewritten. Text the agent writes into the PR title or body in
+  this loop passes the same attack before it is posted. A PR title falsified
+  on its second attack with no clause left standing stops the loop before its
+  next fix and returns to the owner. (Origin: #125; #139.)
 - A prose claim falsified in this loop — by a finding fixed in this PR or by
   the attack above — is deleted (whole, or its overclaiming clause) or moved
   to where it is held (a test, a constant, the one place that already states
