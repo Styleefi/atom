@@ -109,9 +109,9 @@ required). This rule binds the agent running the loop, never the owner.
   sibling copy is a recurrence waiting to happen. (Measured: PR #86
   fixed one README line while a second copy in the same file returned as
   the next round's finding.)
-- A fix stays within every declared bound, each per its own wording;
-  a fix that cannot is remade, or the bound is relaxed with owner approval.
-  (Origin: #113.)
+- A fix stays within every declared bound, each per its own wording; a fix
+  that cannot is remade, or the bound is relaxed with owner approval. (Origin:
+  #113.)
 - A commit in this loop may delete a sentence or its overclaiming clause,
   relocate one verbatim, or rename an identifier. It authors or rewrites a
   sentence — including one written in place of a falsified claim — only after
@@ -121,11 +121,11 @@ required). This rule binds the agent running the loop, never the owner.
   something, by a situation in which following it leaves no compliant action
   or two different ones. What the attack falsifies is disposed of per the next
   bullet; a replacement is attacked once more, and one falsified then is
-  deleted, not rewritten — two attacks per fix at most. Text the agent
-  writes into the PR title or body in this loop passes the same attack
-  before it is posted. A PR title falsified on its second attack with no
-  clause left standing stops the loop before its next fix and returns to
-  the owner. (Origin: #125; #139.)
+  deleted, not rewritten — two attacks per fix at most. Text the agent writes
+  into the PR title or body in this loop passes the same attack before it is
+  posted. A PR title falsified on its second attack with no clause left
+  standing stops the loop before its next fix and returns to the owner.
+  (Origin: #125; #139.)
 - A prose claim falsified in this loop — by a finding fixed in this PR or by
   the attack above — is deleted (whole, or its overclaiming clause) or moved
   to where it is held (a test, a constant, the one place that already states
@@ -198,29 +198,28 @@ redesign / declared scope boundary). In that diagnosis, "write the prose
 more precisely" counts as a repeat instance fix, not a class defense (PR
 #75 rewrote prose four rounds in a row, each recurrence one layer down;
 the class closed only when the convention moved into a test). A declared
-scope boundary applies when the defect class lies outside what the
-artifact under review is meant to defend — because the artifact cannot
-detect or prevent the class by its own means, or because reaching it
-requires a deliberate, PR-visible act (Severity bar, accident test); the
-class may still be reachable in the world. Closing it means proposing a
-trade-off (the owner decides, per the Ledger section) and, once accepted,
-writing the boundary into that artifact's own documentation (docstring,
-README entry) in three parts — the invariant the artifact holds in that
-state, in its own terms; the failure direction there (the artifact
-over-acts, under-acts, or stays silent); and, last, a citation of the
-accepting decision (PR or issue link) — and not, within that declaration, as
-a list of the triggers that reach the state or of the outcome per branch
-(Origin: #125; PR #126 round 2). That declaration is authored once, through
-the Rounds section's attack, then frozen: a later finding against its failure
-direction is closed by deleting the clause, never by rewriting — the
-declaration stays in force with the clause gone; a later finding against its
-invariant or its citation, or an attack that falsifies either, stops the loop
-before its next fix and returns the boundary to the owner. Later
-findings of the class close at triage on the Ledger section's terms only when
-that citation is present; new evidence makes them normal findings again. (PR
-#86 chased one class down four layers — regex boundary → token → shell control
-flow → YAML conditionals — and closed it only this way.) The trigger mandates
-the diagnosis, never a particular remedy.
+scope boundary applies when the defect class lies outside what the artifact
+under review is meant to defend — because the artifact cannot detect or
+prevent the class by its own means, or because reaching it requires a
+deliberate, PR-visible act (Severity bar, accident test); the class may still
+be reachable in the world. Closing it means proposing a trade-off (the owner
+decides, per the Ledger section) and, once accepted, writing the boundary into
+that artifact's own documentation (docstring, README entry) in three parts —
+the invariant the artifact holds in that state, in its own terms; the failure
+direction there (the artifact over-acts, under-acts, or stays silent); and,
+last, a citation of the accepting decision (PR or issue link) — and not,
+within that declaration, as a list of the triggers that reach the state or of
+the outcome per branch (Origin: #125; PR #126 round 2). That declaration is
+authored once, through the Rounds section's attack, then frozen: a later
+finding against its failure direction is closed by deleting the clause, never
+by rewriting — the declaration stays in force with the clause gone; a later
+finding against its invariant or its citation, or an attack that falsifies
+either, stops the loop before its next fix and returns the boundary to the
+owner. Later findings of the class close at triage on the Ledger section's
+terms only when that citation is present; new evidence makes them normal
+findings again. (PR #86 chased one class down four layers — regex boundary →
+token → shell control flow → YAML conditionals — and closed it only this way.)
+The trigger mandates the diagnosis, never a particular remedy.
 
 ## Checkpoint
 
