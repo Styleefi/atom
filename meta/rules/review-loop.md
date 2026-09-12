@@ -158,13 +158,13 @@ filed) unless it carries new evidence, which makes it a normal finding.
 
 Only above-bar findings re-enter the loop as in-PR fixes, with two narrow
 exceptions. A below-bar prose finding worth fixing may ride an above-bar fix
-commit when the fix independently requires touching the finding's subject —
-same function, same comment block, same table row or list item. A below-bar
-finding whose fix is one line — a copy the sweep bullet requires aligning
-counts as more — in a file the full PR diff already touches, and needs no
-design decision, is fold-sized. A ridden or folded finding is recorded in
-the ledger under its commit. Bundled prose is part of the next round's
-review surface, and unrelated bundling slows convergence. (Measured: a
+when the fix independently requires touching the finding's subject — same
+function, same comment block, same paragraph, same table row or list item. A
+below-bar finding whose fix is one line — a copy the sweep bullet requires
+aligning counts as more — in a file the full PR diff already touches, and
+needs no design decision, is fold-sized. A ridden or folded finding is
+recorded in the ledger under its commit. Bundled prose is part of the next
+round's review surface, and unrelated bundling slows convergence. (Measured: a
 comment bundled into a PR #86 fix commit became the next round's finding.)
 
 Two questions, answered in order and recorded in the ledger with their
