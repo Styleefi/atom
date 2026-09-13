@@ -186,6 +186,14 @@ def test_body_beyond_trailers_is_reported(monkeypatch, tmp_path, capsys) -> None
     assert f"{sha[:7]}: {check.REASON_BODY_BEYOND_TRAILERS}" in _context(out)
 
 
+def test_trailers_split_across_paragraphs_are_read_and_reported_as_body(monkeypatch, tmp_path, capsys) -> None:
+    repo = _baseline(monkeypatch, tmp_path)
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "feat: x\n\n" + LOOP + "\nProse: none\n\nCo-Authored-By: A <a@b>\nClaude-Session: https://x\n")
+    sha = _git(repo, "rev-parse", "HEAD")
+    _, out = _run(monkeypatch, repo, "git commit -m x", capsys)
+    assert _context(out) == f"{check.TAG} {sha[:7]}: {check.REASON_BODY_BEYOND_TRAILERS} — see {check.RULE_PATH}"
+
+
 def test_commit_outside_a_loop_is_ignored(monkeypatch, tmp_path, capsys) -> None:
     repo = _baseline(monkeypatch, tmp_path)
     _commit(repo, "feat: plain", files={"a.md": "Prose without any trailer at all.\n"})
