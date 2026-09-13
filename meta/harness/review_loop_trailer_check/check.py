@@ -8,9 +8,53 @@ PostToolUse 페이로드를 읽고 통과한다. 어떤 경로도 exit 2를 만�
 from __future__ import annotations
 
 import json
+import re
 import sys
 
 TAG = "[review-loop-trailer-check]"
+
+_REVIEW_LOOP_RE = re.compile(r"^PR #(\d{1,9}) round (\d{1,9})$")
+_PROSE_VALUES = ("none", "attacked")
+_TRAILER_LINE_RE = re.compile(r"^([^\s:]+)\s*:\s*")
+
+
+def parse_review_loop(value: str) -> tuple[int, int] | None:
+    """`Review-loop:` 트레일러 값을 푼다.
+
+    Returns:
+        (PR 번호, 라운드). 앞뒤 공백을 뗀 값이 `_REVIEW_LOOP_RE`에 맞지 않으면 None.
+    """
+    match = _REVIEW_LOOP_RE.match(value.strip())
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def parse_prose(value: str) -> str | None:
+    """`Prose:` 트레일러 값을 푼다.
+
+    Returns:
+        앞뒤 공백을 뗀 값이 `none`이나 `attacked`면 그 값, 아니면 None.
+    """
+    stripped = value.strip()
+    return stripped if stripped in _PROSE_VALUES else None
+
+
+def _trailer_lines(text: str) -> list[str]:
+    return [
+        _TRAILER_LINE_RE.sub(r"\1: ", line.rstrip())
+        for line in text.splitlines()
+        if line.strip()
+    ]
+
+
+def body_beyond_trailers(body: str, trailers: str) -> bool:
+    """메시지에 트레일러 밖의 본문이 있는가."""
+    remaining = _trailer_lines(body)
+    for line in _trailer_lines(trailers):
+        if line in remaining:
+            remaining.remove(line)
+    return bool(remaining)
 
 
 def _read_payload() -> tuple[str, str | None, str | None] | None:
