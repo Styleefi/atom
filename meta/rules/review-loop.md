@@ -130,9 +130,10 @@ required). This rule binds the agent running the loop, never the owner.
   to where it is held (a test, a constant, the one place that already states
   it); it is not kept by adding a qualifier. (Origin: #125.)
 - Every commit the agent makes in this loop — fix, fold, revert or amend —
-  carries two git trailers, `Review-loop: PR #<n> round <k>` and `Prose:
-  attacked` or `Prose: none`. A commit missing either, or authoring a diff
-  sentence no attack covered, is a self-violation the next pass records.
+  carries two git trailers in its message's last paragraph, `Review-loop: PR
+  #<n> round <k>` and `Prose: attacked` or `Prose: none`. A commit missing
+  either, or authoring a diff sentence no attack covered, is a self-violation
+  the next pass records.
 - A commit the agent makes in this loop carries no message body beyond its
   trailers.
 
