@@ -17,6 +17,7 @@ import pytest
 
 from harness.review_loop_trailer_check.check import (
     _is_noise,
+    _parse_diff,
     _prose_lines_md,
     _prose_lines_py,
     _tokens,
@@ -271,6 +272,15 @@ def test_a_large_deletion_elsewhere_does_not_mask_a_new_sentence(tmp_path: Path)
     assert _judge(tmp_path, before, after) is True
 
 
+def test_diff_prefix_config_does_not_hide_a_file(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _git(repo, "config", "diff.dstPrefix", "X/")
+    _git(repo, "config", "diff.srcPrefix", "Y/")
+    _commit_files(repo, {"a.md": "Old.\n"}, "x: before")
+    sha = _commit_files(repo, {"a.md": "Old.\nA brand new sentence lands here.\n"}, "x: after")
+    assert prose_lines_added(str(repo), sha) is True
+
+
 def test_root_commit_is_inspected(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     sha = _commit_files(repo, {"a.md": "A brand new sentence in the very first commit.\n"}, "x: root")
@@ -369,6 +379,16 @@ def test_new_sentence_after_pseudo_header_lines_is_still_attributed(tmp_path: Pa
 
 
 # ── 단위 ─────────────────────────────────────────────────────────────────────
+
+
+def test_parse_diff_counts_context_lines_inside_a_hunk() -> None:
+    diff = (
+        "diff --git a/a.md b/a.md\n--- a/a.md\n+++ b/a.md\n"
+        "@@ -1,3 +1,4 @@\n-old\n+new\n kept\n kept too\n+added\n"
+    )
+    added, removed = _parse_diff(diff)
+    assert added == {"a.md": [(1, "new"), (4, "added")]}
+    assert removed == ["old"]
 
 
 def test_tokens_drop_backtick_spans_and_punctuation() -> None:

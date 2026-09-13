@@ -236,12 +236,17 @@ def _parse_diff(diff: str) -> tuple[dict[str, list[tuple[int, str]]], list[str]]
                 line_no += 1
         elif line.startswith("-"):
             removed.append(line[1:])
+        elif line.startswith(" ") and line_no is not None:
+            line_no += 1
     return added, removed
 
 
 def prose_lines_added(cwd: str | None, sha: str) -> bool:
     """커밋이 산문 줄을 새로 썼는가."""
-    diff = _run_git(cwd, "-c", "core.quotePath=false", "show", "--format=", "-U0", "--no-color", sha)
+    diff = _run_git(
+        cwd, "-c", "core.quotePath=false", "show", "--format=", "-U0", "--no-color",
+        "--inter-hunk-context=0", "--src-prefix=a/", "--dst-prefix=b/", sha,
+    )
     if diff is None:
         return False
     added, removed = _parse_diff(diff)
