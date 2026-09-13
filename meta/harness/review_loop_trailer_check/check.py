@@ -292,10 +292,6 @@ STATE_FILENAME = "atom-review-loop-trailer.json"
 PROTECTED_BRANCHES = ("main", "master")
 COMMIT_LIMIT = 50
 CHECKED_CAP = 200
-_TRAILER_ANYWHERE_RE = {
-    "Review-loop": re.compile(r"^Review-loop:[ \t]*(.*)$", re.MULTILINE),
-    "Prose": re.compile(r"^Prose:[ \t]*(.*)$", re.MULTILINE),
-}
 _MESSAGE_FORMAT = (
     "%(trailers:key=Review-loop,valueonly)%x00%(trailers:key=Prose,valueonly)"
     "%x00%b%x00%(trailers:only=true)"
@@ -390,14 +386,7 @@ def _message_parts(cwd: str | None, sha: str) -> tuple[str, str, str, str] | Non
     parts = out.split("\0")
     if len(parts) != 4:
         return None
-    review_loop, prose, body, trailers = parts
-    if not review_loop.strip():
-        found = _TRAILER_ANYWHERE_RE["Review-loop"].search(body)
-        review_loop = found.group(1) if found else review_loop
-        if found and not prose.strip():
-            found_prose = _TRAILER_ANYWHERE_RE["Prose"].search(body)
-            prose = found_prose.group(1) if found_prose else prose
-    return review_loop, prose, body, trailers
+    return parts[0], parts[1], parts[2], parts[3]
 
 
 def _reasons(cwd: str | None, sha: str, parts: tuple[str, str, str, str]) -> list[str]:

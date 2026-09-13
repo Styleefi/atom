@@ -190,12 +190,44 @@ def test_body_beyond_trailers_is_reported(monkeypatch, tmp_path, capsys) -> None
     assert f"{sha[:7]}: {check.REASON_BODY_BEYOND_TRAILERS}" in _context(out)
 
 
-def test_trailers_split_across_paragraphs_are_read_and_reported_as_body(monkeypatch, tmp_path, capsys) -> None:
+def test_trailers_outside_the_last_paragraph_are_outside_reach(monkeypatch, tmp_path, capsys) -> None:
     repo = _baseline(monkeypatch, tmp_path)
     _git(repo, "commit", "-q", "--allow-empty", "-m", "feat: x\n\n" + LOOP + "\nProse: none\n\nCo-Authored-By: A <a@b>\nClaude-Session: https://x\n")
-    sha = _git(repo, "rev-parse", "HEAD")
+    assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
+
+
+def test_body_that_quotes_the_trailer_format_is_not_a_loop_commit(monkeypatch, tmp_path, capsys) -> None:
+    repo = _baseline(monkeypatch, tmp_path)
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "docs: explain the trailers\n\nEvery loop commit ends with a block like this one.\n\nReview-loop: PR #<n> round <k>\nProse: none\n\nCo-Authored-By: A <a@b>\n")
+    assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
+
+
+def test_first_observation_of_a_worktree_checks_its_branch(monkeypatch, tmp_path, capsys) -> None:
+    repo = _baseline(monkeypatch, tmp_path)
+    worktree = tmp_path / "wt"
+    _git(repo, "worktree", "add", "-q", "-b", "feat/wt", str(worktree))
+    sha = _commit(worktree, "feat: first call in the worktree", LOOP)
+    _, out = _run(monkeypatch, worktree, "git commit -m x", capsys)
+    assert _context(out) == f"{check.TAG} {sha[:7]}: {check.REASON_MISSING_PROSE} — see {check.RULE_PATH}"
+    assert _run(monkeypatch, worktree, "git commit -m x", capsys) == (0, "")
+
+
+def test_lost_state_file_rechecks_only_unmerged_commits_once(monkeypatch, tmp_path, capsys) -> None:
+    repo = _baseline(monkeypatch, tmp_path)
+    sha = _commit(repo, "feat: x", LOOP)
     _, out = _run(monkeypatch, repo, "git commit -m x", capsys)
-    assert _context(out) == f"{check.TAG} {sha[:7]}: {check.REASON_BODY_BEYOND_TRAILERS} — see {check.RULE_PATH}"
+    assert sha[:7] in _context(out)
+    (repo / ".git" / check.STATE_FILENAME).unlink()
+    _, out = _run(monkeypatch, repo, "ls", capsys)
+    assert sha[:7] in _context(out)
+    assert _run(monkeypatch, repo, "ls", capsys) == (0, "")
+
+
+def test_first_observation_on_main_checks_nothing(monkeypatch, tmp_path, capsys) -> None:
+    repo = _make_repo(tmp_path)
+    _commit(repo, "chore: init")
+    _commit(repo, "feat: on main", LOOP)
+    assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
 
 
 def test_commit_outside_a_loop_is_ignored(monkeypatch, tmp_path, capsys) -> None:
