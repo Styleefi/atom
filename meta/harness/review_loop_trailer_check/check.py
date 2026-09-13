@@ -244,8 +244,8 @@ def _parse_diff(diff: str) -> tuple[dict[str, list[tuple[int, str]]], list[str]]
 def prose_lines_added(cwd: str | None, sha: str) -> bool:
     """커밋이 산문 줄을 새로 썼는가."""
     diff = _run_git(
-        cwd, "-c", "core.quotePath=false", "show", "--format=", "-U0", "--no-color",
-        "--inter-hunk-context=0", "--src-prefix=a/", "--dst-prefix=b/", sha,
+        cwd, "-c", "core.quotePath=false", "show", "--format=", "--no-show-signature", "-U0",
+        "--no-color", "--inter-hunk-context=0", "--src-prefix=a/", "--dst-prefix=b/", sha,
     )
     if diff is None:
         return False
@@ -372,7 +372,7 @@ def _new_commits(cwd: str | None, old: str, new: str, exclusions: list[str]) -> 
 
 
 def _message_parts(cwd: str | None, sha: str) -> tuple[str, str, str, str] | None:
-    out = _run_git(cwd, "log", "-1", f"--format={_MESSAGE_FORMAT}", sha)
+    out = _run_git(cwd, "log", "-1", "--no-show-signature", f"--format={_MESSAGE_FORMAT}", sha)
     if out is None:
         return None
     parts = out.split("\0")

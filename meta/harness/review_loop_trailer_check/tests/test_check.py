@@ -11,9 +11,12 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 
 from harness.review_loop_trailer_check import check
@@ -89,6 +92,34 @@ def _baseline(monkeypatch, tmp_path: Path, **kwargs) -> Path:
     _git(repo, "checkout", "-q", "-b", "feat/x")
     assert _run(monkeypatch, repo) == (0, "")
     return repo
+
+
+def _sign_commits(repo: Path) -> None:
+    key = repo.parent / "signing-key"
+    subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True, capture_output=True)
+    allowed = repo.parent / "allowed-signers"
+    allowed.write_text("t@t " + key.with_suffix(".pub").read_text(), encoding="utf-8")
+    for name, value in [
+        ("gpg.format", "ssh"),
+        ("user.signingkey", str(key)),
+        ("commit.gpgsign", "true"),
+        ("log.showSignature", "true"),
+        ("gpg.ssh.allowedSignersFile", str(allowed)),
+    ]:
+        _git(repo, "config", name, value)
+
+
+@pytest.mark.skipif(shutil.which("ssh-keygen") is None, reason="ssh-keygen not installed")
+def test_signed_commits_with_signature_display_are_read_cleanly(monkeypatch, tmp_path, capsys) -> None:
+    repo = _baseline(monkeypatch, tmp_path)
+    _sign_commits(repo)
+    _commit(repo, "feat: plain signed commit")
+    assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
+    _commit(repo, "feat: signed loop commit", LOOP, "Prose: none", files={"m.py": "x = 1\n"})
+    assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
+    sha = _commit(repo, "docs: signed and new prose", LOOP, "Prose: none", files={"a.md": "A brand new sentence lands here.\n"})
+    _, out = _run(monkeypatch, repo, "git commit -m x", capsys)
+    assert _context(out) == f"{check.TAG} {sha[:7]}: {check.REASON_NONE_WITH_NEW_PROSE} — see {check.RULE_PATH}"
 
 
 def test_first_observation_records_only(monkeypatch, tmp_path, capsys) -> None:
