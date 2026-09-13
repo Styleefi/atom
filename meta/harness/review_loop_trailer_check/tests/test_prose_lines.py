@@ -195,6 +195,10 @@ def test_short_korean_tail_line_is_a_known_miss(tmp_path: Path) -> None:
     assert _judge(tmp_path, {"m.py": before}, {"m.py": after}) is False
 
 
+def test_files_other_than_py_and_md_are_ignored(tmp_path: Path) -> None:
+    assert _judge(tmp_path, {"notes.txt": "Old.\n"}, {"notes.txt": "A brand new sentence lands here.\n"}) is False
+
+
 def test_pseudo_header_lines_in_a_fence_do_not_break_the_parser(tmp_path: Path) -> None:
     fence = "```\n++ b/x\ndiff --git a/x b/x\n@@ -1 +1 @@\n```\n"
     assert _judge(tmp_path, {"a.md": "Intro line kept.\n"}, {"a.md": "Intro line kept.\n" + fence}) is False
