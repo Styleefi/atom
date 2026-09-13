@@ -38,6 +38,7 @@ ENTRY_POINTS = {
     "commit_guard": (True, "[commit-guard]"),
     "commit_publication": (True, "[commit-publication]"),
     "issue_duplicate_guard": (True, "[issue-duplicate-guard]"),
+    "review_loop_trailer_check": (True, "[review-loop-trailer-check]"),
     "rules_checker": (False, "rules_checker:"),
 }
 
@@ -55,6 +56,7 @@ REMOVABLE = {
     "commit_publication",
     "commit_guard",
     "issue_duplicate_guard",
+    "review_loop_trailer_check",
 }
 
 
@@ -66,8 +68,8 @@ def _run_entry_point(package: str, state_home: Path) -> subprocess.CompletedProc
     """진입점을 `python -m`으로 실행한다.
 
     `input=""`는 위생이 아니라 필수다 — 넘기지 않으면 자식이 부모의 stdin을
-    상속하고, `pytest -s`에서는 그게 터미널이라 가드 넷이 stdin.read()에서
-    막힌다. timeout은 그 회귀를 멈춤이 아니라 실패로 바꾼다.
+    상속하고, `pytest -s`에서는 그게 터미널이라 stdin.read()에서 막힌다.
+    timeout은 그 회귀를 멈춤이 아니라 실패로 바꾼다.
     """
     return subprocess.run(
         [sys.executable, "-m", f"harness.{package}"],
