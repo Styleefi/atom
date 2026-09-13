@@ -212,7 +212,7 @@ def _parse_diff(diff: str) -> tuple[dict[str, list[tuple[int, str]]], list[str]]
             continue
         if in_header:
             if line.startswith("+++ "):
-                target = line[4:]
+                target = line[4:].rstrip("\t")
                 path = None if target == "/dev/null" else target.removeprefix("b/")
             elif line.startswith("@@"):
                 in_header = False

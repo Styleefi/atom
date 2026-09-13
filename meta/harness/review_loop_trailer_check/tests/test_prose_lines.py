@@ -246,6 +246,17 @@ def test_non_ascii_path_is_still_attributed(tmp_path: Path) -> None:
     assert _judge(tmp_path, {"한글.md": "첫 문장은 그대로 남아 있다.\n"}, {"한글.md": "첫 문장은 그대로 남아 있다.\n새로 쓴 두 번째 문장이 여기 붙는다.\n"}) is True
 
 
+def test_path_with_a_space_is_still_attributed(tmp_path: Path) -> None:
+    assert _judge(tmp_path, {"my notes.md": "Old.\n"}, {"my notes.md": "Old.\nA brand new sentence lands here.\n"}) is True
+
+
+def test_a_large_deletion_elsewhere_does_not_mask_a_new_sentence(tmp_path: Path) -> None:
+    big = "\n".join(f"The agent records finding {i} in the ledger before the next pass ends." for i in range(60)) + "\n"
+    before = {"big.md": big, "a.md": "Keep.\n"}
+    after = {"big.md": None, "a.md": "Keep.\nBefore the next pass ends the ledger records every finding the agent found.\n"}
+    assert _judge(tmp_path, before, after) is True
+
+
 def test_root_commit_is_inspected(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     sha = _commit_files(repo, {"a.md": "A brand new sentence in the very first commit.\n"}, "x: root")
