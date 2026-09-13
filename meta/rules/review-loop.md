@@ -122,19 +122,17 @@ required). This rule binds the agent running the loop, never the owner.
   or two different ones. What the attack falsifies is disposed of per the next
   bullet; a replacement is attacked once more, and one falsified then is
   deleted, not rewritten. Text the agent writes into the PR title or body in
-  this loop passes the same attack before it is posted. A PR title falsified
-  on its second attack with no clause left standing stops the loop before its
-  next fix and returns to the owner. (Origin: #125; #139.)
+  this loop passes the same attack before it is posted. A PR title or commit
+  subject falsified on its second attack with no clause left standing stops
+  the loop before its next fix and returns to the owner. (Origin: #125; #139.)
 - A prose claim falsified in this loop — by a finding fixed in this PR or by
   the attack above — is deleted (whole, or its overclaiming clause) or moved
   to where it is held (a test, a constant, the one place that already states
   it); it is not kept by adding a qualifier. (Origin: #125.)
 - Every commit the agent makes in this loop — fix, fold, revert or amend —
-  carries two git trailers, `Review-loop: PR #<n> round <k>` and `Prose: none`
-  or `Prose: <n> new; attacked [twice] by fresh <model> subagent; <m>
-  falsified` — `none` when no attack ran; `<n>` counts diff sentences only. A
-  commit missing either, or authoring a diff sentence no attack covered, is a
-  self-violation the next pass records.
+  carries two git trailers, `Review-loop: PR #<n> round <k>` and `Prose:
+  attacked` or `Prose: none`. A commit missing either, or authoring a diff
+  sentence no attack covered, is a self-violation the next pass records.
 - A commit the agent makes in this loop carries no message body beyond its
   trailers.
 
