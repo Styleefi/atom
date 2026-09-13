@@ -376,21 +376,35 @@ def _branch_in_loop(cwd: str | None, exclusions: list[str]) -> bool:
     return bool(out) and any(line.strip() for line in out.splitlines())
 
 
-def _authoring_verb(command: str) -> bool:
+def _tokenize(text: str) -> list[str]:
+    lex = shlex.shlex(text, posix=True, punctuation_chars=True)
+    lex.whitespace_split = True
+    lex.commenters = ""
+    return list(lex)
+
+
+def _segments(command: str) -> list[list[str]]:
     try:
-        lex = shlex.shlex(command, posix=True, punctuation_chars=True)
-        lex.whitespace_split = True
-        lex.commenters = ""
-        tokens = list(lex)
+        token_lines = [_tokenize(line) for line in command.splitlines()]
     except ValueError:
-        return False
-    segments: list[list[str]] = [[]]
-    for token in tokens:
-        if token in OPERATORS:
-            segments.append([])
-        else:
-            segments[-1].append(token)
-    for segment in segments:
+        try:
+            token_lines = [_tokenize(command)]
+        except ValueError:
+            return []
+    segments: list[list[str]] = []
+    for tokens in token_lines:
+        segments.append([])
+        for token in tokens:
+            if token in OPERATORS:
+                segments.append([])
+            else:
+                segments[-1].append(token)
+    return segments
+
+
+def _authoring_count(command: str) -> int:
+    count = 0
+    for segment in _segments(command):
         index = 0
         while index < len(segment) and _ENV_ASSIGNMENT_RE.match(segment[index]):
             index += 1
@@ -401,8 +415,8 @@ def _authoring_verb(command: str) -> bool:
         while i < len(rest) and rest[i].startswith("-"):
             i += 2 if rest[i] in ("-C", "-c") else 1
         if i < len(rest) and rest[i] in AUTHORING_VERBS:
-            return True
-    return False
+            count += 1
+    return count
 
 
 def _message_parts(cwd: str | None, sha: str) -> tuple[str, str, str, str] | None:
@@ -510,7 +524,7 @@ def main() -> int:
     newly: list[str] = []
     reports: dict[str, list[str]] = {}
     in_loop: bool | None = None
-    authoring = _authoring_verb(command)
+    authored = commits[: _authoring_count(command)]
     for sha in commits:
         if sha in known:
             continue
@@ -520,8 +534,10 @@ def main() -> int:
         if parts is None:
             continue
         if not parts[0].strip():
+            if sha not in authored:
+                continue
             if in_loop is None:
-                in_loop = authoring and _branch_in_loop(cwd, exclusions)
+                in_loop = _branch_in_loop(cwd, exclusions)
             if in_loop:
                 reports[sha] = [REASON_MISSING_REVIEW_LOOP]
             continue
