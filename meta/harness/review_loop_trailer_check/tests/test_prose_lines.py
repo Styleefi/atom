@@ -408,9 +408,22 @@ def test_python_prose_lines_survive_a_syntax_error_for_comments() -> None:
     assert 2 in _prose_lines_py(text)
 
 
-@pytest.mark.parametrize("line", ["# noqa: E501", "    Args:", '    """', "## 검증", "# type: ignore[attr]"])
+@pytest.mark.parametrize(
+    "line",
+    ["# noqa: E501", "# noqa: BLE001, E501", "    Args:", '    """', "## 검증", "# type: ignore[attr]", "# pragma: no cover", "# fmt: off"],
+)
 def test_noise_lines(line: str) -> None:
     assert _is_noise(line) is True
+
+
+def test_prose_after_a_directive_is_not_noise() -> None:
+    assert _is_noise("# noqa: BLE001 — fail-open이 설계 요구사항") is False
+
+
+def test_new_justification_after_noqa_is_flagged(tmp_path: Path) -> None:
+    before = "try:\n    pass\nexcept OSError:\n    pass\n"
+    after = "try:\n    pass\nexcept Exception:  # noqa: BLE001 — a brand new justification sentence nobody attacked\n    pass\n"
+    assert _judge(tmp_path, {"m.py": before}, {"m.py": after}) is True
 
 
 @pytest.mark.parametrize("line", ["    한 번이다.", "# 실패는 전부 통과 방향이다.", "A line."])

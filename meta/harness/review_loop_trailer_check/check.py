@@ -112,7 +112,11 @@ _BACKTICK_SPAN_RE = re.compile(r"`[^`]*`")
 _STRIP_CHARS_RE = re.compile(r"[.,;:!?—–\-()\[\]{}\"'«»#*>|]")
 _WORD_CHAR_RE = re.compile(r"[0-9A-Za-z가-힣]")
 _HANGUL_RE = re.compile(r"[가-힣]")
-_NOISE_PREFIXES = ("# noqa", "# type:", "# fmt:", "# pragma:", "#!", "# -*- coding")
+_NOISE_PREFIXES = ("#!", "# -*- coding")
+_DIRECTIVE_RE = re.compile(
+    r"^#\s*(?:noqa(?::\s*[A-Z0-9, ]+)?|type:\s*ignore(?:\[[^\]]*\])?"
+    r"|pragma:\s*[a-z ]+|fmt:\s*(?:on|off|skip))"
+)
 _DOCSTRING_LABELS = frozenset(
     {"Args:", "Returns:", "Raises:", "Yields:", "Attributes:", "Example:", "Examples:", "Note:", "Notes:"}
 )
@@ -155,6 +159,7 @@ def _is_noise(line: str) -> bool:
         return True
     if stripped.strip("\"' ") in _DOCSTRING_LABELS:
         return True
+    stripped = _DIRECTIVE_RE.sub("", stripped)
     return len(_WORD_CHAR_RE.findall(stripped)) < MIN_PROSE_CHARS
 
 
