@@ -176,6 +176,10 @@ def test_missing_prose_still_runs_the_prose_check(monkeypatch, tmp_path, capsys)
     sha = _commit(repo, "docs: x", LOOP, files={"a.md": "A brand new sentence lands here.\n"})
     _, out = _run(monkeypatch, repo, "git commit -m x", capsys)
     assert f"{sha[:7]}: {check.REASON_MISSING_PROSE}+{check.REASON_NONE_WITH_NEW_PROSE}" in _context(out)
+    assert [entry["reason"] for entry in _ledger(tmp_path)] == [
+        check.REASON_MISSING_PROSE,
+        check.REASON_NONE_WITH_NEW_PROSE,
+    ]
 
 
 def test_body_beyond_trailers_is_reported(monkeypatch, tmp_path, capsys) -> None:

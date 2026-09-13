@@ -510,15 +510,16 @@ def main() -> int:
             reports[sha] = reasons
     state["checked"] = (state["checked"] + newly)[-CHECKED_CAP:]
     _store_state(state_path, state)
-    for sha, reasons in reports.items():
-        _log(
-            event="report",
-            harness=HARNESS_ID,
-            reason="+".join(reasons),
-            command=None,
-            cwd=cwd,
-            session_id=session_id,
-        )
+    for reasons in reports.values():
+        for reason in reasons:
+            _log(
+                event="report",
+                harness=HARNESS_ID,
+                reason=reason,
+                command=None,
+                cwd=cwd,
+                session_id=session_id,
+            )
     if reports:
         _emit(reports)
     return 0
