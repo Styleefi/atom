@@ -109,6 +109,7 @@ def _run_git(cwd: str | None, *args: str) -> str | None:
 
 PROSE_SUFFIXES = (".py", ".md")
 MIN_PROSE_CHARS = 4
+MATCH_SLACK = 16
 
 _BACKTICK_SPAN_RE = re.compile(r"`[^`]*`")
 _STRIP_CHARS_RE = re.compile(r"[.,;:!?—–\-()\[\]{}\"'«»#*>|]")
@@ -135,11 +136,20 @@ def _same_token(a: str, b: str) -> bool:
 
 
 def _is_subsequence(block: list[str], pool: list[str]) -> bool:
-    i = 0
-    for token in pool:
-        if i < len(block) and _same_token(block[i], token):
-            i += 1
-    return i == len(block)
+    limit = 2 * len(block) + MATCH_SLACK
+    for start, first in enumerate(pool):
+        if not _same_token(block[0], first):
+            continue
+        i = 1
+        end = start
+        for end in range(start + 1, len(pool)):
+            if i == len(block) or end - start >= limit:
+                break
+            if _same_token(block[i], pool[end]):
+                i += 1
+        if i == len(block):
+            return True
+    return False
 
 
 def _is_noise(line: str) -> bool:
