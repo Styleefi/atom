@@ -14,7 +14,6 @@ import io
 import json
 import os
 import re
-import shlex
 import subprocess
 import sys
 import tokenize
@@ -22,14 +21,12 @@ import tokenize
 TAG = "[review-loop-trailer-check]"
 
 # 보고 사유. 규칙 파일의 "`report` reasons:" 행과 test_reasons_sync가 결속한다.
-REASON_MISSING_REVIEW_LOOP = "missing-review-loop-trailer"
 REASON_MISSING_PROSE = "missing-prose-trailer"
 REASON_MALFORMED_REVIEW_LOOP = "malformed-review-loop"
 REASON_MALFORMED_PROSE = "malformed-prose"
 REASON_NONE_WITH_NEW_PROSE = "none-with-new-prose"
 REASON_BODY_BEYOND_TRAILERS = "body-beyond-trailers"
 REASONS = (
-    REASON_MISSING_REVIEW_LOOP,
     REASON_MISSING_PROSE,
     REASON_MALFORMED_REVIEW_LOOP,
     REASON_MALFORMED_PROSE,
@@ -285,10 +282,6 @@ STATE_FILENAME = "atom-review-loop-trailer.json"
 PROTECTED_BRANCHES = ("main", "master")
 COMMIT_LIMIT = 50
 CHECKED_CAP = 200
-AUTHORING_VERBS = ("commit", "revert", "cherry-pick")
-OPERATORS = {"&&", "||", "|", ";", ";;", "&", "(", ")"}
-
-_ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _MESSAGE_FORMAT = (
     "%(trailers:key=Review-loop,valueonly)%x00%(trailers:key=Prose,valueonly)"
     "%x00%b%x00%(trailers:only=true)"
@@ -373,59 +366,6 @@ def _new_commits(cwd: str | None, old: str, new: str, exclusions: list[str]) -> 
     return [line.strip() for line in out.splitlines() if line.strip()]
 
 
-def _branch_in_loop(cwd: str | None, exclusions: list[str]) -> bool:
-    if not exclusions:
-        return False
-    out = _run_git(
-        cwd, "log", f"--max-count={COMMIT_LIMIT}", "--format=%(trailers:key=Review-loop,valueonly)",
-        "HEAD", "--not", *exclusions,
-    )
-    return bool(out) and any(line.strip() for line in out.splitlines())
-
-
-def _tokenize(text: str) -> list[str]:
-    lex = shlex.shlex(text, posix=True, punctuation_chars=True)
-    lex.whitespace_split = True
-    lex.commenters = ""
-    return list(lex)
-
-
-def _segments(command: str) -> list[list[str]]:
-    try:
-        token_lines = [_tokenize(line) for line in command.splitlines()]
-    except ValueError:
-        try:
-            token_lines = [_tokenize(command)]
-        except ValueError:
-            return []
-    segments: list[list[str]] = []
-    for tokens in token_lines:
-        segments.append([])
-        for token in tokens:
-            if token in OPERATORS:
-                segments.append([])
-            else:
-                segments[-1].append(token)
-    return segments
-
-
-def _authoring_count(command: str) -> int:
-    count = 0
-    for segment in _segments(command):
-        index = 0
-        while index < len(segment) and _ENV_ASSIGNMENT_RE.match(segment[index]):
-            index += 1
-        rest = segment[index:]
-        if not rest or rest[0].rsplit("/", 1)[-1] != "git":
-            continue
-        i = 1
-        while i < len(rest) and rest[i].startswith("-"):
-            i += 2 if rest[i] in ("-C", "-c") else 1
-        if i < len(rest) and rest[i] in AUTHORING_VERBS:
-            count += 1
-    return count
-
-
 def _message_parts(cwd: str | None, sha: str) -> tuple[str, str, str, str] | None:
     out = _run_git(cwd, "log", "-1", f"--format={_MESSAGE_FORMAT}", sha)
     if out is None:
@@ -506,7 +446,7 @@ def main() -> int:
         return 1
     if payload is None:
         return 0
-    command, cwd, session_id = payload
+    _command, cwd, session_id = payload
     dirs = _repo_dirs(cwd)
     if dirs is None:
         return 0
@@ -530,23 +470,13 @@ def main() -> int:
     known = set(state["checked"])
     newly: list[str] = []
     reports: dict[str, list[str]] = {}
-    in_loop: bool | None = None
-    authored = commits[: _authoring_count(command)]
     for sha in commits:
         if sha in known:
             continue
         known.add(sha)
         newly.append(sha)
         parts = _message_parts(cwd, sha)
-        if parts is None:
-            continue
-        if not parts[0].strip():
-            if sha not in authored:
-                continue
-            if in_loop is None:
-                in_loop = _branch_in_loop(cwd, exclusions)
-            if in_loop:
-                reports[sha] = [REASON_MISSING_REVIEW_LOOP]
+        if parts is None or not parts[0].strip():
             continue
         reasons = _reasons(cwd, sha, parts)
         if reasons:

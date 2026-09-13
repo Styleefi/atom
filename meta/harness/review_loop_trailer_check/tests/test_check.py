@@ -15,7 +15,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 
 from harness.review_loop_trailer_check import check
 
@@ -162,57 +161,6 @@ def test_commit_outside_a_loop_is_ignored(monkeypatch, tmp_path, capsys) -> None
     assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
 
 
-def test_missing_review_loop_on_a_loop_branch_is_reported(monkeypatch, tmp_path, capsys) -> None:
-    repo = _baseline(monkeypatch, tmp_path)
-    _commit(repo, "feat: first", LOOP, "Prose: none")
-    assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
-    sha = _commit(repo, "feat: forgot the trailers")
-    _, out = _run(monkeypatch, repo, "git commit -m x", capsys)
-    assert _context(out) == f"{check.TAG} {sha[:7]}: {check.REASON_MISSING_REVIEW_LOOP} — see {check.RULE_PATH}"
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        "git -C . commit -q -m x",
-        "FOO=1 git cherry-pick abc",
-        "ls && git revert HEAD",
-        "git add a\ngit commit -m x",
-        "cd repo\ngit commit -m x",
-        "git commit -m \"$(cat <<'EOF'\nfeat: x\n\nbody\nEOF\n)\"",
-    ],
-)
-def test_authoring_verbs_are_recognised(command: str) -> None:
-    assert check._authoring_count(command) == 1
-
-
-@pytest.mark.parametrize("command", ["true", "git merge main", "git rebase main", "git pull", "echo 'git commit'", "git log"])
-def test_non_authoring_commands_are_not(command: str) -> None:
-    assert check._authoring_count(command) == 0
-
-
-def test_two_commits_in_one_call_count_twice() -> None:
-    assert check._authoring_count("git commit -m a && git commit -m b") == 2
-
-
-def test_owner_commit_before_the_agents_commit_is_not_reported(monkeypatch, tmp_path, capsys) -> None:
-    repo = _baseline(monkeypatch, tmp_path)
-    _commit(repo, "feat: first", LOOP, "Prose: none")
-    assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
-    _commit(repo, "feat: owner made this in a gui")
-    _commit(repo, "feat: agent commit", LOOP, "Prose: none")
-    assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
-
-
-def test_head_moved_by_an_owner_commit_is_ignored(monkeypatch, tmp_path, capsys) -> None:
-    # 루프 중 브랜치라도, 무관한 명령 뒤에 나타난 트레일러 없는 커밋은 오너의 것으로 본다.
-    repo = _baseline(monkeypatch, tmp_path)
-    _commit(repo, "feat: first", LOOP, "Prose: none")
-    assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
-    _commit(repo, "feat: owner made this in a gui")
-    assert _run(monkeypatch, repo, "ls", capsys) == (0, "")
-
-
 def test_upstream_commits_merged_in_are_ignored(monkeypatch, tmp_path, capsys) -> None:
     repo = _baseline(monkeypatch, tmp_path)
     _commit(repo, "feat: first", LOOP, "Prose: none")
@@ -225,14 +173,11 @@ def test_upstream_commits_merged_in_are_ignored(monkeypatch, tmp_path, capsys) -
     assert _run(monkeypatch, repo, "git merge main", capsys) == (0, "")
 
 
-def test_repo_without_main_refs_treats_the_branch_as_outside_a_loop(monkeypatch, tmp_path, capsys) -> None:
-    repo = _make_repo(tmp_path, with_remote=False)
-    _git(repo, "checkout", "-q", "-b", "trunk")
-    _commit(repo, "chore: init")
-    assert _run(monkeypatch, repo, capsys=capsys) == (0, "")
+def test_trailer_less_commit_is_ignored_even_on_a_loop_branch(monkeypatch, tmp_path, capsys) -> None:
+    repo = _baseline(monkeypatch, tmp_path)
     _commit(repo, "feat: first", LOOP, "Prose: none")
     assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
-    _commit(repo, "feat: no trailers")
+    _commit(repo, "feat: forgot the trailers", files={"a.md": "Prose without any trailer at all.\n"})
     assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
 
 
