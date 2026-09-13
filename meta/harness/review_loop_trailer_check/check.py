@@ -371,9 +371,12 @@ def _main_refs(cwd: str | None) -> list[str]:
     return refs
 
 
-def _new_commits(cwd: str | None, old: str, new: str, exclusions: list[str]) -> list[str] | None:
+def _new_commits(
+    cwd: str | None, old: str | None, new: str, exclusions: list[str]
+) -> list[str] | None:
+    span = new if old is None else f"{old}..{new}"
     out = _run_git(
-        cwd, "rev-list", "--no-merges", f"--max-count={COMMIT_LIMIT}", f"{old}..{new}", "--not", *exclusions
+        cwd, "rev-list", "--no-merges", f"--max-count={COMMIT_LIMIT}", span, "--not", *exclusions
     )
     if out is None:
         return None
@@ -480,10 +483,13 @@ def main() -> int:
     key = f"HEAD@{git_dir}"
     old = state["heads"].get(key)
     state["heads"][key] = head
-    if old is None or old == head:
+    if old == head:
         _store_state(state_path, state)
         return 0
     exclusions = _main_refs(cwd)
+    if old is None and not exclusions:
+        _store_state(state_path, state)
+        return 0
     commits = _new_commits(cwd, old, head, exclusions)
     if commits is None:
         _store_state(state_path, state)  # 재기준화: 이번 호출은 검사 없이 지나간다

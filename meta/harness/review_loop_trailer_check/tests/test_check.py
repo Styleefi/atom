@@ -260,11 +260,13 @@ def test_malformed_stdin_fails_open(monkeypatch, capsys) -> None:
     assert check.TAG in capsys.readouterr().err
 
 
-def test_corrupt_state_file_fails_open(monkeypatch, tmp_path, capsys) -> None:
+def test_corrupt_state_file_starts_over_without_blocking(monkeypatch, tmp_path, capsys) -> None:
     repo = _baseline(monkeypatch, tmp_path)
     (repo / ".git" / check.STATE_FILENAME).write_text("{not json", encoding="utf-8")
-    _commit(repo, "feat: x", LOOP)
-    assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")  # 재관측: 기록만
+    sha = _commit(repo, "feat: x", LOOP)
+    rc, out = _run(monkeypatch, repo, "git commit -m x", capsys)
+    assert rc == 0 and sha[:7] in _context(out)
+    assert json.loads((repo / ".git" / check.STATE_FILENAME).read_text())["checked"] == [sha]
 
 
 def test_lost_old_object_rebaselines(monkeypatch, tmp_path, capsys) -> None:
