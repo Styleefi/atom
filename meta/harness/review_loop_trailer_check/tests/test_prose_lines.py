@@ -199,6 +199,20 @@ def test_files_other_than_py_and_md_are_ignored(tmp_path: Path) -> None:
     assert _judge(tmp_path, {"notes.txt": "Old.\n"}, {"notes.txt": "A brand new sentence lands here.\n"}) is False
 
 
+@pytest.mark.parametrize(
+    "before,after",
+    [
+        ("TIMEOUT = 10  # seconds to wait for git\n", "TIMEOUT = 30  # seconds to wait for git\n"),
+        (
+            "try:\n    pass\nexcept Exception:  # noqa: BLE001\n    pass\n",
+            "try:\n    pass\nexcept (OSError, ValueError):  # noqa: BLE001\n    pass\n",
+        ),
+    ],
+)
+def test_code_change_on_a_commented_line_passes(tmp_path: Path, before: str, after: str) -> None:
+    assert _judge(tmp_path, {"m.py": before}, {"m.py": after}) is False
+
+
 def test_pseudo_header_lines_in_a_fence_do_not_break_the_parser(tmp_path: Path) -> None:
     fence = "```\n++ b/x\ndiff --git a/x b/x\n@@ -1 +1 @@\n```\n"
     assert _judge(tmp_path, {"a.md": "Intro line kept.\n"}, {"a.md": "Intro line kept.\n" + fence}) is False
@@ -326,6 +340,12 @@ def test_test_comment_sentences_are_flagged(tmp_path: Path) -> None:
         '    assert "refs/remotes/origin/main" in left\n'
     )
     assert _judge(tmp_path, {"test_b.py": before}, {"test_b.py": after}) is True
+
+
+def test_comment_change_on_a_code_line_is_flagged(tmp_path: Path) -> None:
+    before = "TIMEOUT = 10  # seconds to wait for git\n"
+    after = "TIMEOUT = 10  # seconds before the hook gives up entirely\n"
+    assert _judge(tmp_path, {"m.py": before}, {"m.py": after}) is True
 
 
 def test_korean_tail_line_of_four_letters_is_flagged(tmp_path: Path) -> None:

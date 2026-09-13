@@ -161,13 +161,13 @@ def _is_noise(line: str) -> bool:
     return len(_WORD_CHAR_RE.findall(stripped)) < MIN_PROSE_CHARS
 
 
-def _prose_lines_py(text: str) -> set[int]:
+def _prose_lines_py(text: str) -> dict[int, str | None]:
     # tokenize는 어휘 단계라 구문 오류가 있어도 주석은 낸다; ast는 실패하면 docstring만 포기한다.
-    lines: set[int] = set()
+    lines: dict[int, str | None] = {}
     try:
         for token in tokenize.generate_tokens(io.StringIO(text).readline):
             if token.type == tokenize.COMMENT:
-                lines.add(token.start[0])
+                lines[token.start[0]] = token.string
     except (tokenize.TokenError, SyntaxError):
         pass
     try:
@@ -182,7 +182,8 @@ def _prose_lines_py(text: str) -> set[int]:
             continue
         value = body[0].value
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
-            lines.update(range(body[0].lineno, (body[0].end_lineno or body[0].lineno) + 1))
+            for number in range(body[0].lineno, (body[0].end_lineno or body[0].lineno) + 1):
+                lines[number] = None
     return lines
 
 
@@ -255,11 +256,17 @@ def prose_lines_added(cwd: str | None, sha: str) -> bool:
         content = _run_git(cwd, "show", f"{sha}:{path}")
         if content is None:
             continue
-        prose = _prose_lines_py(content) if suffix == ".py" else _prose_lines_md(content)
+        if suffix == ".py":
+            prose = _prose_lines_py(content)
+        else:
+            prose = dict.fromkeys(_prose_lines_md(content))
         block: list[str] = []
         previous: int | None = None
         for number, text in lines:
-            if number not in prose or _is_noise(text):
+            if number not in prose:
+                continue
+            text = prose[number] or text
+            if _is_noise(text):
                 continue
             if previous is not None and number != previous + 1:
                 if block and not _is_subsequence(block, pool):
