@@ -205,12 +205,13 @@ deliberate, PR-visible act (Severity bar, accident test); the class may still
 be reachable in the world. Closing it means proposing a trade-off (the owner
 decides, per the Ledger section) and, once accepted, writing the boundary into
 that artifact's own documentation (docstring, README entry) in three parts —
-the invariant the artifact holds in that state, in its own terms; the failure
-direction there (the artifact over-acts, under-acts, or stays silent); and,
-last, a citation of the accepting decision (PR or issue link) — and not,
+the invariant the artifact holds in that state, stated over what the artifact
+itself contains, reads or computes, not over how its input came to be; the
+failure direction there (the artifact over-acts, under-acts, or stays silent);
+and, last, a citation of the accepting decision (PR or issue link) — and not,
 within that declaration, as a list of the triggers that reach the state or of
-the outcome per branch (Origin: #125; PR #126 round 2). That declaration is
-authored once, through the Rounds section's attack, then frozen: a later
+the outcome per branch (Origin: #125; PR #126 round 2; #164). That declaration
+is authored once, through the Rounds section's attack, then frozen: a later
 finding against its failure direction is closed by deleting the clause, never
 by rewriting — the declaration stays in force with the clause gone; a later
 finding against its invariant or its citation, or an attack that falsifies
