@@ -872,17 +872,44 @@ def _spy_env(monkeypatch) -> list[dict[str, str]]:
     return seen
 
 
+def _local_env_var_names() -> list[str]:
+    """git 자신이 "저장소 지역"이라 부르는 변수 이름들.
+
+    이름을 손으로 적지 않고 git에게 묻는다 — 목록은 git 버전마다 자란다.
+
+    Returns:
+        변수 이름 목록.
+    """
+    out = subprocess.run(
+        ["git", "rev-parse", "--local-env-vars"],
+        capture_output=True,
+        text=True,
+        env=_GIT_ENV,
+        check=True,
+    ).stdout
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
 def test_no_inherited_git_var_reaches_the_child(monkeypatch, tmp_path):
-    """호출자 환경의 `GIT_*`는 하나도 전달되지 않는다 — 도구가 세우는 것만 남는다."""
+    """호출자 환경의 `GIT_*`는 하나도 전달되지 않는다 — 도구가 세우는 것만 남는다.
+
+    이름 표본이 아니라 접두사 규칙 자체를 고정한다. 표본만 심으면 "이 하나는 통과시키자"는
+    허용목록 회귀가 초록으로 지나간다 — 심은 이름이 거기 없으면 자식 env의 `GIT_` 집합이
+    그대로이기 때문이다. 그래서 git이 스스로 대는 목록 전부에, 어떤 허용목록에도 들어 있을
+    리 없는 합성 이름을 더해 심는다.
+    """
     src, pub, _local = _published(tmp_path)
-    for name, value in (
-        ("GIT_DIR", str(tmp_path / "nowhere" / ".git")),
-        ("GIT_CONFIG_GLOBAL", str(tmp_path / "nope.cfg")),
-        ("GIT_CEILING_DIRECTORIES", str(tmp_path)),
-        ("GIT_TRACE2_EVENT", str(tmp_path / "trace.json")),
-        ("GIT_SSH_COMMAND", "/bin/false"),
-    ):
-        monkeypatch.setenv(name, value)
+
+    injected = [
+        *_local_env_var_names(),
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_SSH_COMMAND",
+        "GIT_TRACE2_EVENT",
+        "GIT_ZZ_SYNTHETIC_PROBE",
+    ]
+    assert len(injected) > 15, injected
+    for name in injected:
+        monkeypatch.setenv(name, "x")
 
     seen = _spy_env(monkeypatch)
     _run(monkeypatch, src, _short(pub))
