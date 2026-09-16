@@ -939,6 +939,11 @@ def test_git_dir_in_the_environment_does_not_move_the_repository(
     only_there = _commit(other, "chore: only in the second repository")
     _git(other, "push", "-q", "origin", "main")
 
+    # 양성 대조. 아래 단언이 거는 exit 3은 이 모듈의 거의 모든 실패 경로가 내는 값이라,
+    # fixture가 조용히 썩으면(저 저장소의 원격이 못 쓰게 되는 등) 누출이 있어도 초록이 된다.
+    # 판별자가 실제로 저쪽에서 발행된 상태임을 먼저 고정한다.
+    assert _run(monkeypatch, other, _short(only_there)) == check.EXIT_ALL_ON
+
     monkeypatch.setenv("GIT_DIR", str(second / "src" / ".git"))
     assert _run(monkeypatch, src, _short(only_there)) == check.EXIT_UNDECIDED
 
@@ -963,3 +968,41 @@ def test_insteadof_in_the_environment_does_not_move_the_remote(monkeypatch, tmp_
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(cfg))
 
     assert _run(monkeypatch, src, _short(local)) == check.EXIT_SOME_NOT_ON
+
+
+def test_stripping_transport_env_substitutes_the_target_rather_than_severing_it(
+    monkeypatch, tmp_path
+):
+    """전송 변수를 벗기면 끊기는 게 아니라 **대상이 바뀔 수 있다**.
+
+    docstring이 이 방향을 산문으로 두 번 잘못 적었다(둘 다 "닿지 못해 exit 2나 3이 된다"고
+    약속했고 둘 다 반증됐다). 그래서 산문이 아니라 여기서 고정한다.
+
+    구도: 호출자는 `GIT_SSH_COMMAND`로 저장소 A를 겨냥한다. A에는 그 커밋이 없다. 그런데
+    저장소 config의 `core.sshCommand`가 B를 받치고 있고 B에는 있다. 도구는 환경 쪽만 벗기므로
+    B에 대해 "발행됨"을 낸다 — 호출자가 겨냥한 적 없는 원격이다.
+
+    이건 결함이 아니라 `GIT_` 전면 제거의 논리적 귀결이다. 이 단언이 깨지면 그 결정이
+    바뀐 것이므로 docstring의 ③도 함께 다시 봐야 한다. `core.gitProxy`·`PATH`의 기본
+    실행 파일도 같은 구조를 만든다.
+    """
+    aimed = _bare(tmp_path, "aimed")
+    backing = _bare(tmp_path, "backing")
+    src = _work(tmp_path, "src")
+    _commit(src, "chore: base")
+    _git(src, "push", "-q", str(aimed), "main")
+    unpublished = _commit(src, "feat: not on the aimed remote")
+    _git(src, "push", "-q", str(backing), "main")
+
+    scripts = {}
+    for name, repo in (("aimed", aimed), ("backing", backing)):
+        path = tmp_path / f"ssh_{name}.sh"
+        path.write_text(f"#!/bin/sh\nexec git upload-pack {repo}\n", encoding="utf-8")
+        path.chmod(0o755)
+        scripts[name] = path
+
+    _git(src, "remote", "add", "origin", "ssh://example.invalid/srv/repo.git")
+    _git(src, "config", "core.sshCommand", str(scripts["backing"]))
+    monkeypatch.setenv("GIT_SSH_COMMAND", str(scripts["aimed"]))
+
+    assert _run(monkeypatch, src, _short(unpublished)) == check.EXIT_ALL_ON

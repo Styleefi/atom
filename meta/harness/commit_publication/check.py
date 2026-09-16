@@ -20,11 +20,15 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
       둔다. 전송·프로토콜은 저장소 설정에도 전역 설정에도 둘 수 있다(`core.sshCommand`,
       `http.proxy`, `http.sslCAInfo`). 관측(`trace2.*Target`)은 전역·시스템 설정에만
       둘 수 있다 — git이 저장소 설정의 trace2 키를 읽지 않는다. 자식 프로젝트도 소스를
-      고치지 않고 이 경로로 해결한다. 제거의 실패 방향은 두 갈래다. 제거된 변수가 대상에
-      **닿게** 하던 것이면 닿지 못해 exit 2나 3이 된다. 제거된 변수가 대상을 **좁히고**
-      있었다면 — 격리용 `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CEILING_DIRECTORIES` — 판정
-      대상이 조용히 넓어져, 호출자가 묻지 않은 저장소·원격에 대한 "발행됨"이 나갈 수 있다.
-      그때 출력에는 아무 표시가 없다.
+      고치지 않고 이 경로로 해결한다. **제거가 무엇을 낳을지는 보증하지 않는다.** 관측된
+      방향이 셋이고 이 목록도 닫혀 있지 않다. ① 대상에 닿지 못해 exit 2나 3이 된다.
+      ② 좁히던 방어(격리용 `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CEILING_DIRECTORIES`,
+      `GIT_ALLOW_PROTOCOL`)가 사라져 판정 대상이 넓어진다. ③ 대상이 갈아치워진다 — 같은
+      뜻의 저장소 config 키(`core.sshCommand`·`core.gitProxy`)나 `PATH`의 기본 실행 파일이
+      뒤를 받치고 있으면, 벗긴 뒤의 판정은 호출자가 겨냥한 적 없는 원격에 대한 것이 된다.
+      ②③은 출력에 아무 표시 없이 잘못된 "발행됨"(exit 4)을 낼 수 있다. ③은 바로 위가
+      권하는 이전이 만들어내는 상태다 — env와 config가 둘 다 살아 있는 동안. 산문이 아니라
+      테스트가 ③을 고정한다.
     - `GIT_` 접두사 밖의 채널은 중화하지 않는다. `HOME`·`XDG_CONFIG_HOME`이 고르는 전역
       설정(`url.insteadOf`·`core.useReplaceRefs`), `PATH`가 고르는 git·ssh 실행 파일,
       프록시 변수가 전부 판정을 바꿀 수 있고 거짓 "발행됨"까지 만든다. 이 목록은 예시이지
@@ -33,8 +37,10 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
     - 얕은 클론은 판정하지 않는다. 깊이 밖 조상이 끊겨 `merge-base`가 "없다"고 답하므로,
       네트워크 전에 물러난다(exit 3).
     - 로컬 그래프 재작성(replace ref·graft 파일)을 중화하지 않는다. 위조하면 on으로 읽힐
-      수 있다. 훅도 중화하지 않으므로 도구도 하지 않는다. graft 파일 위치를 바꾸는 유일한
-      환경 경로인 `GIT_GRAFT_FILE`은 전달되지 않는다(위치를 옮기는 config 키는 없다).
+      수 있다. 훅도 중화하지 않으므로 도구도 하지 않는다. graft 파일은 git dir이 아니라
+      **common dir 기준** `info/grafts`라서 위치를 옮기는 환경 경로가 셋이다 —
+      `GIT_GRAFT_FILE`·`GIT_DIR`·`GIT_COMMON_DIR`. 셋 다 `GIT_` 접두사라 전달되지 않는다
+      (위치를 정하는 config 키는 없다).
       replace ref는 다르다 — `core.useReplaceRefs`가 평범한 config 키이고 어느 전역 설정을
       읽을지는 `HOME`·`XDG_CONFIG_HOME`이 정하므로, 저장소가 같아도 그 환경변수만 달라지면
       판정이 뒤집힐 수 있다.
