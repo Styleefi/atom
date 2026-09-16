@@ -844,3 +844,95 @@ def test_the_rule_cites_a_command_this_module_accepts() -> None:
 
     for gone in ("merge-base --is-ancestor", "FETCH_HEAD", "HEAD branch"):
         assert gone not in rule, f"the replaced procedure came back: {gone}"
+
+
+# --- 상속된 GIT_* 환경변수 (#165) --------------------------------------------
+
+
+def _spy_env(monkeypatch) -> list[dict[str, str]]:
+    """자식 git에 넘어간 env를 기록한다.
+
+    git을 대체하지 않는다 — 기록만 하고 진짜 `subprocess.run`에 넘긴다(모듈 docstring의
+    "git을 mock하지 않는다").
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+
+    Returns:
+        호출 순서대로 쌓이는 env dict 목록.
+    """
+    seen: list[dict[str, str]] = []
+    real = subprocess.run
+
+    def _record(*args, **kwargs):
+        seen.append(dict(kwargs.get("env") or {}))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(check.subprocess, "run", _record)
+    return seen
+
+
+def test_no_inherited_git_var_reaches_the_child(monkeypatch, tmp_path):
+    """호출자 환경의 `GIT_*`는 하나도 전달되지 않는다 — 도구가 세우는 것만 남는다."""
+    src, pub, _local = _published(tmp_path)
+    for name, value in (
+        ("GIT_DIR", str(tmp_path / "nowhere" / ".git")),
+        ("GIT_CONFIG_GLOBAL", str(tmp_path / "nope.cfg")),
+        ("GIT_CEILING_DIRECTORIES", str(tmp_path)),
+        ("GIT_TRACE2_EVENT", str(tmp_path / "trace.json")),
+        ("GIT_SSH_COMMAND", "/bin/false"),
+    ):
+        monkeypatch.setenv(name, value)
+
+    seen = _spy_env(monkeypatch)
+    _run(monkeypatch, src, _short(pub))
+
+    assert seen, "git이 한 번도 실행되지 않았다"
+    for env in seen:
+        assert {k for k in env if k.startswith("GIT_")} == {
+            "GIT_TERMINAL_PROMPT",
+            "GIT_ASKPASS",
+        }
+
+
+def test_git_dir_in_the_environment_does_not_move_the_repository(
+    monkeypatch, tmp_path
+):
+    """다른 저장소를 가리키는 `GIT_DIR`이 있어도 판정 대상은 cwd 저장소다.
+
+    판별자: 저 저장소에만 있는 발행된 SHA. 새면 그 저장소 기준으로 on(4)이 나오고,
+    막히면 이 저장소가 그 객체를 몰라 판정 불가(3)가 된다.
+    """
+    src, _pub, _local = _published(tmp_path)
+    second = tmp_path / "second"
+    second.mkdir()
+    other, _other_pub, _other_local = _published(second)
+    # 제목을 달리해 SHA가 이쪽 저장소에만 있게 한다 — 같은 제목·저자·빈 트리는
+    # 같은 초에 만들어지면 두 저장소에서 같은 SHA가 된다.
+    only_there = _commit(other, "chore: only in the second repository")
+    _git(other, "push", "-q", "origin", "main")
+
+    monkeypatch.setenv("GIT_DIR", str(second / "src" / ".git"))
+    assert _run(monkeypatch, src, _short(only_there)) == check.EXIT_UNDECIDED
+
+
+def test_insteadof_in_the_environment_does_not_move_the_remote(monkeypatch, tmp_path):
+    """전역 설정으로 주입된 `url.insteadOf`가 판정 대상 원격을 바꾸지 못한다.
+
+    `GIT_CONFIG_GLOBAL`은 `git rev-parse --local-env-vars`의 15개 목록 밖이라,
+    그 목록을 벗기는 방식으로는 막히지 않는 두 번째 벡터다(#165).
+
+    판별자: 미발행 커밋 하나. 가짜 원격에는 그것까지 올라가 있으므로, 새면 on(4)이
+    나오고 막히면 진짜 원격 기준으로 not-on(5)이 된다.
+    """
+    src, _pub, local = _published(tmp_path)
+    fake = _bare(tmp_path, "fake")
+    _git(src, "push", "-q", str(fake), "HEAD:refs/heads/main")
+
+    cfg = tmp_path / "global.cfg"
+    cfg.write_text(
+        f'[url "{fake}"]\n\tinsteadOf = {tmp_path / "remote.git"}\n', encoding="utf-8"
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(cfg))
+
+    assert _run(monkeypatch, src, _short(local)) == check.EXIT_SOME_NOT_ON

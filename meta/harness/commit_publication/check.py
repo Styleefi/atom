@@ -14,10 +14,23 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
       남는다.
 
 주장하지 않는 것:
+    - 호출자 환경의 `GIT_` 접두사 변수는 하나도 전달하지 않는다. 그래서 전송 설정
+      (`GIT_SSH_COMMAND` 등)과 관측 설정(`GIT_TRACE2_EVENT` 등)이 함께 사라진다 —
+      후자는 파일·소켓 타겟이어도 마찬가지다. 필요하면 환경변수가 아니라 git config로
+      둔다. 전송·프로토콜은 저장소 설정에도 전역 설정에도 둘 수 있다(`core.sshCommand`,
+      `http.proxy`, `http.sslCAInfo`). 관측(`trace2.*Target`)은 전역·시스템 설정에만
+      둘 수 있다 — git이 저장소 설정의 trace2 키를 읽지 않는다. 자식 프로젝트도 소스를
+      고치지 않고 이 경로로 해결한다. 이 변수들이 없어 대상에 닿지 못하면 exit 2나 3이다;
+      어느 쪽도 4가 아니므로 잘못된 "발행됨"은 나오지 않는다.
+    - `GIT_` 접두사 밖의 채널은 중화하지 않는다. `HOME`이 가리키는 `~/.gitconfig`의
+      `url.insteadOf`나 ssh 설정은 그대로 작용한다. 이 도구는 자기가 넘기는 환경만
+      통제하고 오너 자신의 파일 설정은 통제하지 않는다.
     - 얕은 클론은 판정하지 않는다. 깊이 밖 조상이 끊겨 `merge-base`가 "없다"고 답하므로,
       네트워크 전에 물러난다(exit 3).
     - 로컬 그래프 재작성(replace ref·graft 파일)을 중화하지 않는다. 위조하면 on으로 읽힐
-      수 있다. 훅도 중화하지 않으므로 도구도 하지 않는다.
+      수 있다. 훅도 중화하지 않으므로 도구도 하지 않는다. 다만 어느 그래프를 읽을지는
+      저장소 자신의 설정으로만 정해진다 — `GIT_` 접두사 변수를 전달하지 않으므로 환경이
+      graft 파일 위치도, replace ref 적용 여부도 바꾸지 못한다.
     - 축약 SHA와 같은 이름의 ref가 있으면 git은 그 ref를 우선한다(전체 SHA는 객체가
       우선한다). 그때의 답은 ref에 대한 것이다.
     - ls-remote와 fetch 사이에 원격 tip이 움직이면, 그 tip이 로컬에 없어 판정 불가가
@@ -140,7 +153,14 @@ def run_git(args: list[str], *, timeout: int) -> tuple[int, str]:
             text=True,
             errors="replace",
             env={
-                **os.environ,
+                # 호출자 환경의 `GIT_` 변수는 하나도 넘기지 않는다 — `GIT_DIR`·
+                # `GIT_CONFIG_GLOBAL`(insteadOf)·`GIT_SSH_COMMAND`가 각각 판정 대상
+                # 저장소와 원격을 갈아치울 수 있고, 그 오답에는 아무 표시가 없다(#165).
+                # 접두사로 거르는 이유는 목록이 새기 때문이다 —
+                # `git rev-parse --local-env-vars`의 15개가 위 둘째·셋째를 놓친다.
+                # 호출 시점에 계산한다: 모듈 상수로 굳히면 환경을 바꾼 뒤의 호출이
+                # 옛 사본을 쓴다.
+                **{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
                 "GIT_TERMINAL_PROMPT": "0",
                 "GIT_ASKPASS": "/bin/false",
                 "SSH_ASKPASS": "/bin/false",
