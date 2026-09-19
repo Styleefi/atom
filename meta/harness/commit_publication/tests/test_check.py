@@ -975,6 +975,14 @@ def test_insteadof_in_the_environment_does_not_move_the_remote(monkeypatch, tmp_
     cfg.write_text(
         f'[url "{fake}"]\n\tinsteadOf = {tmp_path / "remote.git"}\n', encoding="utf-8"
     )
+    rewritten = subprocess.run(
+        ["git", "-C", str(src), "ls-remote", "--get-url", "origin"],
+        capture_output=True,
+        text=True,
+        env={**_GIT_ENV, "GIT_CONFIG_GLOBAL": str(cfg)},
+        check=True,
+    ).stdout.strip()
+    assert rewritten == str(fake), rewritten
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(cfg))
 
     assert _run(monkeypatch, src, _short(local)) == check.EXIT_SOME_NOT_ON
