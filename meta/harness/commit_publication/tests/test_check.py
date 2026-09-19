@@ -900,9 +900,8 @@ def test_no_inherited_git_var_reaches_the_child(monkeypatch, tmp_path):
     """
     src, pub, _local = _published(tmp_path)
 
-    # `--local-env-vars` 밖에서 판정을 바꾸는 것으로 실측된 이름들을 더한다. 이름 하나를
-    # 찍어 예외로 뚫는 회귀는 그 이름이 여기 없으면 초록으로 지나간다 — 그 부류 전체는
-    # 아래 AST 테스트가 막고, 이 목록은 실측된 벡터를 이름으로 한 번 더 고정한다.
+    # 이름 하나를
+    # 찍어 예외로 뚫는 회귀는 그 이름이 여기 없으면 초록으로 지나간다.
     injected = [
         *_local_env_var_names(),
         "GIT_ALLOW_PROTOCOL",
