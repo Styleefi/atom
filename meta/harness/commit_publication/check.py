@@ -14,10 +14,27 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
       남는다.
 
 주장하지 않는 것:
+    - 호출자 환경의 `GIT_` 접두사 변수는 하나도 전달하지 않는다. 그래서 전송 설정
+      (`GIT_SSH_COMMAND` 등)과 관측 설정(`GIT_TRACE2_EVENT` 등)이 함께 사라진다 —
+      후자는 파일·소켓 타겟이어도 마찬가지다.
+      전송·프로토콜은 저장소 설정에도 전역 설정에도 둘 수 있다(`core.sshCommand`,
+      `http.proxy`, `http.sslCAInfo`). 관측(`trace2.*Target`)은 전역·시스템 설정에만
+      둘 수 있다 — git이 저장소 설정의 trace2 키를 읽지 않는다.
+    - `GIT_` 접두사 밖의 채널은 중화하지 않는다. `HOME`·`XDG_CONFIG_HOME`이 고르는 전역
+      설정(`url.insteadOf`·`core.useReplaceRefs`), `PATH`가 고르는 git·ssh 실행 파일,
+      프록시 변수가 전부 판정을 바꿀 수 있고 거짓 "발행됨"까지 만든다. 이 목록은 예시이지
+      방어선이 아니다 — 이 도구는 자기가 넘기는 환경만 통제하고, 호출자의 나머지 환경도
+      오너 자신의 파일 설정도 통제하지 않는다.
     - 얕은 클론은 판정하지 않는다. 깊이 밖 조상이 끊겨 `merge-base`가 "없다"고 답하므로,
       네트워크 전에 물러난다(exit 3).
     - 로컬 그래프 재작성(replace ref·graft 파일)을 중화하지 않는다. 위조하면 on으로 읽힐
-      수 있다. 훅도 중화하지 않으므로 도구도 하지 않는다.
+      수 있다. 훅도 중화하지 않으므로 도구도 하지 않는다. graft 파일은 git dir이 아니라
+      **common dir 기준** `info/grafts`라서 위치를 옮기는 환경 경로가 셋이다 —
+      `GIT_GRAFT_FILE`·`GIT_DIR`·`GIT_COMMON_DIR`. 셋 다 `GIT_` 접두사라 전달되지 않는다
+      (위치를 정하는 config 키는 없다).
+      replace ref는 다르다 — `core.useReplaceRefs`가 평범한 config 키이고 어느 전역 설정을
+      읽을지는 `HOME`·`XDG_CONFIG_HOME`이 정하므로, 저장소가 같아도 그 환경변수만 달라지면
+      판정이 뒤집힐 수 있다.
     - 축약 SHA와 같은 이름의 ref가 있으면 git은 그 ref를 우선한다(전체 SHA는 객체가
       우선한다). 그때의 답은 ref에 대한 것이다.
     - ls-remote와 fetch 사이에 원격 tip이 움직이면, 그 tip이 로컬에 없어 판정 불가가
@@ -32,11 +49,9 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
     - `--no-write-fetch-head`는 git 2.29 이상을 요구한다. 그 미만에서는 fetch가 미지 옵션으로
       실패해 exit 3이 된다.
     - 판정 대상은 프로세스 cwd가 속한 저장소다. 규칙이 인용하는 `uv run --directory meta ...`는
-      cwd를 `meta/`로 바꾸므로 `meta/`를 담은 저장소를 본다. 다른 저장소(서브모듈 등)의
-      보고는 범위 밖이다 — 선언된 경계. 불변식: 이 도구는 cwd가 속한 저장소의 원격에
-      대해서만 답한다. 실패 방향: 다른 저장소의 SHA는 대개 이 저장소에 없어 판정 불가(exit 3)가
-      되고, 우연히 있으면 이 저장소의 원격에 대한 답이 나간다. 인용: 오너 결정
-      2026-09-04, PR #152.
+      cwd를 `meta/`로 바꾸므로 `meta/`를 담은 저장소를 본다. 저장소를 지정하는
+      인자(`-C` 등)는 받지 않는다(PR #152의 범위 축소). 다른 저장소(서브모듈 등)의
+      보고는 범위 밖이다.
     - 도구 자신의 타임아웃은 git을 SIGKILL로 끝낸다. 그때 전송 프로세스(remote helper·ssh)는
       원격 연결이 닫힐 때까지 남을 수 있다.
     - 호출자가 도구를 죽이면 git 자식 프로세스의 정리는 보장하지 않는다.
@@ -140,7 +155,14 @@ def run_git(args: list[str], *, timeout: int) -> tuple[int, str]:
             text=True,
             errors="replace",
             env={
-                **os.environ,
+                # 호출자 환경의 `GIT_` 변수는 하나도 넘기지 않는다 — `GIT_DIR`·
+                # `GIT_CONFIG_GLOBAL`(insteadOf)·`GIT_SSH_COMMAND`가 각각 판정 대상
+                # 저장소와 원격을 갈아치울 수 있고, 그 오답에는 아무 표시가 없다(#165).
+                # 접두사로 거르는 이유는 목록이 새기 때문이다 —
+                # `git rev-parse --local-env-vars`의 15개가 위 둘째·셋째를 놓친다.
+                # 호출 시점에 계산한다: 모듈 상수로 굳히면 환경을 바꾼 뒤의 호출이
+                # 옛 사본을 쓴다.
+                **{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
                 "GIT_TERMINAL_PROMPT": "0",
                 "GIT_ASKPASS": "/bin/false",
                 "SSH_ASKPASS": "/bin/false",

@@ -844,3 +844,221 @@ def test_the_rule_cites_a_command_this_module_accepts() -> None:
 
     for gone in ("merge-base --is-ancestor", "FETCH_HEAD", "HEAD branch"):
         assert gone not in rule, f"the replaced procedure came back: {gone}"
+
+
+# --- 상속된 GIT_* 환경변수 (#165) --------------------------------------------
+
+
+def _spy_env(monkeypatch) -> list[dict[str, str]]:
+    """자식 git에 넘어간 env를 기록한다.
+
+    git을 대체하지 않는다 — 기록만 하고 진짜 `subprocess.run`에 넘긴다(모듈 docstring의
+    "git을 mock하지 않는다").
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+
+    Returns:
+        호출 순서대로 쌓이는 env dict 목록.
+    """
+    seen: list[dict[str, str]] = []
+    real = subprocess.run
+
+    def _record(*args, **kwargs):
+        seen.append(dict(kwargs.get("env") or {}))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(check.subprocess, "run", _record)
+    return seen
+
+
+def _local_env_var_names() -> list[str]:
+    """git 자신이 "저장소 지역"이라 부르는 변수 이름들.
+
+    이름을 손으로 적지 않고 git에게 묻는다 — 목록은 git 버전마다 자란다.
+
+    Returns:
+        변수 이름 목록.
+    """
+    out = subprocess.run(
+        ["git", "rev-parse", "--local-env-vars"],
+        capture_output=True,
+        text=True,
+        env=_GIT_ENV,
+        check=True,
+    ).stdout
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+def test_no_inherited_git_var_reaches_the_child(monkeypatch, tmp_path):
+    """호출자 환경의 `GIT_*`는 하나도 전달되지 않는다 — 도구가 세우는 것만 남는다.
+    """
+    src, pub, _local = _published(tmp_path)
+
+    # 이름 하나를
+    # 찍어 예외로 뚫는 회귀는 그 이름이 여기 없으면 초록으로 지나간다.
+    injected = [
+        *_local_env_var_names(),
+        "GIT_ALLOW_PROTOCOL",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_NAMESPACE",
+        "GIT_PROXY_COMMAND",
+        "GIT_SSH",
+        "GIT_SSH_COMMAND",
+        "GIT_SSH_VARIANT",
+        "GIT_TRACE2_EVENT",
+        "GIT_ZZ_SYNTHETIC_PROBE",
+    ]
+    assert len(injected) > 15, injected
+    for name in injected:
+        monkeypatch.setenv(name, "x")
+
+    seen = _spy_env(monkeypatch)
+    _run(monkeypatch, src, _short(pub))
+
+    assert seen, "git이 한 번도 실행되지 않았다"
+    for env in seen:
+        assert {k for k in env if k.startswith("GIT_")} == {
+            "GIT_TERMINAL_PROMPT",
+            "GIT_ASKPASS",
+        }
+
+
+def test_git_dir_in_the_environment_does_not_move_the_repository(
+    monkeypatch, tmp_path
+):
+    """다른 저장소를 가리키는 `GIT_DIR`이 있어도 판정 대상은 cwd 저장소다.
+
+    판별자: 저 저장소에만 있는 발행된 SHA. 새면 그 저장소 기준으로 on(4)이 나온다.
+    막히면 cwd 저장소 기준으로 판정되는데, **이 fixture에서는** cwd 저장소가 그 객체를
+    모르므로 판정 불가(3)가 된다. 3은 차단의 성질이 아니라 fixture의 성질이다.
+    """
+    src, _pub, _local = _published(tmp_path)
+    second = tmp_path / "second"
+    second.mkdir()
+    other, _other_pub, _other_local = _published(second)
+    # 제목을 달리해 SHA가 이쪽 저장소에만 있게 한다 — 같은 제목·저자·빈 트리는
+    # 같은 초에 만들어지면 두 저장소에서 같은 SHA가 된다.
+    only_there = _commit(other, "chore: only in the second repository")
+    _git(other, "push", "-q", "origin", "main")
+
+    # 양성 대조. 아래 단언이 거는 exit 3은 이 모듈의 거의 모든 실패 경로가 내는 값이라,
+    # fixture가 조용히 썩으면(저 저장소의 원격이 못 쓰게 되는 등) 누출이 있어도 초록이 된다.
+    # 판별자가 실제로 저쪽에서 발행된 상태임을 먼저 고정한다.
+    assert _run(monkeypatch, other, _short(only_there)) == check.EXIT_ALL_ON
+
+    monkeypatch.setenv("GIT_DIR", str(second / "src" / ".git"))
+    assert _run(monkeypatch, src, _short(only_there)) == check.EXIT_UNDECIDED
+
+
+def test_insteadof_in_the_environment_does_not_move_the_remote(monkeypatch, tmp_path):
+    """전역 설정으로 주입된 `url.insteadOf`가 판정 대상 원격을 바꾸지 못한다.
+
+    `GIT_CONFIG_GLOBAL`은 `git rev-parse --local-env-vars`의 15개 목록 밖이라,
+    그 목록을 벗기는 방식으로는 막히지 않는 두 번째 벡터다(#165).
+
+    판별자: 미발행 커밋 하나. 가짜 원격에는 그것까지 올라가 있으므로, 새면 on(4)이
+    나오고 막히면 진짜 원격 기준으로 not-on(5)이 된다.
+    """
+    src, _pub, local = _published(tmp_path)
+    fake = _bare(tmp_path, "fake")
+    _git(src, "push", "-q", str(fake), "HEAD:refs/heads/main")
+
+    cfg = tmp_path / "global.cfg"
+    cfg.write_text(
+        f'[url "{fake}"]\n\tinsteadOf = {tmp_path / "remote.git"}\n', encoding="utf-8"
+    )
+    rewritten = subprocess.run(
+        ["git", "-C", str(src), "ls-remote", "--get-url", "origin"],
+        capture_output=True,
+        text=True,
+        env={**_GIT_ENV, "GIT_CONFIG_GLOBAL": str(cfg)},
+        check=True,
+    ).stdout.strip()
+    assert rewritten == str(fake), rewritten
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(cfg))
+
+    assert _run(monkeypatch, src, _short(local)) == check.EXIT_SOME_NOT_ON
+
+
+def test_stripping_transport_env_substitutes_the_target_rather_than_severing_it(
+    monkeypatch, tmp_path
+):
+    """전송 변수를 벗기면 끊기는 게 아니라 **대상이 바뀔 수 있다**.
+
+    구도: 호출자는 `GIT_SSH_COMMAND`로 저장소 A를 겨냥한다. A에는 그 커밋이 없다. 그런데
+    저장소 config의 `core.sshCommand`가 B를 받치고 있고 B에는 있다. 도구는 환경 쪽만 벗기므로
+    B에 대해 "발행됨"을 낸다 — 호출자가 겨냥한 적 없는 원격이다.
+
+    이건 결함이 아니라 `GIT_` 전면 제거의 논리적 귀결이다.
+    """
+    aimed = _bare(tmp_path, "aimed")
+    backing = _bare(tmp_path, "backing")
+    src = _work(tmp_path, "src")
+    _commit(src, "chore: base")
+    _git(src, "push", "-q", str(aimed), "main")
+    unpublished = _commit(src, "feat: not on the aimed remote")
+    _git(src, "push", "-q", str(backing), "main")
+
+    scripts = {}
+    for name, repo in (("aimed", aimed), ("backing", backing)):
+        path = tmp_path / f"ssh_{name}.sh"
+        path.write_text(f"#!/bin/sh\nexec git upload-pack {repo}\n", encoding="utf-8")
+        path.chmod(0o755)
+        scripts[name] = path
+
+    _git(src, "remote", "add", "origin", "ssh://example.invalid/srv/repo.git")
+
+    # 음성 대조. 겨냥한 원격만 보이게 하면 미발행(5)이어야 한다. 이게 없으면 fixture가
+    # 썩어 겨냥한 원격에도 그 커밋이 올라간 경우 아래 단언은 아무것도 증명하지 않은 채
+    # 통과한다 — 4는 "B를 봤다"가 아니라 "어딘가에서 on을 봤다"일 뿐이다.
+    _git(src, "config", "core.sshCommand", str(scripts["aimed"]))
+    assert _run(monkeypatch, src, _short(unpublished)) == check.EXIT_SOME_NOT_ON
+
+    _git(src, "config", "core.sshCommand", str(scripts["backing"]))
+    monkeypatch.setenv("GIT_SSH_COMMAND", str(scripts["aimed"]))
+
+    assert _run(monkeypatch, src, _short(unpublished)) == check.EXIT_ALL_ON
+
+
+def _run_git_env_dict() -> ast.Dict:
+    """`run_git`이 `subprocess.run`에 넘기는 `env=` 사전 리터럴을 소스에서 꺼낸다.
+
+    Returns:
+        `env=` 값인 `ast.Dict` 노드.
+    """
+    tree = ast.parse(Path(check.__file__).read_text(encoding="utf-8"))
+    func = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "run_git"
+    )
+    envs = [
+        kw.value
+        for node in ast.walk(func)
+        if isinstance(node, ast.Call)
+        for kw in node.keywords
+        if kw.arg == "env"
+    ]
+    assert len(envs) == 1, f"run_git must pass exactly one env=, found {len(envs)}"
+    assert isinstance(envs[0], ast.Dict), "env= must stay a dict literal this test can read"
+    return envs[0]
+
+
+_RUN_GIT_ENV = (
+    "{**{k: v for k, v in os.environ.items() if not k.startswith('GIT_')}, "
+    "'GIT_TERMINAL_PROMPT': '0', 'GIT_ASKPASS': '/bin/false', "
+    "'SSH_ASKPASS': '/bin/false', 'SSH_ASKPASS_REQUIRE': 'force'}"
+)
+
+
+def test_run_git_env_literal_matches_the_pinned_source() -> None:
+    """`run_git`의 `env=` 사전 리터럴을 고정된 문자열과 통째로 비교한다 — 선언된 경계.
+
+    불변식: 이 테스트는 `run_git` 안 `env=` 리터럴의 `ast.unparse` 결과가 `_RUN_GIT_ENV`와
+    같음을 단언한다. 실패 방향: 그 리터럴 밖의 코드가 자식 git에 `GIT_` 변수를 넘기면 이
+    테스트는 침묵할 수 있다. 인용: 오너 결정 2026-09-19, PR #169 원장.
+    """
+    assert ast.unparse(_run_git_env_dict()) == _RUN_GIT_ENV
