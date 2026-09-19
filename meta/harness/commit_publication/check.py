@@ -48,6 +48,10 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
       않는다.
     - `--no-write-fetch-head`는 git 2.29 이상을 요구한다. 그 미만에서는 fetch가 미지 옵션으로
       실패해 exit 3이 된다.
+    - 첫 `rev-parse`가 128을 내면 같은 명령을 `-c safe.directory=*`로 한 번 더 부른다. 그 값을
+      protected config로 읽는 git(upstream 2.38 이상)이 아니면, 소유권 검사가 있어도 두 번째
+      호출이 128을 낸다. 배포판 백포트는 버전 문자열과 다를 수 있다.
+      인용: 오너 결정 2026-09-19, PR #171.
     - 판정 대상은 프로세스 cwd가 속한 저장소다. 규칙이 인용하는 `uv run --directory meta ...`는
       cwd를 `meta/`로 바꾸므로 `meta/`를 담은 저장소를 본다. 저장소를 지정하는
       인자(`-C` 등)는 받지 않는다(PR #152의 범위 축소). 다른 저장소(서브모듈 등)의
@@ -76,7 +80,6 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
     5는 그대로 5이고(별도 줄로 이름을 부른다), 4는 3이 된다 — "하나 이상 not-on"은 존재
     명제이고 "전부 on"은 전칭 명제이기 때문이다. 실질 판정을 1이 아니라 5에 둔 이유는
     파이썬이 잡히지 않은 예외에서 1을, uv가 실패 시 1이나 2를 내기 때문이다.
-    2와 3의 경계: **2는 에이전트가 스스로 고칠 수 있고 3은 못 고친다.**
 """
 
 from __future__ import annotations
@@ -119,7 +122,7 @@ class _Undecided(Exception):
 
 
 class _CallerError(Exception):
-    """호출자가 고칠 수 있는 잘못 (exit 2)."""
+    """호출자 잘못 (exit 2)."""
 
     def __init__(self, reason: str) -> None:
         super().__init__(reason)
@@ -214,14 +217,27 @@ def _assert_not_shallow() -> None:
     """얕은 클론이면 네트워크 이전에 판정을 포기한다.
 
     Raises:
-        _CallerError: git이 rc 128을 냈을 때.
-        _Undecided: 얕은 클론이거나, git이 답하지 않을 때.
+        _CallerError: rev-parse가 128을 내고, `-c safe.directory=*`로 되부른 같은 명령이
+            0 또는 128을 냈을 때.
+        _Undecided: 얕은 클론이거나, 어느 호출이든 git이 답하지 않을 때.
     """
     rc, out = run_git(
         ["rev-parse", "--is-shallow-repository"], timeout=LOCAL_TIMEOUT_SECONDS
     )
     if rc == 128:
-        raise _CallerError("not a git repository")
+        trusted_rc, _ = run_git(
+            ["-c", "safe.directory=*", "rev-parse", "--is-shallow-repository"],
+            timeout=LOCAL_TIMEOUT_SECONDS,
+        )
+        if trusted_rc == 0:
+            raise _CallerError(
+                "git exits 128 at the working directory and 0 with safe.directory=*"
+            )
+        if trusted_rc == 128:
+            raise _CallerError(
+                "git exits 128 at the working directory, also with safe.directory=*"
+            )
+        raise _Undecided("git did not answer when asked about this repository")
     if rc != 0:
         raise _Undecided("git did not answer when asked about this repository")
     if out.strip() == "true":
