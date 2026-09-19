@@ -1062,6 +1062,14 @@ def test_the_env_filter_admits_no_git_variable_by_name() -> None:
         if isinstance(key, ast.Constant) and str(key.value).startswith("GIT_")
     }
     assert literal_git == {"GIT_TERMINAL_PROMPT", "GIT_ASKPASS"}, literal_git
+    assert all(key is None or isinstance(key, ast.Constant) for key in env.keys), [
+        ast.unparse(key) for key in env.keys if key is not None
+    ]
+    for key, value in zip(env.keys, env.values):
+        if isinstance(key, ast.Constant) and str(key.value).startswith("GIT_"):
+            assert isinstance(value, ast.Constant) and isinstance(value.value, str), (
+                f"{key.value}: {ast.unparse(value)}"
+            )
 
     unpacked = [value for key, value in zip(env.keys, env.values) if key is None]
     assert len(unpacked) == 1, "exactly one ** unpacking may bring in the environment"
