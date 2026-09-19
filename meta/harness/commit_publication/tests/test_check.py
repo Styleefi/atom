@@ -900,10 +900,20 @@ def test_no_inherited_git_var_reaches_the_child(monkeypatch, tmp_path):
     """
     src, pub, _local = _published(tmp_path)
 
+    # `--local-env-vars` 밖에서 판정을 바꾸는 것으로 실측된 이름들을 더한다. 이름 하나를
+    # 찍어 예외로 뚫는 회귀는 그 이름이 여기 없으면 초록으로 지나간다 — 그 부류 전체는
+    # 아래 AST 테스트가 막고, 이 목록은 실측된 벡터를 이름으로 한 번 더 고정한다.
     injected = [
         *_local_env_var_names(),
+        "GIT_ALLOW_PROTOCOL",
         "GIT_CEILING_DIRECTORIES",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_NAMESPACE",
+        "GIT_PROXY_COMMAND",
+        "GIT_SSH",
         "GIT_SSH_COMMAND",
+        "GIT_SSH_VARIANT",
         "GIT_TRACE2_EVENT",
         "GIT_ZZ_SYNTHETIC_PROBE",
     ]
@@ -927,8 +937,10 @@ def test_git_dir_in_the_environment_does_not_move_the_repository(
 ):
     """다른 저장소를 가리키는 `GIT_DIR`이 있어도 판정 대상은 cwd 저장소다.
 
-    판별자: 저 저장소에만 있는 발행된 SHA. 새면 그 저장소 기준으로 on(4)이 나오고,
-    막히면 이 저장소가 그 객체를 몰라 판정 불가(3)가 된다.
+    판별자: 저 저장소에만 있는 발행된 SHA. 새면 그 저장소 기준으로 on(4)이 나온다.
+    막히면 cwd 저장소 기준으로 판정되는데, **이 fixture에서는** cwd 저장소가 그 객체를
+    모르므로 판정 불가(3)가 된다. 3은 차단의 성질이 아니라 fixture의 성질이다 — cwd
+    저장소가 그 객체를 아는 배치라면 막혀도 4가 나온다(모듈 docstring의 "보증하지 않는다").
     """
     src, _pub, _local = _published(tmp_path)
     second = tmp_path / "second"
@@ -1002,7 +1014,71 @@ def test_stripping_transport_env_substitutes_the_target_rather_than_severing_it(
         scripts[name] = path
 
     _git(src, "remote", "add", "origin", "ssh://example.invalid/srv/repo.git")
+
+    # 음성 대조. 겨냥한 원격만 보이게 하면 미발행(5)이어야 한다. 이게 없으면 fixture가
+    # 썩어 겨냥한 원격에도 그 커밋이 올라간 경우 아래 단언은 아무것도 증명하지 않은 채
+    # 통과한다 — 4는 "B를 봤다"가 아니라 "어딘가에서 on을 봤다"일 뿐이다.
+    _git(src, "config", "core.sshCommand", str(scripts["aimed"]))
+    assert _run(monkeypatch, src, _short(unpublished)) == check.EXIT_SOME_NOT_ON
+
     _git(src, "config", "core.sshCommand", str(scripts["backing"]))
     monkeypatch.setenv("GIT_SSH_COMMAND", str(scripts["aimed"]))
 
     assert _run(monkeypatch, src, _short(unpublished)) == check.EXIT_ALL_ON
+
+
+def _run_git_env_dict() -> ast.Dict:
+    """`run_git`이 `subprocess.run`에 넘기는 `env=` 사전 리터럴을 소스에서 꺼낸다.
+
+    Returns:
+        `env=` 값인 `ast.Dict` 노드.
+    """
+    tree = ast.parse(Path(check.__file__).read_text(encoding="utf-8"))
+    func = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "run_git"
+    )
+    envs = [
+        kw.value
+        for node in ast.walk(func)
+        if isinstance(node, ast.Call)
+        for kw in node.keywords
+        if kw.arg == "env"
+    ]
+    assert len(envs) == 1, f"run_git must pass exactly one env=, found {len(envs)}"
+    assert isinstance(envs[0], ast.Dict), "env= must stay a dict literal this test can read"
+    return envs[0]
+
+
+def test_the_env_filter_admits_no_git_variable_by_name() -> None:
+    """env 필터의 모양 자체를 고정한다 — 이름으로 예외를 뚫는 회귀를 부류째 막는다.
+
+    spy 테스트는 심은 이름만 본다. 실제 이름 하나를 찍어 통과시키는 회귀
+    (`or k == "GIT_CONFIG_SYSTEM"`, `k not in (...)`)는 그 이름이 목록에 없으면 초록으로
+    지나간다. 3라운드 공격이 그런 변이 여섯 개가 전 스위트를 통과함을 실측했고, 그중
+    `GIT_CONFIG_SYSTEM`은 거짓 exit 4까지 갔다. 이름 표본으로는 원리상 이 부류를 닫을 수
+    없으므로 소스를 본다.
+
+    고정하는 것 둘: 환경을 들여오는 길은 `not k.startswith("GIT_")` 하나만 가진 사전
+    컴프리헨션 한 개이고, 리터럴로 적힌 `GIT_` 키는 도구가 스스로 세우는 둘뿐이다.
+    """
+    env = _run_git_env_dict()
+
+    literal_git = {
+        key.value
+        for key in env.keys
+        if isinstance(key, ast.Constant) and str(key.value).startswith("GIT_")
+    }
+    assert literal_git == {"GIT_TERMINAL_PROMPT", "GIT_ASKPASS"}, literal_git
+
+    unpacked = [value for key, value in zip(env.keys, env.values) if key is None]
+    assert len(unpacked) == 1, "exactly one ** unpacking may bring in the environment"
+    (comp,) = unpacked
+    assert isinstance(comp, ast.DictComp), ast.unparse(comp)
+
+    (gen,) = comp.generators
+    assert ast.unparse(gen.iter) == "os.environ.items()", ast.unparse(gen.iter)
+    (cond,) = gen.ifs
+    key_name = ast.unparse(gen.target.elts[0])
+    assert ast.unparse(cond) == f"not {key_name}.startswith('GIT_')", ast.unparse(cond)
