@@ -213,14 +213,27 @@ def _assert_not_shallow() -> None:
     """얕은 클론이면 네트워크 이전에 판정을 포기한다.
 
     Raises:
-        _CallerError: git이 rc 128을 냈을 때.
-        _Undecided: 얕은 클론이거나, git이 답하지 않을 때.
+        _CallerError: rev-parse가 128을 내고, `-c safe.directory=*`로 되부른 같은 명령이
+            0 또는 128을 냈을 때.
+        _Undecided: 얕은 클론이거나, 어느 호출이든 git이 답하지 않을 때.
     """
     rc, out = run_git(
         ["rev-parse", "--is-shallow-repository"], timeout=LOCAL_TIMEOUT_SECONDS
     )
     if rc == 128:
-        raise _CallerError("not a git repository")
+        trusted_rc, _ = run_git(
+            ["-c", "safe.directory=*", "rev-parse", "--is-shallow-repository"],
+            timeout=LOCAL_TIMEOUT_SECONDS,
+        )
+        if trusted_rc == 0:
+            raise _CallerError(
+                "git exits 128 at the working directory and 0 with safe.directory=*"
+            )
+        if trusted_rc == 128:
+            raise _CallerError(
+                "git exits 128 at the working directory, also with safe.directory=*"
+            )
+        raise _Undecided("git did not answer when asked about this repository")
     if rc != 0:
         raise _Undecided("git did not answer when asked about this repository")
     if out.strip() == "true":

@@ -20,6 +20,7 @@ import ast
 import itertools
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -575,10 +576,64 @@ def test_an_unreachable_remote_is_undecided_and_names_itself(
     assert "on main/master" not in out
 
 
-def test_outside_a_repository_is_caller_error(monkeypatch, tmp_path):
+def test_outside_a_repository_reports_both_exit_codes(monkeypatch, capsys, tmp_path):
     plain = tmp_path / "plain"
     plain.mkdir()
     assert _run(monkeypatch, plain, "deadbeefdead") == check.EXIT_CALLER
+    err = capsys.readouterr().err
+    assert "git exits 128 at the working directory, also with safe.directory=*" in err
+
+    broken = _work(tmp_path, "broken")
+    with (broken / ".git" / "config").open("a", encoding="utf-8") as f:
+        f.write("[broken\n")
+    assert _run(monkeypatch, broken, "deadbeefdead") == check.EXIT_CALLER
+    err = capsys.readouterr().err
+    assert "git exits 128 at the working directory, also with safe.directory=*" in err
+
+
+def _different_owner_git(tmp_path) -> Path:
+    """`GIT_TEST_ASSUME_DIFFERENT_OWNER=1`·`GIT_CONFIG_NOSYSTEM=1`을 export하고 실제 git을
+    exec하는 래퍼를 tmp_path/bin/git 에 쓰고 그 디렉터리를 돌려준다."""
+    real_git = shutil.which("git")
+    assert real_git, "git not on PATH"
+    wrapper_dir = tmp_path / "bin"
+    wrapper_dir.mkdir()
+    wrapper = wrapper_dir / "git"
+    wrapper.write_text(
+        "#!/bin/sh\n"
+        "export GIT_TEST_ASSUME_DIFFERENT_OWNER=1 GIT_CONFIG_NOSYSTEM=1\n"
+        f'exec "{real_git}" "$@"\n',
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    return wrapper_dir
+
+
+def test_an_ownership_refusal_reports_both_exit_codes(monkeypatch, capsys, tmp_path):
+    if os.name != "posix":
+        pytest.skip("the git wrapper is a shell script")
+    src, pub, _local = _published(tmp_path)
+    wrapper_dir = _different_owner_git(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("PATH", f"{wrapper_dir}{os.pathsep}{os.environ['PATH']}")
+
+    raw = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=src,
+        capture_output=True,
+        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+    )
+    assert raw.returncode == 128, f"raw git through the wrapper exited {raw.returncode}"
+
+    rc = _run(monkeypatch, src, _short(pub))
+    out, err = capsys.readouterr()
+    assert rc == check.EXIT_CALLER
+    assert "git exits 128 at the working directory and 0 with safe.directory=*" in err
+    assert "on main/master" not in out
+
+    (tmp_path / ".gitconfig").write_text("[safe]\n\tdirectory = *\n", encoding="utf-8")
+    assert _run(monkeypatch, src, _short(pub)) == check.EXIT_ALL_ON
 
 
 def test_local_branches_head_and_fetch_head_are_untouched(monkeypatch, tmp_path):
@@ -654,6 +709,7 @@ def test_the_runner_separates_a_timeout_from_a_failure_to_run(monkeypatch):
 # 호출 자리 술어. `check.py` 의 `run_git` 호출 노드와 일대일이어야 한다(아래 테스트가 잰다).
 _SPAWN_SITES = {
     "rev-parse": lambda a: a[:2] == ["rev-parse", "--is-shallow-repository"],
+    "probe": lambda a: a[:2] == ["-c", "safe.directory=*"],
     "remote": lambda a: a == ["remote"],
     "ls-remote": lambda a: a[0] == "ls-remote",
     "fetch": lambda a: a[0] == "fetch",
@@ -664,6 +720,7 @@ _SPAWN_SITES = {
 # `_SPAWN_REASONS` 와 `_REMOTE_PHRASES` 로 본다.
 _SPAWN_CELLS = (
     ("rev-parse", 127, (), ()),
+    ("probe", 127, (), ()),
     ("remote", 127, (), ()),
     ("ls-remote", 127, (), ()),
     ("ls-remote", 124, ("could not reach",), ("git could not be run",)),
@@ -675,10 +732,13 @@ _SPAWN_CELLS = (
 # 사유 경로 127 칸의 사유. 여기 없는 자리는 `_report` 경로로 본다.
 _SPAWN_REASONS = {
     "rev-parse": "git did not answer when asked about this repository",
+    "probe": "git did not answer when asked about this repository",
     "remote": "`git remote` failed",
     "ls-remote": "git could not be run",
     "fetch": "git could not be run",
 }
+
+_SITES_REACHED_ONLY_AFTER_RC_128 = {"probe"}
 
 # 이 모듈이 원격을 가리킬 때 쓰는 문구(`55c53dd`). 127 칸의 stdout 어디에도 없어야 한다.
 _REMOTE_PHRASES = ("could not reach", "the fetch from", "has neither main nor master")
@@ -760,7 +820,11 @@ def test_a_local_git_failure_is_never_reported_as_a_remote_one(
         return (rc, "") if hit["on"] else real(args, **kwargs)
 
     monkeypatch.setattr(check, "run_git", _injected)
-    exit_code = _run(monkeypatch, src, _short(local))
+    where = src
+    if site in _SITES_REACHED_ONLY_AFTER_RC_128:
+        where = tmp_path / "plain"
+        where.mkdir()
+    exit_code = _run(monkeypatch, where, _short(local))
     out, err = capsys.readouterr()
 
     assert hit["on"], f"the {site} call site was never reached"
