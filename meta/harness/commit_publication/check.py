@@ -16,11 +16,10 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
 주장하지 않는 것:
     - 호출자 환경의 `GIT_` 접두사 변수는 하나도 전달하지 않는다. 그래서 전송 설정
       (`GIT_SSH_COMMAND` 등)과 관측 설정(`GIT_TRACE2_EVENT` 등)이 함께 사라진다 —
-      후자는 파일·소켓 타겟이어도 마찬가지다. 필요하면 환경변수가 아니라 git config로
-      둔다. 전송·프로토콜은 저장소 설정에도 전역 설정에도 둘 수 있다(`core.sshCommand`,
+      후자는 파일·소켓 타겟이어도 마찬가지다.
+      전송·프로토콜은 저장소 설정에도 전역 설정에도 둘 수 있다(`core.sshCommand`,
       `http.proxy`, `http.sslCAInfo`). 관측(`trace2.*Target`)은 전역·시스템 설정에만
-      둘 수 있다 — git이 저장소 설정의 trace2 키를 읽지 않는다. 자식 프로젝트도 소스를
-      고치지 않고 이 경로로 해결한다.
+      둘 수 있다 — git이 저장소 설정의 trace2 키를 읽지 않는다.
     - `GIT_` 접두사 밖의 채널은 중화하지 않는다. `HOME`·`XDG_CONFIG_HOME`이 고르는 전역
       설정(`url.insteadOf`·`core.useReplaceRefs`), `PATH`가 고르는 git·ssh 실행 파일,
       프록시 변수가 전부 판정을 바꿀 수 있고 거짓 "발행됨"까지 만든다. 이 목록은 예시이지

@@ -892,11 +892,6 @@ def _local_env_var_names() -> list[str]:
 
 def test_no_inherited_git_var_reaches_the_child(monkeypatch, tmp_path):
     """호출자 환경의 `GIT_*`는 하나도 전달되지 않는다 — 도구가 세우는 것만 남는다.
-
-    이름 표본이 아니라 접두사 규칙 자체를 고정한다. 표본만 심으면 "이 하나는 통과시키자"는
-    허용목록 회귀가 초록으로 지나간다 — 심은 이름이 거기 없으면 자식 env의 `GIT_` 집합이
-    그대로이기 때문이다. 그래서 git이 스스로 대는 목록 전부에, 어떤 허용목록에도 들어 있을
-    리 없는 합성 이름을 더해 심는다.
     """
     src, pub, _local = _published(tmp_path)
 
@@ -997,8 +992,7 @@ def test_stripping_transport_env_substitutes_the_target_rather_than_severing_it(
     저장소 config의 `core.sshCommand`가 B를 받치고 있고 B에는 있다. 도구는 환경 쪽만 벗기므로
     B에 대해 "발행됨"을 낸다 — 호출자가 겨냥한 적 없는 원격이다.
 
-    이건 결함이 아니라 `GIT_` 전면 제거의 논리적 귀결이다. `core.gitProxy`·`PATH`의 기본
-    실행 파일도 같은 구조를 만든다.
+    이건 결함이 아니라 `GIT_` 전면 제거의 논리적 귀결이다.
     """
     aimed = _bare(tmp_path, "aimed")
     backing = _bare(tmp_path, "backing")
