@@ -48,6 +48,10 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
       않는다.
     - `--no-write-fetch-head`는 git 2.29 이상을 요구한다. 그 미만에서는 fetch가 미지 옵션으로
       실패해 exit 3이 된다.
+    - 첫 `rev-parse`가 128을 내면 같은 명령을 `-c safe.directory=*`로 한 번 더 부른다. 그 값을
+      protected config로 읽는 git(upstream 2.38 이상)이 아니면, 소유권 검사가 있어도 두 번째
+      호출이 128을 낸다. 배포판 백포트는 버전 문자열과 다를 수 있다.
+      인용: 오너 결정 2026-09-19, PR #171.
     - 판정 대상은 프로세스 cwd가 속한 저장소다. 규칙이 인용하는 `uv run --directory meta ...`는
       cwd를 `meta/`로 바꾸므로 `meta/`를 담은 저장소를 본다. 저장소를 지정하는
       인자(`-C` 등)는 받지 않는다(PR #152의 범위 축소). 다른 저장소(서브모듈 등)의
