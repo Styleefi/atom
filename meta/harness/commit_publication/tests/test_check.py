@@ -1053,39 +1053,18 @@ def _run_git_env_dict() -> ast.Dict:
     return envs[0]
 
 
-def test_the_env_filter_admits_no_git_variable_by_name() -> None:
-    """env 필터의 모양 자체를 고정한다.
+_RUN_GIT_ENV = (
+    "{**{k: v for k, v in os.environ.items() if not k.startswith('GIT_')}, "
+    "'GIT_TERMINAL_PROMPT': '0', 'GIT_ASKPASS': '/bin/false', "
+    "'SSH_ASKPASS': '/bin/false', 'SSH_ASKPASS_REQUIRE': 'force'}"
+)
 
-    spy 테스트는 심은 이름만 본다. 실제 이름 하나를 찍어 통과시키는 회귀
-    (`or k == "GIT_CONFIG_SYSTEM"`, `k not in (...)`)는 그 이름이 목록에 없으면 초록으로
-    지나간다. 3라운드 공격이 그런 변이 여섯 개가 전 스위트를 통과함을 실측했고, 그중
-    `GIT_CONFIG_SYSTEM`은 거짓 exit 4까지 갔다. 이름 표본으로는 원리상 이 부류를 닫을 수
-    없으므로 소스를 본다.
+
+def test_run_git_env_literal_matches_the_pinned_source() -> None:
+    """`run_git`의 `env=` 사전 리터럴을 고정된 문자열과 통째로 비교한다 — 선언된 경계.
+
+    불변식: 이 테스트는 `run_git` 안 `env=` 리터럴의 `ast.unparse` 결과가 `_RUN_GIT_ENV`와
+    같음을 단언한다. 실패 방향: 그 리터럴 밖의 코드가 자식 git에 `GIT_` 변수를 넘기면 이
+    테스트는 침묵할 수 있다. 인용: 오너 결정 2026-09-19, PR #169 원장.
     """
-    env = _run_git_env_dict()
-
-    literal_git = {
-        key.value
-        for key in env.keys
-        if isinstance(key, ast.Constant) and str(key.value).startswith("GIT_")
-    }
-    assert literal_git == {"GIT_TERMINAL_PROMPT", "GIT_ASKPASS"}, literal_git
-    assert all(key is None or isinstance(key, ast.Constant) for key in env.keys), [
-        ast.unparse(key) for key in env.keys if key is not None
-    ]
-    for key, value in zip(env.keys, env.values):
-        if isinstance(key, ast.Constant) and str(key.value).startswith("GIT_"):
-            assert isinstance(value, ast.Constant) and isinstance(value.value, str), (
-                f"{key.value}: {ast.unparse(value)}"
-            )
-
-    unpacked = [value for key, value in zip(env.keys, env.values) if key is None]
-    assert len(unpacked) == 1, "exactly one ** unpacking may bring in the environment"
-    (comp,) = unpacked
-    assert isinstance(comp, ast.DictComp), ast.unparse(comp)
-
-    (gen,) = comp.generators
-    assert ast.unparse(gen.iter) == "os.environ.items()", ast.unparse(gen.iter)
-    (cond,) = gen.ifs
-    key_name = ast.unparse(gen.target.elts[0])
-    assert ast.unparse(cond) == f"not {key_name}.startswith('GIT_')", ast.unparse(cond)
+    assert ast.unparse(_run_git_env_dict()) == _RUN_GIT_ENV
