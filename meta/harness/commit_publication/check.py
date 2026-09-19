@@ -5,7 +5,7 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
 그 ref가 없거나 낡은 구성(`--single-branch`·pruned clone, `git pull <URL>`)에서는 이미
 발행된 커밋도 보고한다. 그 판별을 규칙 산문이 아니라 실행 파일이 수행하게 한다.
 
-주장하는 것 (전부 아래 "주장하지 않는 것"의 조건 안에서다):
+주장하는 것:
     - 나열된 SHA 각각이 지정된 remote의 `refs/heads/main`·`refs/heads/master`에 대해
       조상인지를, ls-remote가 돌려준 tip과 비교해 판정한다.
     - 판정은 **이 실행이 읽은 원격 상태**에 대한 것이다. "훅이 틀렸다"는 판정하지 않는다 —
@@ -20,12 +20,7 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
       둔다. 전송·프로토콜은 저장소 설정에도 전역 설정에도 둘 수 있다(`core.sshCommand`,
       `http.proxy`, `http.sslCAInfo`). 관측(`trace2.*Target`)은 전역·시스템 설정에만
       둘 수 있다 — git이 저장소 설정의 trace2 키를 읽지 않는다. 자식 프로젝트도 소스를
-      고치지 않고 이 경로로 해결한다. **벗긴 뒤 무엇이 판정 대상이 되는지는 보증하지
-      않는다.** 변수가 사라져도 채널은 남고, 그 채널을 무엇이 받치는지 — 예컨대 cwd 탐색,
-      저장소·전역 config, `PATH`의 실행 파일 — 가 대상을 정한다. 그 대상은 호출자가 겨냥한
-      적 없는 저장소나 원격일 수 있고, 그때의 "발행됨"(exit 4)에는 아무 표시가 없다. 바로
-      위가 권하는 이전도 그 상태를 만든다 — env와 config가 둘 다 살아 있는 동안. 이 방향은
-      산문이 아니라 테스트가 고정한다.
+      고치지 않고 이 경로로 해결한다.
     - `GIT_` 접두사 밖의 채널은 중화하지 않는다. `HOME`·`XDG_CONFIG_HOME`이 고르는 전역
       설정(`url.insteadOf`·`core.useReplaceRefs`), `PATH`가 고르는 git·ssh 실행 파일,
       프록시 변수가 전부 판정을 바꿀 수 있고 거짓 "발행됨"까지 만든다. 이 목록은 예시이지

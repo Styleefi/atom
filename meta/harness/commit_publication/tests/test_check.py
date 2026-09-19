@@ -939,8 +939,7 @@ def test_git_dir_in_the_environment_does_not_move_the_repository(
 
     판별자: 저 저장소에만 있는 발행된 SHA. 새면 그 저장소 기준으로 on(4)이 나온다.
     막히면 cwd 저장소 기준으로 판정되는데, **이 fixture에서는** cwd 저장소가 그 객체를
-    모르므로 판정 불가(3)가 된다. 3은 차단의 성질이 아니라 fixture의 성질이다 — cwd
-    저장소가 그 객체를 아는 배치라면 막혀도 4가 나온다(모듈 docstring의 "보증하지 않는다").
+    모르므로 판정 불가(3)가 된다. 3은 차단의 성질이 아니라 fixture의 성질이다.
     """
     src, _pub, _local = _published(tmp_path)
     second = tmp_path / "second"
@@ -987,15 +986,11 @@ def test_stripping_transport_env_substitutes_the_target_rather_than_severing_it(
 ):
     """전송 변수를 벗기면 끊기는 게 아니라 **대상이 바뀔 수 있다**.
 
-    docstring이 이 방향을 산문으로 두 번 잘못 적었다(둘 다 "닿지 못해 exit 2나 3이 된다"고
-    약속했고 둘 다 반증됐다). 그래서 산문이 아니라 여기서 고정한다.
-
     구도: 호출자는 `GIT_SSH_COMMAND`로 저장소 A를 겨냥한다. A에는 그 커밋이 없다. 그런데
     저장소 config의 `core.sshCommand`가 B를 받치고 있고 B에는 있다. 도구는 환경 쪽만 벗기므로
     B에 대해 "발행됨"을 낸다 — 호출자가 겨냥한 적 없는 원격이다.
 
-    이건 결함이 아니라 `GIT_` 전면 제거의 논리적 귀결이다. 이 단언이 깨지면 그 결정이
-    바뀐 것이므로 docstring의 ③도 함께 다시 봐야 한다. `core.gitProxy`·`PATH`의 기본
+    이건 결함이 아니라 `GIT_` 전면 제거의 논리적 귀결이다. `core.gitProxy`·`PATH`의 기본
     실행 파일도 같은 구조를 만든다.
     """
     aimed = _bare(tmp_path, "aimed")
@@ -1052,16 +1047,13 @@ def _run_git_env_dict() -> ast.Dict:
 
 
 def test_the_env_filter_admits_no_git_variable_by_name() -> None:
-    """env 필터의 모양 자체를 고정한다 — 이름으로 예외를 뚫는 회귀를 부류째 막는다.
+    """env 필터의 모양 자체를 고정한다.
 
     spy 테스트는 심은 이름만 본다. 실제 이름 하나를 찍어 통과시키는 회귀
     (`or k == "GIT_CONFIG_SYSTEM"`, `k not in (...)`)는 그 이름이 목록에 없으면 초록으로
     지나간다. 3라운드 공격이 그런 변이 여섯 개가 전 스위트를 통과함을 실측했고, 그중
     `GIT_CONFIG_SYSTEM`은 거짓 exit 4까지 갔다. 이름 표본으로는 원리상 이 부류를 닫을 수
     없으므로 소스를 본다.
-
-    고정하는 것 둘: 환경을 들여오는 길은 `not k.startswith("GIT_")` 하나만 가진 사전
-    컴프리헨션 한 개이고, 리터럴로 적힌 `GIT_` 키는 도구가 스스로 세우는 둘뿐이다.
     """
     env = _run_git_env_dict()
 
