@@ -76,7 +76,6 @@ commit_backstop 훅은 **로컬에 존재하는** 원격 main/master ref만 제�
     5는 그대로 5이고(별도 줄로 이름을 부른다), 4는 3이 된다 — "하나 이상 not-on"은 존재
     명제이고 "전부 on"은 전칭 명제이기 때문이다. 실질 판정을 1이 아니라 5에 둔 이유는
     파이썬이 잡히지 않은 예외에서 1을, uv가 실패 시 1이나 2를 내기 때문이다.
-    2와 3의 경계: **2는 에이전트가 스스로 고칠 수 있고 3은 못 고친다.**
 """
 
 from __future__ import annotations
@@ -119,7 +118,7 @@ class _Undecided(Exception):
 
 
 class _CallerError(Exception):
-    """호출자가 고칠 수 있는 잘못 (exit 2)."""
+    """호출자 잘못 (exit 2)."""
 
     def __init__(self, reason: str) -> None:
         super().__init__(reason)

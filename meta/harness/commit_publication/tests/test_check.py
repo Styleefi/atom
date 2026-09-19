@@ -562,7 +562,7 @@ def test_malformed_sha_is_caller_error_and_unresolvable_is_undecided(
 def test_an_unreachable_remote_is_undecided_and_names_itself(
     monkeypatch, capsys, tmp_path
 ):
-    # 등록은 됐는데 닿지 않는 원격. 오타(exit 2)와 달리 호출자가 고칠 수 없으므로 exit 3
+    # 등록은 됐는데 닿지 않는 원격. exit 3
     # 이고, 사유는 어느 원격이었는지 말한다. 이 경로를 도는 테스트가 없어서, 사유에서
     # 이름을 빼는 변이가 스위트를 통과했다.
     src, pub, _ = _published(tmp_path)
@@ -576,7 +576,6 @@ def test_an_unreachable_remote_is_undecided_and_names_itself(
 
 
 def test_outside_a_repository_is_caller_error(monkeypatch, tmp_path):
-    # cwd 문제는 호출자가 고칠 수 있다.
     plain = tmp_path / "plain"
     plain.mkdir()
     assert _run(monkeypatch, plain, "deadbeefdead") == check.EXIT_CALLER
