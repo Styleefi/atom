@@ -228,8 +228,8 @@ def test_verbatim_relocation_across_files_passes(tmp_path: Path) -> None:
         "불변식: 그렇게 호출된 자리는 모두 표에 rc 127 칸이 있다.\n"
         "실패 방향: 그 이름 없이 git을 부르는 자리는 검사되지 않는다.\n"
     )
-    before = {"check.py": '"""모듈.\n\n' + block + '"""\n', "test_check.py": '"""테스트.\n"""\n'}
-    after = {"check.py": '"""모듈.\n"""\n', "test_check.py": '"""테스트.\n\n' + moved + '"""\n'}
+    before = {"check.py": '"""모듈.\n\n' + block + '"""\n', "check_test.py": '"""테스트.\n"""\n'}
+    after = {"check.py": '"""모듈.\n"""\n', "check_test.py": '"""테스트.\n\n' + moved + '"""\n'}
     assert _judge(tmp_path, before, after) is False
 
 
@@ -335,21 +335,21 @@ def test_relocated_block_with_two_reworded_sentences_is_flagged(tmp_path: Path) 
         "불변식: 그렇게 호출된 자리는 모두 표에 rc 127 칸이 있다.\n"
         "실패 방향: 그 이름 없이 git을 부르는 자리는 검사되지 않는다.\n"
     )
-    before = {"check.py": '"""모듈.\n\n' + block + '"""\n', "test_check.py": '"""테스트.\n"""\n'}
-    after = {"check.py": '"""모듈.\n"""\n', "test_check.py": '"""테스트.\n\n' + moved + '"""\n'}
+    before = {"check.py": '"""모듈.\n\n' + block + '"""\n', "check_test.py": '"""테스트.\n"""\n'}
+    after = {"check.py": '"""모듈.\n"""\n', "check_test.py": '"""테스트.\n\n' + moved + '"""\n'}
     assert _judge(tmp_path, before, after) is True
 
 
 def test_test_comment_sentences_are_flagged(tmp_path: Path) -> None:
     # 0e70c56
-    before = 'def test_x():\n    assert "refs/remotes/origin/main" in left  # --not --remotes는 여전히 실동작한다\n'
+    before = 'def case_x():\n    assert "refs/remotes/origin/main" in left  # --not --remotes는 여전히 실동작한다\n'
     after = (
-        "def test_x():\n"
+        "def case_x():\n"
         '    # 원격 ref 집합이 비지 않았다 — 아래 블록이 "제외할 ref가 하나도 없어서"\n'
         "    # 생긴 퇴화가 아님을 배제한다.\n"
         '    assert "refs/remotes/origin/main" in left\n'
     )
-    assert _judge(tmp_path, {"test_b.py": before}, {"test_b.py": after}) is True
+    assert _judge(tmp_path, {"b_test.py": before}, {"b_test.py": after}) is True
 
 
 def test_comment_change_on_a_code_line_is_flagged(tmp_path: Path) -> None:
