@@ -28,6 +28,8 @@ commit_guard(PreToolUse)는 명령 텍스트를 추론하는 best-effort 예방�
       보호의 몫이다(평범한 단일 라인 형태는 commit_guard가 실행 전에 차단).
     - payload cwd 밖 저장소(`git -C`, 서브모듈→부모)는 cwd가 그 저장소로
       돌아온 뒤에야 지연 적발된다.
+    - 훅이 상속한 `GIT_DIR`은 저장소 해석을 payload cwd 밖으로 옮길 수 있다 —
+      명령이 `GIT_DIR`을 지우고 cwd에서 커밋한 경우의 실측은 #170.
     - 처음 기록되는 tip은 판정하지 않는다(기록만). 예외는 기록의 상속이다 —
       `HEAD@<git-dir>` 키는 worktree가 사라져도 남으므로, 같은 git-dir을
       다시 얻는 새 worktree의 HEAD는 첫 기록이 아니라 옛 tip을 직전 tip으로
