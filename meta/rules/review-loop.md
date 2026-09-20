@@ -120,9 +120,9 @@ the loop writes only its angle-bracket slots.
 > could commit — each with its wrong action and bound.
 >
 > Output only this: the purpose sentence; a table with the columns
-> class, wrong action, bound, the purpose-failure class marked; one or two
-> below-bar examples; and a list of every file you read and every command
-> you ran. No trade-offs, no advice to the loop.
+> class, wrong action, bound, with the purpose-failure class marked in its
+> class cell; one or two below-bar examples; and a list of every file you
+> read and every command you ran. No trade-offs, no advice to the loop.
 
 ## Rounds
 
