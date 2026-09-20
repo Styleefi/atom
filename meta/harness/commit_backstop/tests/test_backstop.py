@@ -10,6 +10,7 @@ tmp_path에 실제 저장소(+bare remote)를 만들어 결정성 있게 검증�
 
 from __future__ import annotations
 
+import ast
 import io
 import json
 import os
@@ -839,9 +840,24 @@ def _head_key(path) -> str:
     return f"HEAD@{os.path.realpath(out)}"
 
 
+@pytest.mark.parametrize(
+    "inherited, restart_at",
+    [
+        (None, "repo"),
+        ("repo", "repo"),
+        ("wt", "wt"),
+        ("wt", "repo"),
+        ("repo", "wt"),
+    ],
+)
 def test_lost_baseline_rewrite_reseeds_every_worktree_head(
-    monkeypatch, capsys, tmp_path
+    monkeypatch, capsys, tmp_path, inherited, restart_at
 ):
+    """재시작이 모든 worktree의 HEAD를 담는다 — 상속된 `GIT_DIR` 아래에서도.
+
+    `inherited`는 훅이 물려받는 `GIT_DIR`이 어느 worktree의 git-dir인가를,
+    `restart_at`은 재시작 호출의 payload cwd를 고른다.
+    """
     repo, wt, wt_tip = _observed_worktree(monkeypatch, tmp_path)
     # 한 번도 관찰되지 않은 worktree — 기록이 기억이 아니라 열거에 근거함을
     # 고정한다(마지막 스탠자만 남기는 구현도 여기서 죽는다).
@@ -849,7 +865,13 @@ def test_lost_baseline_rewrite_reseeds_every_worktree_head(
     _git(repo, "worktree", "add", "-q", str(wt2), "-b", "feat/wt2", "main")
     with open(_state_path(repo), "w", encoding="utf-8") as fp:
         fp.write("{ not json")
-    assert _run(monkeypatch, repo) == 1
+    where = {"repo": repo, "wt": wt}
+    if inherited is None:
+        # 부재를 주변 환경에 맡기지 않는다.
+        monkeypatch.delenv("GIT_DIR", raising=False)
+    else:
+        monkeypatch.setenv("GIT_DIR", _git(where[inherited], "rev-parse", "--path-format=absolute", "--git-dir"))
+    assert _run(monkeypatch, where[restart_at]) == 1
     assert "restarts at this call's tips" in capsys.readouterr().err
     main_tip = _git(repo, "rev-parse", "refs/heads/main")
     seen = _read_state(repo)["seen"]
@@ -878,6 +900,94 @@ def test_sibling_worktree_violation_after_lost_baseline_blocks(
     capsys.readouterr()
     bad = _commit(wt, "Bad header in sibling.")
     assert _run(monkeypatch, wt) == backstop.EXIT_BLOCK
+    err = capsys.readouterr().err
+    assert bad[:12] in err
+    assert "Conventional Commits" in err  # 헤더 레인이 잡은 것
+    assert "landed on local" not in err  # 브랜치 레인 오인 봉인
+
+
+def test_reseed_enumerates_the_environment_resolved_repository(
+    monkeypatch, capsys, tmp_path
+):
+    """상속된 `GIT_DIR`이 다른 저장소를 가리키면 재시드는 그 저장소를 열거한다.
+
+    경로별 해석만 환경을 비우고 `worktree list`는 비우지 않는다는 구분을 고정한다.
+    둘 다 비우면 payload cwd 저장소의 worktree들이 환경 저장소의 상태 파일에
+    심기고, 환경 저장소의 형제들은 기준선을 잃는다.
+    """
+    other = _baseline(monkeypatch, tmp_path, name="other")
+    other_wt = tmp_path / "other-wt"
+    _git(other, "worktree", "add", "-q", str(other_wt), "-b", "feat/other-wt", "main")
+    repo, wt, _ = _observed_worktree(monkeypatch, tmp_path)
+    os.remove(_state_path(other))
+    monkeypatch.setenv("GIT_DIR", _git(other, "rev-parse", "--path-format=absolute", "--git-dir"))
+    assert _run(monkeypatch, repo) == 0  # 환경 저장소의 최초 관찰: 기록만
+    capsys.readouterr()
+    seen = _read_state(other)["seen"]
+    assert _head_key(other_wt) in seen
+    assert _head_key(wt) not in seen
+
+
+def test_only_one_function_touches_the_environment() -> None:
+    """자식 git에 넘어가는 환경을 손대는 자리는 `_worktree_heads` 하나다.
+
+    단언하는 것: `os.environ`·`putenv`·`unsetenv` 참조나 `env=` 키워드가 나온
+    자리를 가장 가까운 감싸는 함수 이름으로(감싸는 함수가 없으면 `<module>`로)
+    모은 집합이 `{"_worktree_heads"}`와 같다. 등식이라 정리가 사라져도, 다른
+    자리로 번져도 실패한다. 중첩 헬퍼로 옮기면 그 헬퍼 이름이 나타나 실패한다.
+
+    침묵하는 방향: `getattr(os, "environ")`·subprocess 래퍼처럼 구문을 우회하는
+    편집은 보지 못한다. 둘 다 의도적이고 diff에 드러나는 편집이다.
+
+    이 등식을 고정하는 이유는 전역 정리가 기각된 설계이기 때문이다 — PR #173
+    원장 F2-2에 기록된 오너 결정(2026-09-20). 그 기각은 원장에만 있어서 나중
+    세션에게는 일반화가 자연스러워 보인다. 형태는 commit_publication 테스트의
+    `_run_git_env_dict` 선례를 따른다.
+    """
+    def touches(node) -> bool:
+        if isinstance(node, ast.Attribute):
+            return node.attr in {"environ", "putenv", "unsetenv"}
+        return isinstance(node, ast.Call) and any(
+            kw.arg == "env" for kw in node.keywords
+        )
+
+    def collect(node, owner: str, found: set[str]) -> None:
+        for child in ast.iter_child_nodes(node):
+            name = (
+                child.name
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                else owner
+            )
+            if touches(child):
+                found.add(name)
+            collect(child, name, found)
+
+    touching: set[str] = set()
+    collect(ast.parse(Path(backstop.__file__).read_text(encoding="utf-8")), "<module>", touching)
+    assert touching == {"_worktree_heads"}
+
+
+@pytest.mark.parametrize("inherited, restart_at", [("repo", "repo"), ("wt", "wt")])
+def test_sibling_violation_after_a_restart_under_an_inherited_git_dir(
+    monkeypatch, capsys, tmp_path, inherited, restart_at
+):
+    """상속된 `GIT_DIR` 아래 재시작 뒤에도, 환경 없는 세션이 형제를 적발한다.
+
+    피해자는 `GIT_DIR`이 가리키지 않는 `wt2`다. 가리키는 쪽은 `main()`의 자기
+    관찰이 그 키를 덮어써, 붕괴 뒤에도 그 worktree의 기준선은 남는다.
+    """
+    repo, wt, _ = _observed_worktree(monkeypatch, tmp_path)
+    wt2 = tmp_path / "wt2"
+    _git(repo, "worktree", "add", "-q", str(wt2), "-b", "feat/wt2", "main")
+    with open(_state_path(repo), "w", encoding="utf-8") as fp:
+        fp.write("{ not json")
+    where = {"repo": repo, "wt": wt}
+    monkeypatch.setenv("GIT_DIR", _git(where[inherited], "rev-parse", "--path-format=absolute", "--git-dir"))
+    assert _run(monkeypatch, where[restart_at]) == 1
+    capsys.readouterr()
+    monkeypatch.delenv("GIT_DIR")
+    bad = _commit(wt2, "Bad header in sibling.")
+    assert _run(monkeypatch, wt2) == backstop.EXIT_BLOCK
     err = capsys.readouterr().err
     assert bad[:12] in err
     assert "Conventional Commits" in err  # 헤더 레인이 잡은 것
