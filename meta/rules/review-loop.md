@@ -25,25 +25,25 @@ required). This rule binds the agent running the loop, never the owner.
 
 ## Severity bar
 
-- Before round 1, declare in the ledger the concrete defect classes that
-  count as above-bar for this PR, plus one or two below-bar examples. A
-  declared class names two things: its **wrong action** — what the artifact
-  under review, or a later session following the diff as written, does wrong
-  while a finding in the class stands — and its **bound** — a mechanically
+- The ledger carries a declaration of the concrete defect classes that count
+  as above-bar for this PR, plus one or two below-bar examples. A declared
+  class names two things: its **wrong action** — what the artifact under
+  review, or a later session following the diff as written, does wrong while
+  a finding in the class stands — and its **bound** — a mechanically
   checkable limit on fixes, such as a test the fix must add or a count no
   fix may raise. Restating an abstract formula, or a class missing either
   part, is not a declaration (Origin: #113). Guide: "a finding with a
   realistic scenario reproducing the defect class this PR exists to fix, or
   an equally harmful malfunction."
 - The declaration is authored by a fresh-context subagent (not a fork),
-  spawned after the PR has its diff and before the first fix, from a
-  working tree clean at the PR's head, with the Bar declaration prompt
-  below: the agent running the loop fills the prompt's slots — the PR's
-  number, base, head, and the issues its body closes — and adds nothing
-  to the prompt. The agent running the loop does not draft or edit the
-  initial declaration; one that lacks the floor's class, or that it takes
-  to be no declaration in this section's sense, goes to the owner rather
-  than to a raise. (Origin: #151.)
+  spawned after the PR has its diff and before the first fix, with the
+  Bar declaration prompt below: the agent running the loop fills the
+  prompt's slots — the PR's number, merge base, head, and the issues its
+  body closes — and adds nothing to the prompt. The agent running the
+  loop does not draft or edit the initial declaration; one that lacks the
+  floor's class, or that it takes to be no declaration in this section's
+  sense, stops the loop before its first fix and returns to the owner.
+  (Origin: #151.)
 - Floor: the declared classes MUST include failure of the PR's purpose (the
   issue it closes, or the PR body's stated goal).
 - Scale the bar to the diff's behavior surface, not its line count.
@@ -98,18 +98,19 @@ The text below is the prompt of the declaring subagent. The agent running
 the loop writes only its angle-bracket slots.
 
 > You author the severity-bar declaration for a review loop on pull
-> request #<n> of this repository — base <base>, head <head>, closing
-> issue(s) <issues>. Use the five inputs below and consult nothing else
-> about this PR: not its comments, not unlinked issues. If you feel you
-> need more, declare from what you have.
+> request #<n> of this repository — merge base <base>, head <head>. Use
+> the five inputs below and consult nothing else about this PR: not its
+> comments, not unlinked issues. If you feel you need more, declare from
+> what you have.
 >
 > 1. The Severity bar section of meta/rules/review-loop.md as it stands
->    at the base (`git show <base>:meta/rules/review-loop.md`): what a
->    declaration is, its floor, its behaviour gate.
+>    at the merge base (`git show <base>:meta/rules/review-loop.md`):
+>    what a declaration is, its floor, its behaviour gate.
 > 2. The PR's title and body.
-> 3. Each closing issue, if any: its body and every comment.
+> 3. Each issue the PR body closes, if any (<issues>): its body and every
+>    comment.
 > 4. The PR's diff.
-> 5. The working tree, which is at <head>, read-only.
+> 5. The files at <head>, via `git show`.
 >
 > Work in this order. (a) From inputs 2 and 3, before reading the diff,
 > write one sentence: what this PR exists to do, and what it would mean
@@ -183,10 +184,10 @@ the loop writes only its angle-bracket slots.
 
 One ledger comment per PR, created before round 1 and updated every round.
 It is the loop's single source of truth — a later session resumes from it
-alone. It records: the bar declaration verbatim, with the slot values
-given and what the declarer reports having read and run; the review
-procedure in use (changing it needs owner approval, recorded here); per
-round, the verified findings → matched class → assigned lane, the
+alone. It records: the bar declaration verbatim, kept apart from any raise,
+with the slot values given and what the declarer reports having read and
+run; the review procedure in use (changing it needs owner approval, recorded
+here); per round, the verified findings → matched class → assigned lane, the
 above-bar count, the class names each fix addresses, and per commit the
 attacking model, whether the message was attacked, and the sentences
 falsified, each with its disposal; owner-accepted trade-offs (one-line
