@@ -25,24 +25,24 @@ required). This rule binds the agent running the loop, never the owner.
 
 ## Severity bar
 
-- The ledger carries a declaration of the concrete defect classes that count
-  as above-bar for this PR, plus one or two below-bar examples. A declared
-  class names two things: its **wrong action** — what the artifact under
-  review, or a later session following the diff as written, does wrong while
-  a finding in the class stands — and its **bound** — a mechanically
-  checkable limit on fixes, such as a test the fix must add or a count no
-  fix may raise. Restating an abstract formula, or a class missing either
-  part, is not a declaration (Origin: #113). Guide: "a finding with a
-  realistic scenario reproducing the defect class this PR exists to fix, or
-  an equally harmful malfunction."
+- Before round 1, the ledger carries a declaration of the concrete defect
+  classes that count as above-bar for this PR, plus one or two below-bar
+  examples. A declared class names two things: its **wrong action** — what
+  the artifact under review, or a later session following the diff as
+  written, does wrong while a finding in the class stands — and its
+  **bound** — a mechanically checkable limit on fixes, such as a test the
+  fix must add or a count no fix may raise. Restating an abstract formula,
+  or a class missing either part, is not a declaration (Origin: #113).
+  Guide: "a finding with a realistic scenario reproducing the defect class
+  this PR exists to fix, or an equally harmful malfunction."
 - The declaration is authored by a fresh-context subagent (not a fork),
-  spawned after the PR has its diff and before the first fix, with the
-  Bar declaration prompt below: the agent running the loop fills the
-  prompt's slots — the PR's number, merge base, head, and the issues its
-  body closes — and adds nothing to the prompt. The agent running the
-  loop does not draft or edit the initial declaration; one that lacks the
-  floor's class, or that it takes to be no declaration in this section's
-  sense, stops the loop before its first fix and returns to the owner.
+  spawned after the PR has its diff and before the first fix, with the Bar
+  declaration prompt below: the agent running the loop fills the prompt's
+  slots — the PR's number, merge base, head, and the issues its body closes
+  — and adds nothing to the prompt. The agent running the loop does not
+  draft or edit the initial declaration; one that lacks the floor's class,
+  or that it takes to be no declaration in this section's sense, stops the
+  loop before its first fix and returns to the owner, not to a raise.
   (Origin: #151.)
 - Floor: the declared classes MUST include failure of the PR's purpose (the
   issue it closes, or the PR body's stated goal).
