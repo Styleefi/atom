@@ -274,6 +274,10 @@ def _worktree_heads(cwd: str | None) -> dict[str, str]:
     남은 worktree — 경로가 재사용되면 stale sha로 키를 오염시킨다)을 배제할
     수 있다.
 
+    경로별 해석은 `GIT_DIR`·`GIT_COMMON_DIR`·`GIT_WORK_TREE`를 뺀 환경에서
+    한다(#174). 열거(`worktree list`)는 상속된 환경 그대로 둔다 — 판정 대상
+    저장소의 목록이어야 한다.
+
     실패는 조용히 좁힌다 — 열거 자체가 실패하면 빈 dict(이 기록 이전과 같은
     동작으로 강등), 개별 스탠자가 걸러지면 그 항목만 뺀다(걸러지는 조건의
     열거는 모듈 docstring 비주장 목록이 보유한다 — 사본이 갈리면 목록 쪽이
@@ -292,21 +296,29 @@ def _worktree_heads(cwd: str | None) -> dict[str, str]:
     path: str | None = None
     sha: str | None = None
     prunable = False
-    for item in out.split("\0"):
-        if item.startswith("worktree "):
-            path = item[len("worktree "):]
-        elif item.startswith("HEAD "):
-            sha = item[len("HEAD "):].strip()
-        elif item.startswith("prunable"):
-            prunable = True
-        elif not item:  # 스탠자 경계 — 방출 후 리셋
-            # sha.strip("0")이 falsy면 해석 불가 HEAD(미탄생·손상 admin dir).
-            if path and sha and sha.strip("0") and not prunable:
-                dirs = _repo_dirs(path)
-                if dirs is not None:
-                    heads[f"HEAD@{dirs[1]}"] = sha
-            path = sha = None
-            prunable = False
+    saved = {
+        name: os.environ.pop(name)
+        for name in ("GIT_DIR", "GIT_COMMON_DIR", "GIT_WORK_TREE")
+        if name in os.environ
+    }
+    try:
+        for item in out.split("\0"):
+            if item.startswith("worktree "):
+                path = item[len("worktree "):]
+            elif item.startswith("HEAD "):
+                sha = item[len("HEAD "):].strip()
+            elif item.startswith("prunable"):
+                prunable = True
+            elif not item:  # 스탠자 경계 — 방출 후 리셋
+                # sha.strip("0")이 falsy면 해석 불가 HEAD(미탄생·손상 admin dir).
+                if path and sha and sha.strip("0") and not prunable:
+                    dirs = _repo_dirs(path)
+                    if dirs is not None:
+                        heads[f"HEAD@{dirs[1]}"] = sha
+                path = sha = None
+                prunable = False
+    finally:
+        os.environ.update(saved)
     return heads
 
 
