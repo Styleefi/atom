@@ -97,23 +97,23 @@ required). This rule binds the agent running the loop, never the owner.
 The text below is the prompt of the declaring subagent. The agent running
 the loop writes only its angle-bracket slots.
 
-> You author the severity-bar declaration for a review loop on pull
-> request #<n> of this repository — merge base <base>, head <head>. Use
-> the five inputs below and consult nothing else about this PR: not its
-> comments. If you feel you need more, declare from what you have.
+> You author the severity-bar declaration for a review loop on pull or
+> merge request <n> of this repository — merge base <base>, head <head>.
+> Use the five inputs below and consult nothing else about this request:
+> not its comments. If you feel you need more, declare from what you have.
 >
 > 1. The Severity bar section of meta/rules/review-loop.md as it stands
 >    at the merge base (`git show <base>:meta/rules/review-loop.md`):
 >    what a declaration is, its floor, its behaviour gate.
-> 2. The PR's title and body.
-> 3. Each issue the PR body closes, if any (<issues>): its body and every
->    comment.
-> 4. The PR's diff.
+> 2. The request's title and body.
+> 3. Each issue the request's body closes, if any (<issues>): its body and
+>    every comment.
+> 4. The request's diff.
 > 5. The files at <head>.
 >
 > Work in this order. (a) From inputs 2 and 3, before reading the diff,
-> write one sentence: what this PR exists to do, and what it would mean
-> for that to fail. That is the purpose-failure class. (b) Read inputs 4
+> write one sentence: what this request exists to do, and what it would
+> mean for that to fail. That is the purpose-failure class. (b) Read inputs 4
 > and 5 and declare the above-bar classes per input 1 — the
 > purpose-failure class, then each equally harmful malfunction of the
 > artifact under review, or of a later session following the diff as
