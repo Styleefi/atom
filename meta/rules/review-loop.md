@@ -193,9 +193,8 @@ rationale, recorded at decision time); links to filed issues. An edit the
 agent makes to the PR title or body is recorded like a commit.
 
 Trade-off acceptance is the owner's decision — the agent only proposes. A
-finding matching an entry in a ledger's owner-accepted trade-offs is
-closed at triage (not counted, not filed) unless it carries new evidence,
-which makes it a normal finding.
+finding matching a recorded trade-off is closed at triage (not counted, not
+filed) unless it carries new evidence, which makes it a normal finding.
 
 ## Triage lanes
 
