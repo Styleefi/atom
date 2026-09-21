@@ -98,7 +98,8 @@ The text below is the prompt of the declaring subagent. The agent running
 the loop writes only its angle-bracket slots.
 
 > You author the severity-bar declaration for a review loop on pull or
-> merge request <n> of this repository — merge base <base>, head <head>.
+> merge request `<n>` of this repository — merge base `<base>`, head
+> `<head>`.
 > Use the five inputs below and consult nothing else about this request:
 > not its comments. If you feel you need more, declare from what you have.
 >
@@ -106,10 +107,10 @@ the loop writes only its angle-bracket slots.
 >    at the merge base (`git show <base>:meta/rules/review-loop.md`):
 >    what a declaration is, its floor, its behaviour gate.
 > 2. The request's title and body.
-> 3. Each issue the request's body closes, if any (<issues>): its body and
->    every comment.
+> 3. Each issue the request's body closes, if any (`<issues>`): its body
+>    and every comment.
 > 4. The request's diff.
-> 5. The files at <head>.
+> 5. The files at `<head>`.
 >
 > Work in this order. (a) From inputs 2 and 3, before reading the diff,
 > write one sentence: what this request exists to do, and what it would
