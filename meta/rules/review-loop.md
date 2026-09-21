@@ -113,11 +113,9 @@ the loop writes only its angle-bracket slots.
 >
 > Work in this order. (a) From inputs 2 and 3, before reading the diff,
 > write one sentence: what this request exists to do, and what it would
-> mean for that to fail. That is the purpose-failure class. (b) Read inputs 4
-> and 5 and declare the above-bar classes per input 1 — the
-> purpose-failure class, then each equally harmful malfunction of the
-> artifact under review, or of a later session following the diff as
-> written — each with its wrong action and bound.
+> mean for that to fail. That is the purpose-failure class. (b) Read
+> inputs 4 and 5 and declare the above-bar classes per input 1, each with
+> its wrong action and bound.
 >
 > Output only this: the purpose sentence; a table with the columns
 > class, wrong action, bound, with the purpose-failure class marked in its
