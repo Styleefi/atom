@@ -256,11 +256,12 @@ def test_trailer_less_commit_is_ignored_even_on_a_loop_branch(monkeypatch, tmp_p
     assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
 
 
-def test_blank_review_loop_value_is_ignored(monkeypatch, tmp_path, capsys) -> None:
+def test_blank_review_loop_value_is_reported_as_malformed(monkeypatch, tmp_path, capsys) -> None:
     repo = _baseline(monkeypatch, tmp_path)
-    _commit(repo, "feat: blank", "Review-loop:   ", "Prose: none", files={"a.md": "A new sentence here.\n"})
+    sha = _commit(repo, "feat: blank", "Review-loop:", "Prose: none")
     assert _git(repo, "log", "-1", "--format=%(trailers:key=Review-loop)") == "Review-loop:"
-    assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
+    _, out = _run(monkeypatch, repo, "git commit -m x", capsys)
+    assert f"{sha[:7]}: {check.REASON_MALFORMED_REVIEW_LOOP}" in _context(out)
 
 
 def test_each_sha_is_reported_once(monkeypatch, tmp_path, capsys) -> None:

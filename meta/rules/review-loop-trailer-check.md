@@ -11,10 +11,9 @@ blocking: false
 The `meta/harness/review_loop_trailer_check/` PostToolUse hook looks at up
 to fifty non-merge commits that reached HEAD since its last observation,
 leaving out those already on `main`/`master`. A commit with a `Review-loop:`
-trailer, as git reads it, whose value is not empty once whitespace is stripped
-is checked for what the review-loop rule's trailer bullets require: a
-`Prose:` trailer valued `attacked` or `none`, no message body beyond the
-trailers, and — unless that trailer says `attacked` — no
+trailer, as git reads it, is checked for what the review-loop rule's trailer
+bullets require: a `Prose:` trailer valued `attacked` or `none`, no message
+body beyond the trailers, and — unless that trailer says `attacked` — no
 added prose line. Which added lines count as prose, and which edits
 (relocation, reflow, clause deletion, backticked-identifier renames) do not,
 is fixed by the fixtures in its `tests/test_prose_lines.py`.
