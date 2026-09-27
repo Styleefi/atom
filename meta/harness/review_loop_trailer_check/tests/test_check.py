@@ -3,8 +3,8 @@
 
 임시 저장소에 커밋을 만들고 페이로드를 stdin으로 넣어 stdout JSON(보고)과 원장
 줄, 상태 파일을 본다. 설계 불변식 — 절대 차단하지 않음(exit 0/1뿐),
-`git log`의 `%(trailers)`가 읽는 `Review-loop:` 트레일러가 없는 커밋은 침묵,
-SHA당 한 번만 보고, 실패는 전부 통과 방향 — 를 케이스로 고정한다.
+훅의 트레일러 읽기(`_MESSAGE_FORMAT`)가 `Review-loop:` 트레일러를 찾지 못한
+커밋은 침묵, SHA당 한 번만 보고, 실패는 전부 통과 방향 — 를 케이스로 고정한다.
 """
 
 from __future__ import annotations

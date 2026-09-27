@@ -10,13 +10,14 @@ blocking: false
 
 The `meta/harness/review_loop_trailer_check/` PostToolUse hook looks at up to
 fifty non-merge commits that reached HEAD since its last observation, leaving
-out those already on `main`/`master`. A commit with a `Review-loop:` trailer,
-as `git log`'s `%(trailers)` reads it, is checked for what the review-loop
-rule's trailer bullets require: a `Prose:` trailer valued `attacked` or
-`none`, no message body beyond the trailers, and — unless that trailer says
-`attacked` — no added prose line. Which added lines count as prose, and which
-edits (relocation, reflow, clause deletion, backticked-identifier renames) do
-not, is fixed by the fixtures in its `tests/test_prose_lines.py`.
+out those already on `main`/`master`. A commit in which the hook's trailer
+read (`_MESSAGE_FORMAT` in `check.py`) finds a `Review-loop:` trailer is
+checked for what the review-loop rule's trailer bullets require: a `Prose:`
+trailer valued `attacked` or `none`, no message body beyond the trailers, and
+— unless that trailer says `attacked` — no added prose line. Which added lines
+count as prose, and which edits (relocation, reflow, clause deletion,
+backticked-identifier renames) do not, is fixed by the fixtures in its
+`tests/test_prose_lines.py`.
 
 Nothing is blocked: findings reach the model as one line of constant reasons
 keyed by short SHA — never a trailer value, a subject or a line of prose —
@@ -26,9 +27,9 @@ and each is appended to the `blocklog` ledger as a `report` event.
 failure path fails open, and a SHA the state file remembers as checked is
 not reported again.
 
-Outside its reach: a loop commit that omits the `Review-loop:` trailer as
-`git log`'s `%(trailers)` reads it (accepted by the owner:
+Outside its reach: a loop commit in which that read finds no `Review-loop:`
+trailer (accepted by the owner:
 https://github.com/Styleefi/atom/issues/178#issuecomment-5856387534, read as
-https://github.com/Styleefi/atom/issues/178#issuecomment-5857106322), and
+https://github.com/Styleefi/atom/issues/178#issuecomment-5857350331), and
 sentences — the check is per line, so counting or judging prose stays with
 the next review pass.
