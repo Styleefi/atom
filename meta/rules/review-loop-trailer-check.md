@@ -27,6 +27,8 @@ and each is appended to the `blocklog` ledger as a `report` event.
 failure path fails open, and a SHA the state file remembers as checked is
 not reported again.
 
-Outside its reach: a loop commit that omits the `Review-loop:` trailer, and
+Outside its reach: a loop commit that omits the `Review-loop:` trailer
+(accepted by the owner:
+https://github.com/Styleefi/atom/issues/178#issuecomment-5856387534), and
 sentences — the check is per line, so counting or judging prose stays with
 the next review pass.
