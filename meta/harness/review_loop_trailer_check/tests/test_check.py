@@ -2,8 +2,8 @@
 """main() 통합 테스트.
 
 임시 저장소에 커밋을 만들고 페이로드를 stdin으로 넣어 stdout JSON(보고)과 원장
-줄, 상태 파일을 본다. 설계 불변식 — 절대 차단하지 않음(exit 0/1뿐), 루프 밖
-커밋은 침묵, SHA당 한 번만 보고, 실패는 전부 통과 방향 — 를 케이스로 고정한다.
+줄, 상태 파일을 본다. 설계 불변식 — 절대 차단하지 않음(exit 0/1뿐),
+SHA당 한 번만 보고, 실패는 전부 통과 방향 — 를 케이스로 고정한다.
 """
 
 from __future__ import annotations
@@ -253,6 +253,13 @@ def test_trailer_less_commit_is_ignored_even_on_a_loop_branch(monkeypatch, tmp_p
     _commit(repo, "feat: first", LOOP, "Prose: none")
     assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
     _commit(repo, "feat: forgot the trailers", files={"a.md": "Prose without any trailer at all.\n"})
+    assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
+
+
+def test_blank_review_loop_value_is_ignored(monkeypatch, tmp_path, capsys) -> None:
+    repo = _baseline(monkeypatch, tmp_path)
+    _commit(repo, "feat: blank", "Review-loop:   ", "Prose: none", files={"a.md": "A new sentence here.\n"})
+    assert _git(repo, "log", "-1", "--format=%(trailers:key=Review-loop)") == "Review-loop:"
     assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
 
 
