@@ -492,7 +492,7 @@ def main() -> int:
         known.add(sha)
         newly.append(sha)
         parts = _message_parts(cwd, sha)
-        if parts is None or not parts[0].strip():
+        if parts is None or not parts[0]:
             continue
         reasons = _reasons(cwd, sha, parts)
         if reasons:
