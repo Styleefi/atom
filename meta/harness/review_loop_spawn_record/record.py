@@ -276,5 +276,5 @@ def run() -> int:
     try:
         return main()
     except Exception as exc:  # noqa: BLE001 — 비차단이 설계 요구사항
-        print(f"{TAG} not recorded: {exc}", file=sys.stderr)
+        print(f"{TAG} {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1

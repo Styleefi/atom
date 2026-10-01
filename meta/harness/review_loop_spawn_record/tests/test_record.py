@@ -373,7 +373,7 @@ def test_write_failing_at_once_records_nothing(monkeypatch, capsys) -> None:
     monkeypatch.setattr(record.os, "write", no_space)
     rc, out, err = _run(monkeypatch, capsys, payload)
     assert (rc, out) == (1, "")
-    assert record.TAG in err
+    assert record.TAG in err and "OSError" in err
     assert _rows() == []
 
 
