@@ -43,7 +43,7 @@ required). This rule binds the agent running the loop, never the owner.
   draft or edit the initial declaration; one that lacks the floor's class,
   or that it takes to be no declaration in this section's sense, stops the
   loop before its first fix and returns to the owner, not to a raise.
-  (Origin: #151.)
+  (Origin: #151.) See meta/rules/review-loop-spawn-record.md.
 - Floor: the declared classes MUST include failure of the PR's purpose (the
   issue it closes, or the PR body's stated goal).
 - Scale the bar to the diff's behavior surface, not its line count.
