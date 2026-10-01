@@ -359,6 +359,44 @@ def test_unwritable_record_path_warns_and_exits_1(monkeypatch, capsys, tmp_path)
     assert record.TAG in err
 
 
+def test_write_failing_at_once_records_nothing(monkeypatch, capsys) -> None:
+    payload = _spawn(
+        PR180_PROMPT,
+        isAsync=False,
+        status="completed",
+        content=[{"type": "text", "text": DECLARATION}],
+    )
+
+    def no_space(fd, data):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(record.os, "write", no_space)
+    rc, out, err = _run(monkeypatch, capsys, payload)
+    assert (rc, out) == (1, "")
+    assert record.TAG in err
+    assert _rows() == []
+
+
+def test_spawn_and_result_are_written_in_one_write(monkeypatch, capsys) -> None:
+    calls: list[bytes] = []
+    real_write = record.os.write
+
+    def spy(fd, data):
+        calls.append(bytes(data))
+        return real_write(fd, data)
+
+    monkeypatch.setattr(record.os, "write", spy)
+    payload = _spawn(
+        PR180_PROMPT,
+        isAsync=False,
+        status="completed",
+        content=[{"type": "text", "text": DECLARATION}],
+    )
+    rc, out, _ = _run(monkeypatch, capsys, payload)
+    assert rc == 0 and "spawn recorded" in _notice(out)
+    assert len(calls) == 1 and calls[0].count(b"\n") == 2
+
+
 def test_non_object_payload_is_ignored(monkeypatch, capsys) -> None:
     assert _run(monkeypatch, capsys, "[1, 2]") == (0, "", "")
     assert _rows() == []

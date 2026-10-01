@@ -79,10 +79,9 @@ def _token(value: object) -> str:
     return value if isinstance(value, str) and _TOKEN_RE.fullmatch(value) else "?"
 
 
-def _append(path: str, entry: dict[str, object]) -> None:
-    # blocklog.record_block의 쓰기와 의도적으로 같은 방식(O_APPEND·O_NONBLOCK·0600·짧은
-    # 쓰기 반복) — 다른 점은 실패를 삼키지 않고 호출자에게 올린다는 것뿐이다.
-    payload = (json.dumps(entry) + "\n").encode("utf-8")
+def _append(path: str, entries: list[dict[str, object]]) -> None:
+    # 한 호출의 줄들은 한 페이로드로 모아 쓴다.
+    payload = "".join(json.dumps(entry) + "\n" for entry in entries).encode("utf-8")
     os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
     if _ends_mid_line(path):
         # 잘린 마지막 줄에 이어 붙으면 이 줄까지 파싱할 수 없게 된다.
@@ -166,7 +165,7 @@ def _on_agent(payload: dict, tool_input: dict, response: dict, path: str) -> str
             **_text_fields(prompt),
         }
     )
-    _append(path, entry)
+    entries = [entry]
     content = response.get("content")
     if response.get("status") == "completed" and isinstance(content, list):
         texts = [
@@ -176,7 +175,8 @@ def _on_agent(payload: dict, tool_input: dict, response: dict, path: str) -> str
         ]
         result = _base("return", payload)
         result.update({"agent_id": agent_id, "via": "result", **_text_fields("\n".join(texts))})
-        _append(path, result)
+        entries.append(result)
+    _append(path, entries)
     return (
         f"{TAG} spawn recorded: request {request if request is not None else '?'}, "
         f"agent {_token(agent_id)}, {_token(tool_input.get('subagent_type'))}, "
@@ -203,13 +203,14 @@ def _on_send_message(payload: dict, tool_input: dict, response: dict, path: str)
     if not isinstance(text, str):
         text = tool_input.get("content")
     notice = None
+    entries: list[dict[str, object]] = []
     sender = _str_or_none(payload.get("agent_id"))
     target = _message_target(tool_input, response)
     if target in ids:
         delivered = response.get("success") is True
         entry = _base("message", payload)
         entry.update({"caller": sender, "agent_id": target, "delivered": delivered, **_text_fields(text)})
-        _append(path, entry)
+        entries.append(entry)
         length = len(text) if isinstance(text, str) else 0
         notice = (
             f"{TAG} message to recorded agent {_token(target)} recorded "
@@ -218,7 +219,9 @@ def _on_send_message(payload: dict, tool_input: dict, response: dict, path: str)
     if sender in ids:
         entry = _base("return", payload)
         entry.update({"agent_id": sender, "via": "message", **_text_fields(text)})
-        _append(path, entry)
+        entries.append(entry)
+    if entries:
+        _append(path, entries)
     return notice
 
 
@@ -228,7 +231,7 @@ def _on_return(payload: dict, via: str, text: object, path: str) -> None:
         return
     entry = _base("return", payload)
     entry.update({"agent_id": agent_id, "via": via, **_text_fields(text)})
-    _append(path, entry)
+    _append(path, [entry])
 
 
 def main() -> int:
