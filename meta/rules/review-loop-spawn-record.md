@@ -30,8 +30,10 @@ instructions.
 
 Outside its reach: a prompt that does not contain the phrase (a reworded
 opening, or an earlier version of the prompt); a failed `Agent` call
-(`PostToolUseFailure` is not wired); a `SendMessage` whose response names
-no agent id and whose `to` is not the recorded id; any machine but the one
-the loop ran on, since the record is a local file (accepted by the owner:
+(`PostToolUseFailure` is not wired); a foreground spawn's hand-back,
+messages and stops that fire before its `spawn` line is written; a
+`SendMessage` whose response names no agent id and whose `to` is not the
+recorded id; any machine but the one the loop ran on, since the record is a
+local file (accepted by the owner:
 https://github.com/Styleefi/atom/issues/179#issuecomment-5891178724); and an
 edit to the record made afterwards with the same user's permissions.
