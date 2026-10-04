@@ -1,5 +1,5 @@
 # review-loop-trailer-check 규칙 파일과 test_check.py 모듈 docstring을 훅 상수에 묶는 동기화 테스트
-"""산문 ↔ 훅 상수 동기화. 사유 열거의 결속은 commit_backstop/tests/test_reasons_sync.py와 같다."""
+"""산문 ↔ 훅 상수 동기화."""
 
 from __future__ import annotations
 
