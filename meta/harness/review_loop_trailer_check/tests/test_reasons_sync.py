@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -13,6 +14,8 @@ RULE_PATH = (
     / "meta/rules/review-loop-trailer-check.md"
 )
 TEST_CHECK_PATH = Path(__file__).with_name("test_check.py")
+# 산문이 백틱으로 감싸 가리키는 비공개 대문자 상수 이름.
+_POINTER_RE = re.compile(r"`(_[A-Z][A-Z0-9_]*)`")
 
 
 def test_rule_report_reasons_match_the_constant() -> None:
@@ -33,12 +36,10 @@ def test_reason_names_appear_once_in_the_source() -> None:
 
 
 def test_prose_names_the_trailer_read_constant() -> None:
-    """규칙 파일과 test_check.py docstring이 가리키는 트레일러 읽기 상수가 실재해야 한다 (#181).
-
-    이름을 산문에서 파싱하지 않고 여기 적는다 — 흐르는 문장 속 괄호에 패턴을 걸면
-    문구만 고쳐도 빨개지기 때문이다. 백틱 이름이 남아 있는 한 문구는 자유다.
-    """
+    """규칙 파일과 test_check.py 모듈 docstring에서 `_POINTER_RE`에 걸리는 이름은 트레일러 읽기 상수 하나여야 한다 (#181)."""
     name = "_MESSAGE_FORMAT"
     assert hasattr(check, name)
-    assert f"`{name}`" in RULE_PATH.read_text(encoding="utf-8")
-    assert f"`{name}`" in TEST_CHECK_PATH.read_text(encoding="utf-8")
+    rule = RULE_PATH.read_text(encoding="utf-8")
+    docstring = ast.get_docstring(ast.parse(TEST_CHECK_PATH.read_text(encoding="utf-8"))) or ""
+    assert set(_POINTER_RE.findall(rule)) == {name}
+    assert set(_POINTER_RE.findall(docstring)) == {name}
