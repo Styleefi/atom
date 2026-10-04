@@ -1,8 +1,9 @@
-# review-loop-trailer-check 규칙의 report 사유 열거와 REASONS 상수의 동기화 테스트
-"""규칙 프로즈 ↔ 훅 상수 동기화 — commit_backstop/tests/test_reasons_sync.py와 같은 결속."""
+# review-loop-trailer-check 규칙 파일과 test_check.py 모듈 docstring을 훅 상수에 묶는 동기화 테스트
+"""산문 ↔ 훅 상수 동기화."""
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -12,6 +13,9 @@ RULE_PATH = (
     Path(check.__file__).resolve().parents[3]
     / "meta/rules/review-loop-trailer-check.md"
 )
+TEST_CHECK_PATH = Path(__file__).with_name("test_check.py")
+# 산문이 백틱으로 감싸 가리키는 비공개 대문자 상수 이름.
+_POINTER_RE = re.compile(r"`(_[A-Z][A-Z0-9_]*)`")
 
 
 def test_rule_report_reasons_match_the_constant() -> None:
@@ -29,3 +33,13 @@ def test_reason_names_appear_once_in_the_source() -> None:
     for reason in check.REASONS:
         hits = re.findall(rf"(?<![\w-]){re.escape(reason)}(?![\w-])", source)
         assert len(hits) == 1, f"사유 이름이 복제됐다: {reason}"
+
+
+def test_prose_names_the_trailer_read_constant() -> None:
+    """규칙 파일과 test_check.py 모듈 docstring에서 `_POINTER_RE`에 걸리는 이름은 트레일러 읽기 상수 하나여야 한다 (#181)."""
+    name = "_MESSAGE_FORMAT"
+    assert hasattr(check, name)
+    rule = RULE_PATH.read_text(encoding="utf-8")
+    docstring = ast.get_docstring(ast.parse(TEST_CHECK_PATH.read_text(encoding="utf-8"))) or ""
+    assert set(_POINTER_RE.findall(rule)) == {name}
+    assert set(_POINTER_RE.findall(docstring)) == {name}
