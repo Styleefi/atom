@@ -1,4 +1,4 @@
-# review-loop-trailer-check 규칙의 report 사유 열거와 REASONS 상수의 동기화 테스트
+# review-loop-trailer-check 규칙 산문이 가리키는 훅 상수(REASONS, 트레일러 읽기)의 동기화 테스트
 """규칙 프로즈 ↔ 훅 상수 동기화 — commit_backstop/tests/test_reasons_sync.py와 같은 결속."""
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ RULE_PATH = (
     Path(check.__file__).resolve().parents[3]
     / "meta/rules/review-loop-trailer-check.md"
 )
+TEST_CHECK_PATH = Path(__file__).with_name("test_check.py")
 
 
 def test_rule_report_reasons_match_the_constant() -> None:
@@ -29,3 +30,15 @@ def test_reason_names_appear_once_in_the_source() -> None:
     for reason in check.REASONS:
         hits = re.findall(rf"(?<![\w-]){re.escape(reason)}(?![\w-])", source)
         assert len(hits) == 1, f"사유 이름이 복제됐다: {reason}"
+
+
+def test_prose_names_the_trailer_read_constant() -> None:
+    """규칙 파일과 test_check.py docstring이 가리키는 트레일러 읽기 상수가 실재해야 한다 (#181).
+
+    이름을 산문에서 파싱하지 않고 여기 적는다 — 흐르는 문장 속 괄호에 패턴을 걸면
+    문구만 고쳐도 빨개지기 때문이다. 백틱 이름이 남아 있는 한 문구는 자유다.
+    """
+    name = "_MESSAGE_FORMAT"
+    assert hasattr(check, name)
+    assert f"`{name}`" in RULE_PATH.read_text(encoding="utf-8")
+    assert f"`{name}`" in TEST_CHECK_PATH.read_text(encoding="utf-8")
