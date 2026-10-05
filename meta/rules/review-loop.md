@@ -186,16 +186,24 @@ It is the loop's single source of truth — a later session resumes from it
 alone. It records: the bar declaration verbatim, kept apart from any raise,
 with the slot values given and what the declarer reports having read and
 run; the review procedure in use (changing it needs owner approval, recorded
-here); per round, the verified findings → matched class → assigned lane, the
-above-bar count, the class names each fix addresses, and per commit the
-attacking model, whether the message was attacked, and the sentences
-falsified, each with its disposal; owner-accepted trade-offs (one-line
-rationale, recorded at decision time); links to filed issues. An edit the
-agent makes to the PR title or body is recorded like a commit.
+here); per round, its pass records (Pass record below), the verified
+findings → matched class → assigned lane, the above-bar count, the class
+names each fix addresses, and per commit the attacking model, whether the
+message was attacked, and the sentences falsified, each with its disposal;
+owner-accepted trade-offs (one-line rationale, recorded at decision time);
+links to filed issues. An edit the agent makes to the PR title or body is
+recorded like a commit.
 
 Trade-off acceptance is the owner's decision — the agent only proposes. A
 finding matching a recorded trade-off is closed at triage (not counted, not
 filed) unless it carries new evidence, which makes it a normal finding.
+
+### Pass record
+
+| pass | model — argument / ran on (source) | given (source) | session state (source) | reported read (source) | verified by, how (source) |
+|---|---|---|---|---|---|
+| PR #182 round 2, the `/code-review` pass (example) | none / `claude-opus-5-5` (the review session's message to the loop session) | `/code-review high 182` for head `ee5c17f` (the loop session's request) | fork (the review session's message); session `#179-code-review` resumed, not cleared (owner decision) | title, full body, commit subjects (the forked pass's transcript, read by the review session) | one fresh Opus subagent per finding (the review session's message), reproducing the failure scenario on the code as written (the ledger's Procedure, approved in round 1) |
+| PR #182 round 2, the commit-message pass (example) | not recorded / Opus (the review session's message) | the five commit messages at `ee5c17f`, each with its diff, `commit-discipline.md` and the trailer bullets (the review session's message) | fresh subagent of the review session (the review session's message) | not recorded | none needed: 0 findings (the review session's message) |
 
 ## Triage lanes
 
