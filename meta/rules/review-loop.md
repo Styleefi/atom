@@ -202,10 +202,13 @@ filed) unless it carries new evidence, which makes it a normal finding.
 
 > 1. What ran this round's review — the exact command or prompt, on which
 >    request and head?
-> 2. Which model or models did it run on, and from what do you know that?
-> 3. What did it read — title, body, commit messages (full or subjects),
+> 2. Which model or models was it asked to run on, which did it run on, and
+>    from what do you know that?
+> 3. What did its context hold before it started, and from what do you know
+>    that?
+> 4. What did it read — title, body, commit messages (full or subjects),
 >    the diff, files — and from what do you know?
-> 4. Who verified its findings, and how?
+> 5. Who verified its findings, and how?
 
 ## Triage lanes
 
