@@ -186,16 +186,29 @@ It is the loop's single source of truth — a later session resumes from it
 alone. It records: the bar declaration verbatim, kept apart from any raise,
 with the slot values given and what the declarer reports having read and
 run; the review procedure in use (changing it needs owner approval, recorded
-here); per round, the verified findings → matched class → assigned lane, the
-above-bar count, the class names each fix addresses, and per commit the
-attacking model, whether the message was attacked, and the sentences
-falsified, each with its disposal; owner-accepted trade-offs (one-line
-rationale, recorded at decision time); links to filed issues. An edit the
-agent makes to the PR title or body is recorded like a commit.
+here); per round, the answers to the Pass report prompt below, as returned,
+and who gave them; per round, the verified findings → matched class →
+assigned lane, the above-bar count, the class names each fix addresses, and
+per commit the attacking model, whether the message was attacked, and the
+sentences falsified, each with its disposal; owner-accepted trade-offs
+(one-line rationale, recorded at decision time); links to filed issues. An
+edit the agent makes to the PR title or body is recorded like a commit.
 
 Trade-off acceptance is the owner's decision — the agent only proposes. A
 finding matching a recorded trade-off is closed at triage (not counted, not
 filed) unless it carries new evidence, which makes it a normal finding.
+
+### Pass report prompt
+
+> 1. What ran this round's review — the exact command or prompt, on which
+>    request and head?
+> 2. Which model or models was it asked to run on, which did it run on, and
+>    from what do you know that?
+> 3. What did its context hold before it started, and from what do you know
+>    that?
+> 4. What did it read — title, body, commit messages (full or subjects),
+>    the diff, files — and from what do you know?
+> 5. Who verified its findings, and how?
 
 ## Triage lanes
 
