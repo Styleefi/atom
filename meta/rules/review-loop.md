@@ -310,6 +310,6 @@ Exactly two endings:
 
 ## Tooling
 
-The protocol is tool-agnostic: run each pass with the project's review tool
-(e.g. `/code-review`) — the same one throughout the loop, as recorded in
-the ledger.
+The protocol is tool-agnostic: the review procedure recorded in the ledger
+names a round's passes, the part of the scope each reviews, and its tool
+(e.g. `/code-review`) — the same throughout the loop.
