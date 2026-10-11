@@ -25,7 +25,7 @@ Rule bodies live in `meta/rules/`; each is in force only once deployed to its de
 
 | id | tier | vessel | engagement | owner interface | behavior |
 |---|---|---|---|---|---|
-| `answer-first` | principle | claude-md | always loaded | — | A question in the owner's message must be answered in prose before anything is executed. |
+| `answer-first` | principle | claude-md | always loaded | — | A message that asks for something to read in the reply must be answered in prose before anything is executed. |
 | `answer-first-reminder` | convention | hook | automatic on every prompt | — | UserPromptSubmit hook that re-supplies the answer-first reminder when a message looks like a question. Fail-open, wired as the non-blocking wrapper (contract: rules_checker's shell contract tests). |
 | `coding-discipline` | principle | claude-md | always loaded | — | Think before coding, keep it minimal, touch only what the request needs, read the actual error. |
 | `commit-discipline` | convention | claude-md | always loaded | — | Conventional Commits in English, feature branches, merge to main only via PR. |
