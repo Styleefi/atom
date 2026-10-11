@@ -30,7 +30,7 @@
         ]
       },
       {
-        "matcher": "Agent|SendMessage|SubagentHandback",
+        "matcher": "Agent|SendMessage|SubagentHandback|Skill",
         "hooks": [
           {
             "type": "command",

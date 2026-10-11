@@ -313,3 +313,15 @@ Exactly two endings:
 The protocol is tool-agnostic: the review procedure recorded in the ledger
 names a round's passes, the part of the scope each reviews, and its tool
 (e.g. `/code-review`) — the same throughout the loop.
+
+### Pass prompt opening
+
+A pass launched with the `Agent` tool opens its prompt with the sentence
+below; whoever launches it — the agent running the loop, or the review
+session it asks — fills only the angle-bracket slots, and the rest of the
+prompt is its own. A skill forked through the `Skill` tool is recorded from
+its launch, whatever its prompt, review or not; an inline skill, or a
+`/skill` the owner types, is not. See meta/rules/review-loop-spawn-record.md.
+
+> You run a review pass for a review loop on pull or merge request `<n>`
+> of this repository — head `<head>`, scope: <what this pass reviews>.
