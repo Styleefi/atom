@@ -125,12 +125,12 @@ the loop writes only its angle-bracket slots.
 
 ## Rounds
 
-- A round = one review pass (discovery → verification → triage) over the
-  current scope. A fix may be a commit or an edit the agent makes to the
-  PR title or body. A pass whose above-bar findings get fixed is a fix
-  round — one round no matter how many fixes it takes. A pass with zero
-  above-bar findings is the exit observation; there is no separate ceremony.
-- Scope: every pass reviews the PR — its diff, its title and body, and
+- A round = the passes (each discovery → verification → triage) that
+  together review the current scope. A round's passes complete before its
+  fixes. A fix may be a commit or an edit the agent makes to the PR title
+  or body. A round whose above-bar findings get fixed is a fix round — one
+  round no matter how many fixes it takes.
+- Scope: every round reviews the PR — its diff, its title and body, and
   its commits' messages.
 - Reviewers may read anything; a finding enters the loop iff its causal
   chain includes the PR — including new code that triggers or exposes a
@@ -175,7 +175,7 @@ the loop writes only its angle-bracket slots.
   carries two git trailers in its message's last paragraph, `Review-loop: PR
   #<n> round <k>` and `Prose: attacked` or `Prose: none`. A commit missing
   either, or authoring a diff sentence no attack covered, is a self-violation
-  the next pass records.
+  the next round records.
 - A commit the agent makes in this loop carries no message body beyond its
   trailers.
 
@@ -231,11 +231,11 @@ failure scenario or a concrete improvement is necessary, not sufficient;
 style preferences and speculation count as neither. One not worth fixing is
 recorded with that answer. (2) **How large is the fix?** Fold-sized (above)
 is fixed in its own commit after the round's above-bar fix commits, except
-in the exit pass, where it is recorded instead; anything else is filed as an
-issue per the issue-workflow rule — bundled by defect class, at round end,
-with provenance (PR, round) and the verified scenario or improvement.
-(Origin: #125.) Duplicate prevention is the issue-duplicate-guard hook's
-job.
+in a round with zero above-bar findings, where it is recorded instead;
+anything else is filed as an issue per the issue-workflow rule — bundled by
+defect class, at round end, with provenance (PR, round) and the verified
+scenario or improvement. (Origin: #125.) Duplicate prevention is the
+issue-duplicate-guard hook's job.
 
 ## Divergence trigger
 
@@ -280,7 +280,7 @@ The trigger mandates the diagnosis, never a particular remedy.
 
 ## Checkpoint
 
-When a pass yields above-bar findings after three fix rounds have already run
+When a round yields above-bar findings after three fix rounds have already run
 — it would start a fourth — stop before its first fix and report to the owner:
 the per-round above-bar trend, remaining above-bar findings, filed issues,
 rough cost so far, and the options — continue (optionally scoped, e.g. "fix
@@ -293,16 +293,16 @@ the same round, merge both into one report.
 
 Exactly two endings:
 
-1. **Observed exit** — never declared. A pass scoped per the Rounds section
-   — so every fix has been covered by a completed pass — run with the
+1. **Observed exit** — never declared. A round scoped per the Rounds section
+   — so every fix has been covered by a completed round — run with the
    procedure recorded in the ledger, finds zero above-bar findings, with no
    unresolved borderline or pending-decision case and no above-bar backlog
    (including findings returned by a bar raise). The observation is valid only
-   if the HEAD, title and body the pass reviewed are still the PR's when the
-   pass completes — any new commit, whoever pushed it, or any edit to the
-   title or body, invalidates the observation (not the pass) and requires a
-   new pass. Below-bar findings from this pass are filed or recorded in the
-   ledger per Triage lanes, then the loop ends.
+   if the HEAD, title and body the round's passes reviewed are still the
+   PR's when its last pass completes — any new commit, whoever pushed it, or
+   any edit to the title or body, invalidates the observation (not their
+   findings) and requires a new round. Below-bar findings from this round
+   are filed or recorded in the ledger per Triage lanes, then the loop ends.
 2. **Owner decision** — at any point, typically in response to a checkpoint
    or escalation report.
 
