@@ -186,13 +186,15 @@ It is the loop's single source of truth — a later session resumes from it
 alone. It records: the bar declaration verbatim, kept apart from any raise,
 with the slot values given and what the declarer reports having read and
 run; the review procedure in use (changing it needs owner approval, recorded
-here); per round, the answers to the Pass report prompt below, as returned,
-and who gave them; per round, the verified findings → matched class →
-assigned lane, the above-bar count, the class names each fix addresses, and
-per commit the attacking model, whether the message was attacked, and the
-sentences falsified, each with its disposal; owner-accepted trade-offs
-(one-line rationale, recorded at decision time); links to filed issues. An
-edit the agent makes to the PR title or body is recorded like a commit.
+here); per round, the HEAD, title and body at its first pass's start and at
+its last pass's completion; per round, the answers to the Pass report prompt
+below, as returned, and who gave them; per round, the verified findings →
+matched class → assigned lane, the above-bar count, the class names each fix
+addresses, and per commit the attacking model, whether the message was
+attacked, and the sentences falsified, each with its disposal; owner-accepted
+trade-offs (one-line rationale, recorded at decision time); links to filed
+issues. An edit the agent makes to the PR title or body is recorded like a
+commit.
 
 Trade-off acceptance is the owner's decision — the agent only proposes. A
 finding matching a recorded trade-off is closed at triage (not counted, not
