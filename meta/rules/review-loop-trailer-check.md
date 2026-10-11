@@ -31,5 +31,4 @@ Outside its reach: a loop commit in which that read finds no `Review-loop:`
 trailer (accepted by the owner:
 https://github.com/Styleefi/atom/issues/178#issuecomment-5856387534, read as
 https://github.com/Styleefi/atom/issues/178#issuecomment-5857350331), and
-sentences — the check is per line, so counting or judging prose stays with
-the next review pass.
+sentences — the check is per line.
