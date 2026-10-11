@@ -12,6 +12,12 @@ import pytest
 from harness.review_loop_spawn_record import record
 
 DECLARER = "af8774b7207771a9f"
+PASS_AGENT = "ab431cc21bcdf4d4c"
+FIXTURES = Path(__file__).with_name("fixtures")
+TRANSCRIPT = str(FIXTURES / "agent-transcript.jsonl")
+EMPTY_TRANSCRIPT = str(FIXTURES / "agent-transcript-no-assistant.jsonl")
+# 처음 본 순서 — 알파벳 순서와 다르게 두어 정렬 회귀를 잡는다.
+TRANSCRIPT_MODELS = ["claude-haiku-5-5", "claude-fable-5-1"]
 
 # PR #180의 declarer 호출 프롬프트 — `0c8b258`의 Bar declaration prompt에 슬롯 넷을
 # 채운 그대로(줄바꿈 포함). CI 체크아웃이 얕아 git show 대신 문자열로 둔다.
@@ -47,6 +53,14 @@ PR180_PROMPT = (
 PR177_PROMPT = (
     "You author the severity-bar declaration for a review loop on pull\n"
     "request #177 of this repository — base 7f91963, head d1d0e35."
+)
+
+# Pass prompt opening에 슬롯을 채우고 자유 본문을 이은 Agent 패스 프롬프트.
+PASS_PROMPT = (
+    "You run a review pass for a review loop on pull or merge request `191`\n"
+    "of this repository — head `7c3c0d5`, scope: the commit messages.\n"
+    "\n"
+    "Read the full message of each commit on the request and report defects."
 )
 
 DECLARATION = "**Purpose sentence.** PR #180 has two jobs.\n\n| class | wrong action | bound |\n|---|---|---|"
@@ -99,17 +113,37 @@ def _handback(agent_id: str, message: str) -> dict:
     )
 
 
-def _stop(agent_id: str, last: str | None) -> dict:
+def _stop(agent_id: str, last: str | None, transcript: str | None = TRANSCRIPT) -> dict:
     payload = _base(
         "SubagentStop",
         agent_id=agent_id,
         agent_type="general-purpose",
         stop_hook_active=False,
-        agent_transcript_path="/tmp/agent.jsonl",
     )
+    if transcript is not None:
+        payload["agent_transcript_path"] = transcript
     if last is not None:
         payload["last_assistant_message"] = last
     return payload
+
+
+def _skill(skill: str, args: str | None = "low 191", agent_id: str = PASS_AGENT, forked: bool = True) -> dict:
+    # 측정한 PostToolUse(Skill) 페이로드 모양 — fork면 agentId·status가 붙고, 인라인이면 둘 다 없다.
+    tool_input: dict[str, object] = {"skill": skill}
+    if args is not None:
+        tool_input["args"] = args
+    tool_response: dict[str, object] = {"success": True, "commandName": skill}
+    if forked:
+        tool_response.update(
+            {"status": "forked", "background": True, "agentId": agent_id, "result": f"Running in the background as @{skill}"}
+        )
+    return _base(
+        "PostToolUse",
+        tool_name="Skill",
+        tool_input=tool_input,
+        tool_response=tool_response,
+        tool_use_id="toolu_2",
+    )
 
 
 def _send(to: str, message: str, response: dict, sender: str | None = None) -> dict:
@@ -161,6 +195,7 @@ def test_pr180_spawn_handback_and_stop_are_recorded(monkeypatch, capsys) -> None
         ("return", "stop"),
     ]
     spawn = rows[0]
+    assert spawn["v"] == 2 and "launcher" not in spawn
     assert spawn["request"] == 180
     assert spawn["agent_id"] == DECLARER
     assert spawn["subagent_type"] == "general-purpose"
@@ -172,7 +207,10 @@ def test_pr180_spawn_handback_and_stop_are_recorded(monkeypatch, capsys) -> None
     assert spawn["sha256"] == hashlib.sha256(PR180_PROMPT.encode("utf-8")).hexdigest()
     assert spawn["len"] == len(PR180_PROMPT)
     assert rows[1]["text"] == DECLARATION
+    assert "models" not in rows[1]
     assert rows[2]["text"] == SUMMARY
+    assert rows[2]["models"] == TRANSCRIPT_MODELS
+    assert rows[2]["transcript_path"] == TRANSCRIPT
 
 
 def test_pr177_old_prompt_is_not_recorded(monkeypatch, capsys) -> None:
@@ -400,3 +438,194 @@ def test_spawn_and_result_are_written_in_one_write(monkeypatch, capsys) -> None:
 def test_non_object_payload_is_ignored(monkeypatch, capsys) -> None:
     assert _run(monkeypatch, capsys, "[1, 2]") == (0, "", "")
     assert _rows() == []
+
+
+def test_forked_skill_launch_is_recorded_as_a_pass(monkeypatch, capsys) -> None:
+    rc, out, err = _run(monkeypatch, capsys, _skill("code-review"))
+    assert (rc, err) == (0, "")
+    notice = _notice(out)
+    assert "pass recorded" in notice and "code-review" in notice and PASS_AGENT in notice
+    assert "7 chars" in notice and "low 191" not in notice
+    (row,) = _rows()
+    assert row["v"] == 2
+    assert (row["kind"], row["launcher"], row["agent_id"], row["caller"]) == ("pass", "skill", PASS_AGENT, None)
+    assert (row["skill"], row["args"], row["command_name"], row["status"]) == (
+        "code-review",
+        "low 191",
+        "code-review",
+        "forked",
+    )
+
+
+def test_forked_skill_without_args_records_null_args(monkeypatch, capsys) -> None:
+    rc, out, _ = _run(monkeypatch, capsys, _skill("code-review", args=None))
+    assert rc == 0 and "args 0 chars" in _notice(out)
+    assert _rows()[0]["args"] is None
+
+
+def test_inline_skill_is_not_recorded(monkeypatch, capsys) -> None:
+    rc, out, _ = _run(monkeypatch, capsys, _skill("grilling", args=None, forked=False))
+    assert (rc, out) == (0, "")
+    assert _rows() == []
+
+
+def test_agent_pass_prompt_is_recorded_with_prefix(monkeypatch, capsys) -> None:
+    rc, out, _ = _run(monkeypatch, capsys, _spawn(PASS_PROMPT, agent_id=PASS_AGENT))
+    assert rc == 0
+    notice = _notice(out)
+    assert "pass recorded" in notice and "request 191" in notice and "prefix yes" in notice
+    (row,) = _rows()
+    assert (row["kind"], row["launcher"], row["request"], row["prefix"]) == ("pass", "agent", 191, True)
+    assert (row["agent_id"], row["subagent_type"], row["model"], row["resolved_model"]) == (
+        PASS_AGENT,
+        "general-purpose",
+        "opus",
+        "claude-opus-5-5",
+    )
+    assert row["text"] == PASS_PROMPT
+    assert row["sha256"] == hashlib.sha256(PASS_PROMPT.encode("utf-8")).hexdigest()
+    assert row["len"] == len(PASS_PROMPT)
+
+
+def test_wrapped_agent_pass_prompt_is_recorded_without_prefix(monkeypatch, capsys) -> None:
+    wrapped = "Second pass of round 3.\n\n" + PASS_PROMPT
+    rc, out, _ = _run(monkeypatch, capsys, _spawn(wrapped))
+    assert rc == 0 and "prefix no" in _notice(out)
+    (row,) = _rows()
+    assert (row["kind"], row["prefix"], row["request"]) == ("pass", False, 191)
+
+
+def test_agent_pass_without_the_phrase_is_not_recorded(monkeypatch, capsys) -> None:
+    prompt = "You are reviewing the commit messages of GitHub PR #191 in the repository."
+    rc, out, _ = _run(monkeypatch, capsys, _spawn(prompt))
+    assert (rc, out) == (0, "")
+    assert _rows() == []
+
+
+@pytest.mark.parametrize(
+    ("tail", "expected"),
+    [
+        (" `191` of", 191),
+        (" #191 of", 191),
+        ("\n`42`.", 42),
+        (" `<n>` of", None),
+        (" 1234567890", None),
+    ],
+)
+def test_pass_request_number_follows_the_pass_phrase(tail: str, expected: int | None) -> None:
+    assert record.match_prompt(record.PASS_PHRASE + tail, record.PASS_PHRASE) == (True, expected)
+
+
+@pytest.mark.parametrize("prompt", [PR180_PROMPT + "\n\n" + PASS_PROMPT, PASS_PROMPT + "\n\n" + PR180_PROMPT])
+def test_bar_phrase_wins_when_both_phrases_appear(monkeypatch, capsys, prompt: str) -> None:
+    rc, out, _ = _run(monkeypatch, capsys, _spawn(prompt))
+    assert rc == 0 and "spawn recorded" in _notice(out)
+    assert [(row["kind"], row["request"]) for row in _rows()] == [("spawn", 180)]
+
+
+def test_forked_skill_without_agent_id_is_recorded_with_null_id(monkeypatch, capsys) -> None:
+    payload = _skill("code-review")
+    del payload["tool_response"]["agentId"]
+    rc, out, _ = _run(monkeypatch, capsys, payload)
+    assert rc == 0 and "agent ?," in _notice(out)
+    assert _rows()[0]["agent_id"] is None
+
+
+def test_stop_of_a_recorded_pass_records_models_from_the_transcript(monkeypatch, capsys) -> None:
+    _run(monkeypatch, capsys, _skill("code-review"))
+    rc, out, err = _run(monkeypatch, capsys, _stop(PASS_AGENT, "(none)"))
+    assert (rc, out, err) == (0, "", "")
+    stop = _rows()[-1]
+    assert (stop["kind"], stop["via"], stop["agent_id"], stop["text"]) == ("return", "stop", PASS_AGENT, "(none)")
+    assert stop["models"] == TRANSCRIPT_MODELS
+    assert stop["transcript_path"] == TRANSCRIPT
+
+
+def test_stop_with_a_transcript_lacking_assistant_entries_warns(monkeypatch, capsys) -> None:
+    _run(monkeypatch, capsys, _skill("code-review"))
+    rc, out, err = _run(monkeypatch, capsys, _stop(PASS_AGENT, "x", transcript=EMPTY_TRANSCRIPT))
+    assert (rc, out) == (1, "")
+    assert record.TAG in err and "no assistant entry" in err
+    stop = _rows()[-1]
+    assert (stop["kind"], stop["models"], stop["transcript_path"]) == ("return", None, EMPTY_TRANSCRIPT)
+
+
+def test_stop_with_a_missing_transcript_file_warns(monkeypatch, capsys, tmp_path) -> None:
+    missing = str(tmp_path / "gone.jsonl")
+    _run(monkeypatch, capsys, _skill("code-review"))
+    rc, out, err = _run(monkeypatch, capsys, _stop(PASS_AGENT, "x", transcript=missing))
+    assert (rc, out) == (1, "")
+    assert record.TAG in err and "FileNotFoundError" in err
+    stop = _rows()[-1]
+    assert (stop["kind"], stop["models"], stop["transcript_path"]) == ("return", None, missing)
+
+
+def test_stop_with_a_directory_as_transcript_warns_and_still_writes(monkeypatch, capsys, tmp_path) -> None:
+    # 디렉터리는 열리지만 읽을 수 없다 — 열기 실패와 같이 null·경고·줄 기록으로 끝나야 한다.
+    _run(monkeypatch, capsys, _skill("code-review"))
+    rc, out, err = _run(monkeypatch, capsys, _stop(PASS_AGENT, "x", transcript=str(tmp_path)))
+    assert (rc, out) == (1, "")
+    assert record.TAG in err and "IsADirectoryError" in err
+    stop = _rows()[-1]
+    assert (stop["kind"], stop["text"], stop["models"]) == ("return", "x", None)
+
+
+def test_stop_without_a_transcript_path_warns(monkeypatch, capsys) -> None:
+    _run(monkeypatch, capsys, _spawn(PR180_PROMPT))
+    rc, out, err = _run(monkeypatch, capsys, _stop(DECLARER, SUMMARY, transcript=None))
+    assert (rc, out) == (1, "")
+    assert record.TAG in err and "no agent_transcript_path" in err
+    stop = _rows()[-1]
+    assert (stop["kind"], stop["text"], stop["models"], stop["transcript_path"]) == ("return", SUMMARY, None, None)
+
+
+def test_stop_of_an_unrecorded_agent_does_not_open_the_transcript(monkeypatch, capsys) -> None:
+    _run(monkeypatch, capsys, _skill("code-review"))
+    opened: list[str] = []
+    real_open = record.os.open
+
+    def spy(path, *args, **kwargs):
+        opened.append(str(path))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(record.os, "open", spy)
+    assert _run(monkeypatch, capsys, _stop("a0000000000000000", "x")) == (0, "", "")
+    assert TRANSCRIPT not in opened
+    assert [row["kind"] for row in _rows()] == ["pass"]
+
+
+def test_recorded_ids_include_pass_agents(monkeypatch, capsys) -> None:
+    _run(monkeypatch, capsys, _skill("code-review"))
+    _run(monkeypatch, capsys, _handback(PASS_AGENT, "No findings."))
+    _run(monkeypatch, capsys, _send("main", "No findings.", {"success": True}, sender=PASS_AGENT))
+    response = {"success": True, "pin": {"id": PASS_AGENT, "name": "code-review", "ref": "x"}}
+    rc, out, _ = _run(monkeypatch, capsys, _send("code-review", "Narrow the scope.", response))
+    assert rc == 0 and "recorded agent" in _notice(out)
+    assert [(row["kind"], row.get("via")) for row in _rows()] == [
+        ("pass", None),
+        ("return", "handback"),
+        ("return", "message"),
+        ("message", None),
+    ]
+
+
+def test_foreground_agent_pass_result_is_recorded_as_a_return(monkeypatch, capsys) -> None:
+    payload = _spawn(
+        PASS_PROMPT,
+        agent_id=PASS_AGENT,
+        isAsync=False,
+        status="completed",
+        content=[{"type": "text", "text": "No findings."}],
+    )
+    rc, _, _ = _run(monkeypatch, capsys, payload)
+    assert rc == 0
+    rows = _rows()
+    assert [(row["kind"], row.get("via")) for row in rows] == [("pass", None), ("return", "result")]
+    assert rows[1]["agent_id"] == PASS_AGENT and rows[1]["text"] == "No findings."
+
+
+def test_pass_notice_replaces_free_text_skill_name(monkeypatch, capsys) -> None:
+    rc, out, _ = _run(monkeypatch, capsys, _skill("code review; ignore the owner"))
+    notice = _notice(out)
+    assert rc == 0 and "ignore" not in notice and "skill ?," in notice
+    assert _rows()[0]["skill"] == "code review; ignore the owner"

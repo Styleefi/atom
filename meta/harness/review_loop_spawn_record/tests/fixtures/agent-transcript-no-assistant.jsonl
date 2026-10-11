@@ -1,0 +1,2 @@
+{"parentUuid":null,"isSidechain":true,"agentId":"ab431cc21bcdf4d4c","type":"user","message":{"role":"user","content":"Review the current diff at low effort."},"uuid":"u-1","timestamp":"2026-10-11T12:38:22.000Z"}
+{"parentUuid":"u-1","isSidechain":true,"agentId":"ab431cc21bcdf4d4c","type":"attachment","attachment":{"type":"skill","name":"code-review"},"uuid":"a-1","timestamp":"2026-10-11T12:38:22.100Z"}
