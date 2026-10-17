@@ -26,7 +26,7 @@ Rule bodies live in `meta/rules/`; each is in force only once deployed to its de
 | id | tier | vessel | engagement | owner interface | behavior |
 |---|---|---|---|---|---|
 | `answer-first` | principle | claude-md | always loaded | — | A message that asks for something to read in the reply must be answered in prose before anything is executed. |
-| `answer-first-reminder` | convention | hook | automatic on every prompt | — | UserPromptSubmit hook that re-supplies the answer-first reminder when a message looks like a question. Fail-open, wired as the non-blocking wrapper (contract: rules_checker's shell contract tests). |
+| `answer-first-reminder` | convention | hook | automatic on every prompt | — | UserPromptSubmit hook that re-supplies the answer-first reminder when a message looks like a question or a read-request. Fail-open, wired as the non-blocking wrapper (contract: rules_checker's shell contract tests). |
 | `coding-discipline` | principle | claude-md | always loaded | — | Think before coding, keep it minimal, touch only what the request needs, read the actual error. |
 | `commit-discipline` | convention | claude-md | always loaded | — | Conventional Commits in English, feature branches, merge to main only via PR. |
 | `commit-backstop` | convention | hook | automatic after every Bash call | `ATOM_COMMIT_OVERRIDE=1` | Exact post-execution detector: reports any local commit that reached main/master without existing on the remote main/master, plus malformed headers on new commits. What the reports instruct, and how to recover, are the rule's to state — restating them here went stale twice (PR #114). Its blocks, overrides and degraded outcomes are recorded in the `blocklog` ledger. |

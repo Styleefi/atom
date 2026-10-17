@@ -1,8 +1,9 @@
-# answer_first_reminder의 질문 휴리스틱·판정 흐름·불변식을 검증하는 테스트
+# answer_first_reminder의 질문·읽기 요청 휴리스틱·판정 흐름·불변식을 검증하는 테스트
 """reminder 모듈 테스트.
 
-휴리스틱은 contains_question을 직접, 판정 흐름은 stdin JSON monkeypatch로
-검증한다. 설계 불변식 — 어떤 입력 클래스에서도 차단 코드(42) 없음, stdout은
+휴리스틱은 contains_question / contains_read_request를 직접, 판정 흐름은
+stdin JSON monkeypatch로 검증한다. 읽기 요청 케이스는 측정 전사를 인용하지
+않는 합성 문장이다. 설계 불변식 — 어떤 입력 클래스에서도 차단 코드(42) 없음, stdout은
 빈 문자열 또는 정확히 REMINDER 한 줄(payload 내용이 주입 채널로 새지 않음),
 ~야/~지 평서문 제외 — 를 케이스로 고정한다.
 """
@@ -120,6 +121,77 @@ def test_empty_and_whitespace() -> None:
     assert not reminder.contains_question("   \n\t")
 
 
+# --- 휴리스틱: 읽기 요청 감지 -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "이슈 #37을 읽고 무엇을 해결하는 것인지 자세하고 쉽게 설명해 줘",
+        "리뷰 결과를 위험도에 따라 분류해서 보고해 줘",
+        "CI가 통과했는지 확인해 줘",
+        "수정할 가치가 있는지 다각도로 검토 해 줘",
+        "두 방안의 장단점을 비교해 주세요",
+        "다음 세션에서 이어갈지 추천해 줘",
+        "고칠 가치가 있을지 판단해줘",
+        "좀 더 근본적인 해결책을 찾아줘",
+        "옵션과 추천을 제시해 줘",
+        "Fable 에이전트를 띄워서 의견을 받아줘",
+        "네 의견을 줘",
+        "결과를 보고 판단하자",
+        "어떤 의견을 주는지 살펴보자",
+    ],
+)
+def test_read_request_shapes(text: str) -> None:
+    assert reminder.contains_read_request(text)
+
+
+@pytest.mark.parametrize(
+    "ending",
+    ["해 줘", "해줘", "주세요", "해 줄래", "해 봐", "해봐", "해라", "하자", "해 보자",
+     "하러 가자", "합시다", "할게", "해", "을 줘", "바람", "바라", "하도록"],
+)
+def test_read_request_every_ending(ending: str) -> None:
+    assert reminder.contains_read_request("결과를 확인" + ending)
+
+
+def test_read_request_behind_trailing_noise() -> None:
+    assert reminder.contains_read_request("“#37이 무엇인지 설명해 줘…”")
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["“설명해 줘.”", '"설명해 줘."', "(이슈 #37을 설명해 줘.)", "설명해 줘.)", "확인해 줘!”", "설명해 줘. )"],
+)
+def test_read_request_closing_noise_after_split_char(text: str) -> None:
+    # 문장 부호 뒤의 닫는 따옴표·괄호만 남은 조각이 마지막 절로 뽑히면 안 된다.
+    assert reminder.contains_read_request(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "설명이 부족하다",  # 요청 어미 없음
+        "추천대로 진행하자",  # 실행 요청 — 어간이 어미 직전 5자 밖
+        "커밋해 줘",  # 실행 요청 — 읽기 어간 없음
+        "테스트 통과했으면 푸시해",
+        "설명해 줘. 그리고 커밋해.",  # 마지막 절만 본다 — 의도적 미탐
+        "```\n설명해 줘\n```",  # 펜스 안은 제거된다
+        "",
+        "   \n",
+    ],
+)
+def test_read_request_non_fires(text: str) -> None:
+    assert not reminder.contains_read_request(text)
+
+
+def test_read_request_is_not_a_question() -> None:
+    # 두 휴리스틱은 독립이다 — 읽기 요청은 질문 가지에 걸리지 않는다.
+    text = "이슈 #37을 자세히 설명해 줘"
+    assert reminder.contains_read_request(text)
+    assert not reminder.contains_question(text)
+
+
 # --- 판정 흐름 ---------------------------------------------------------------
 
 
@@ -127,6 +199,17 @@ def test_question_prompt_prints_reminder(monkeypatch, capsys) -> None:
     code = _run_main(
         monkeypatch,
         {"prompt": "이게 맞을까", "hook_event_name": "UserPromptSubmit"},
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    assert captured.out == reminder.REMINDER + "\n"
+    assert captured.err == ""
+
+
+def test_read_request_prompt_prints_reminder(monkeypatch, capsys) -> None:
+    code = _run_main(
+        monkeypatch,
+        {"prompt": "이슈 #37을 자세히 설명해 줘", "hook_event_name": "UserPromptSubmit"},
     )
     captured = capsys.readouterr()
     assert code == 0
@@ -237,6 +320,7 @@ def test_run_reports_malformed_input_without_blocking(monkeypatch, capsys) -> No
 
 _ALL_INPUT_CLASSES = [
     {"prompt": "이게 맞을까"},
+    {"prompt": "이슈 #37을 자세히 설명해 줘"},
     {"prompt": "진행해 줘."},
     {"prompt": ""},
     {"prompt": ["질문일까?"]},
