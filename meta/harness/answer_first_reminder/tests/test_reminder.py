@@ -181,7 +181,9 @@ def test_read_request_every_stem(stem: str) -> None:
 
 # #195 이전의 정규식. 선형 루프가 같은 문자 집합을 같은 결과로 떼는지 차등 비교한다.
 _LEGACY_TRAILING_NOISE_RE = re.compile(r"[\s'\"’”‘“()\[\]<>…~.]+$")
-_NOISE_ALPHABET = " \t\u3000\u00a0a가요.!?'\"’”‘“()[]<>…~ㅋ:\n"
+_NOISE_ALPHABET = "a가요.!?'\"’”‘“()[]<>…~ㅋ:" + "".join(
+    chr(cp) for cp in range(0x110000) if chr(cp).isspace()
+)
 
 
 def test_strip_trailing_noise_matches_legacy_regex() -> None:
