@@ -152,7 +152,6 @@ def test_read_request_shapes(text: str) -> None:
      "하러 가자", "합시다", "할게", "해", "을 줘", "바람", "바라", "하도록"],
 )
 def test_read_request_every_ending(ending: str) -> None:
-    # 어미 대안 하나가 빠져도 빨개지도록 전부 고정한다.
     assert reminder.contains_read_request("결과를 확인" + ending)
 
 
