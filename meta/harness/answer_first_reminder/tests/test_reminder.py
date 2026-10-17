@@ -204,6 +204,12 @@ def test_long_whitespace_run_is_linear() -> None:
     assert time.perf_counter() - started < 1.0
 
 
+def test_read_request_stem_window_edges() -> None:
+    # 어미를 뗀 나머지가 5자면 첫 두 글자의 어간이 창 안에 있고, 6자면 밖이다.
+    assert reminder.contains_read_request("설명을 더 해 줘")
+    assert not reminder.contains_read_request("설명을 조금 해 줘")
+
+
 def test_read_request_behind_trailing_noise() -> None:
     assert reminder.contains_read_request("“#37이 무엇인지 설명해 줘…”")
 
