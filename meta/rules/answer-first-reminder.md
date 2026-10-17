@@ -22,7 +22,10 @@ execution resumes after the owner responds.
   its start).
 - **Read-request shape** — the last clause ends with a request ending (해 줘,
   해줘, 주세요, 하자, 보자, 도록, …) and the five characters before that
-  ending contain a read-verb stem (설명, 보고, 확인, 검토, 추천, 판단, …).
+  ending contain a read-verb stem (설명, 보고, 확인, 검토, 추천, 판단, …). The
+  ending match is anchored to the end of the clause and can take a syllable
+  from the stem: "답해 주세요" fires, "답해 줘" does not (the match 해 줘 takes
+  the 해). 답해 stays in the list for fidelity to the census.
   The lists are the #149 census classifier's 17 endings and 21 stems, plus
   five stems (제시 판단 추천 찾아 받아) absent from the census list that the
   2026-10-16 measurement (#37) found on at least two read-requests each;
@@ -38,9 +41,11 @@ under the principle; that is why the reminder is an observation ("looks like
 a question or a read-request"), not an assertion. Whatever lacks the shape
 is missed even when it asks for something to read: markless ~야/~지 and -나
 (indistinguishable from declaratives such as 하나, 만나), a read-request
-outside the last clause, a verb not in the stem list, an ending not in the
-ending list ("설명해줘요", "부탁드려요", "바랍니다"), or an ending followed by
-characters the noise strip does not remove ("확인해 줘ㅋㅋ").
+outside the last clause, a verb not in the stem list, a stem outside the five
+characters that remain before the stripped ending ("설명을 좀 자세히 해 줘": the
+five are 좀 자세히), an ending not in the ending list ("설명해줘요", "부탁드려요",
+"바랍니다"), or an ending followed by characters the noise strip does not
+remove ("확인해 줘ㅋㅋ").
 
 Nothing is ever blocked and every failure path fails open: a false positive
 costs one injected line, and a false negative degrades to the claude-md
