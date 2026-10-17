@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import io
 import json
+import random
+import re
 import runpy
 import sys
+import time
 
 import pytest
 
@@ -174,6 +177,26 @@ def test_read_request_every_stem(stem: str) -> None:
     # 어미는 어간에 해를 덧붙이지 않는 것을 쓴다 — "답해해 줘"는 발동해서 "답해 줘"의
     # 미탐(어미 해 줘가 어간의 해를 가져감)을 가린다.
     assert reminder.contains_read_request("결과를 " + stem + " 주세요")
+
+
+# #195 이전의 정규식. 선형 루프가 같은 문자 집합을 같은 결과로 떼는지 차등 비교한다.
+_LEGACY_TRAILING_NOISE_RE = re.compile(r"[\s'\"’”‘“()\[\]<>…~.]+$")
+_NOISE_ALPHABET = " \t\u3000\u00a0a가요.!?'\"’”‘“()[]<>…~ㅋ:\n"
+
+
+def test_strip_trailing_noise_matches_legacy_regex() -> None:
+    rng = random.Random(195)
+    for _ in range(20_000):
+        text = "".join(rng.choice(_NOISE_ALPHABET) for _ in range(rng.randint(0, 12)))
+        assert reminder._strip_trailing_noise(text) == _LEGACY_TRAILING_NOISE_RE.sub("", text), repr(text)
+
+
+def test_long_whitespace_run_is_linear() -> None:
+    text = "a" + " " * 100_000 + "b"
+    started = time.perf_counter()
+    assert not reminder.contains_question(text)
+    assert not reminder.contains_read_request(text)
+    assert time.perf_counter() - started < 1.0
 
 
 def test_read_request_behind_trailing_noise() -> None:

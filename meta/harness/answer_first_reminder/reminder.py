@@ -91,8 +91,26 @@ _CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 
 _SENTENCE_SPLIT_RE = re.compile(r"[.!。！?？\n]")
 
-# 문장 끝의 공백·따옴표(전각 포함)·괄호류·말줄임·물결 등 어미 검사를 가리는 노이즈.
-_TRAILING_NOISE_RE = re.compile(r"[\s'\"’”‘“()\[\]<>…~.]+$")
+# 조각 끝에서 떼는 노이즈: 공백(str.isspace)과 아래 문자들. `[...]+$` 정규식은 긴
+# 공백 열에서 역추적이 2차 시간으로 늘어나므로(#195) 뒤에서 한 글자씩 보는 선형
+# 루프로 뗀다.
+_TRAILING_NOISE_CHARS = frozenset("'\"’”‘“()[]<>…~.")
+
+
+def _strip_trailing_noise(text: str) -> str:
+    """조각 끝의 공백과 노이즈 문자를 뗀다.
+
+    Args:
+        text: 분리된 조각 하나.
+
+    Returns:
+        끝의 공백·노이즈 문자를 뗀 조각.
+    """
+    end = len(text)
+    while end and (text[end - 1].isspace() or text[end - 1] in _TRAILING_NOISE_CHARS):
+        end -= 1
+    return text[:end]
+
 
 _FIRST_ENGLISH_WORD_RE = re.compile(r"[a-zA-Z]+")
 
@@ -133,7 +151,7 @@ def contains_question(text: str) -> bool:
     if "?" in stripped or "？" in stripped:
         return True
     for raw_sentence in _SENTENCE_SPLIT_RE.split(stripped):
-        sentence = _TRAILING_NOISE_RE.sub("", raw_sentence)
+        sentence = _strip_trailing_noise(raw_sentence)
         if sentence.endswith(_KO_QUESTION_ENDINGS):
             return True
         first_word = _FIRST_ENGLISH_WORD_RE.search(sentence)
@@ -146,7 +164,7 @@ def contains_read_request(text: str) -> bool:
     """텍스트의 마지막 절이 읽기 요청 모양인지 경량 휴리스틱으로 판정한다.
 
     코드 펜스를 제거하고 . ! 。 ！ ? ？ 와 줄바꿈 문자(\n)에서 나눈 조각마다
-    끝 노이즈(_TRAILING_NOISE_RE)를 뗀 뒤, 비어 있지 않은 마지막 조각을 절로
+    끝 노이즈(_strip_trailing_noise)를 뗀 뒤, 비어 있지 않은 마지막 조각을 절로
     삼는다. 그 절이 요청 어미로 끝나고, 어미(와 그 앞 공백)를 뗀 나머지의 끝
     5자 안에 읽기 동사 어간이 있으면 True.
 
@@ -160,7 +178,7 @@ def contains_read_request(text: str) -> bool:
     # 조각마다 노이즈를 먼저 떼야 문장 부호 뒤의 닫는 따옴표·괄호만 남은 조각이
     # 마지막 절로 뽑히지 않는다 — contains_question과 같은 순서.
     clauses = [
-        c for c in (_TRAILING_NOISE_RE.sub("", piece).strip() for piece in _SENTENCE_SPLIT_RE.split(stripped)) if c
+        c for c in (_strip_trailing_noise(piece).strip() for piece in _SENTENCE_SPLIT_RE.split(stripped)) if c
     ]
     if not clauses:
         return False
