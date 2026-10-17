@@ -194,10 +194,13 @@ def test_strip_trailing_noise_matches_legacy_regex() -> None:
 
 
 def test_long_whitespace_run_is_linear() -> None:
-    text = "a" + " " * 100_000 + "b"
+    inside = "a" + " " * 100_000 + "b"
+    trailing = "설명해 줘" + " " * 100_000
     started = time.perf_counter()
-    assert not reminder.contains_question(text)
-    assert not reminder.contains_read_request(text)
+    assert not reminder.contains_question(inside)
+    assert not reminder.contains_read_request(inside)
+    assert not reminder.contains_question(trailing)
+    assert reminder.contains_read_request(trailing)
     assert time.perf_counter() - started < 1.0
 
 
