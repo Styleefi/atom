@@ -12,8 +12,11 @@ from __future__ import annotations
 
 import io
 import json
+import random
+import re
 import runpy
 import sys
+import time
 
 import pytest
 
@@ -153,6 +156,58 @@ def test_read_request_shapes(text: str) -> None:
 )
 def test_read_request_every_ending(ending: str) -> None:
     assert reminder.contains_read_request("결과를 확인" + ending)
+
+
+# 어간 목록을 테스트 쪽에 리터럴로 둔다 — 모듈 상수를 매개화하면 어간을 지워도
+# 케이스가 함께 사라져 고정이 아니다.
+_PINNED_READ_STEMS = (
+    "설명", "보고", "확인", "검토", "알려", "정리", "비교", "분석", "리뷰", "평가",
+    "조사", "보여", "요약", "살펴", "읽어", "답해", "답변", "의견", "생각", "짚어",
+    "소개", "제시", "판단", "추천", "찾아", "받아",
+)
+
+
+def test_read_stem_list_is_pinned() -> None:
+    assert set(reminder._KO_READ_STEMS) == set(_PINNED_READ_STEMS)
+    assert len(reminder._KO_READ_STEMS) == len(_PINNED_READ_STEMS)
+
+
+@pytest.mark.parametrize("stem", _PINNED_READ_STEMS)
+def test_read_request_every_stem(stem: str) -> None:
+    # 어미는 어간에 해를 덧붙이지 않는 것을 쓴다 — "답해해 줘"는 발동해서 "답해 줘"의
+    # 미탐(어미 해 줘가 어간의 해를 가져감)을 가린다.
+    assert reminder.contains_read_request("결과를 " + stem + " 주세요")
+
+
+# #195 이전의 정규식. 선형 루프가 같은 문자 집합을 같은 결과로 떼는지 차등 비교한다.
+_LEGACY_TRAILING_NOISE_RE = re.compile(r"[\s'\"’”‘“()\[\]<>…~.]+$")
+_NOISE_ALPHABET = "a가요.!?'\"’”‘“()[]<>…~ㅋ:" + "".join(
+    chr(cp) for cp in range(0x110000) if chr(cp).isspace()
+)
+
+
+def test_strip_trailing_noise_matches_legacy_regex() -> None:
+    rng = random.Random(195)
+    for _ in range(20_000):
+        text = "".join(rng.choice(_NOISE_ALPHABET) for _ in range(rng.randint(0, 12)))
+        assert reminder._strip_trailing_noise(text) == _LEGACY_TRAILING_NOISE_RE.sub("", text), repr(text)
+
+
+def test_long_whitespace_run_is_linear() -> None:
+    inside = "a" + " " * 100_000 + "b"
+    trailing = "설명해 줘" + " " * 100_000
+    started = time.perf_counter()
+    assert not reminder.contains_question(inside)
+    assert not reminder.contains_read_request(inside)
+    assert not reminder.contains_question(trailing)
+    assert reminder.contains_read_request(trailing)
+    assert time.perf_counter() - started < 1.0
+
+
+def test_read_request_stem_window_edges() -> None:
+    # 어미를 뗀 나머지가 5자면 첫 두 글자의 어간이 창 안에 있고, 6자면 밖이다.
+    assert reminder.contains_read_request("설명을 더 해 줘")
+    assert not reminder.contains_read_request("설명을 조금 해 줘")
 
 
 def test_read_request_behind_trailing_noise() -> None:

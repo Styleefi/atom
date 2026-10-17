@@ -2,11 +2,12 @@
 """answer-first 리마인더 hook (answer-first-reminder 규칙의 배포체).
 
 Claude Code의 UserPromptSubmit hook으로 실행되어 들어오는 소유자 메시지가
-질문 모양이거나 읽기 요청 모양이면 리마인더 한 줄을 stdout으로 출력한다. UserPromptSubmit에서
-exit 0의 stdout이 모델 컨텍스트에 추가되는 것은 훅 도입 당시 확인된 제품
-동작으로, 이 출력이 answer-first 규칙(읽을 것을 요청하는 메시지에는 답변이 이번 턴의
-산출물)을 위반 시점에 재공급한다. 규칙의 발동 조건은 "답장에서 읽을 것을 요청하는
-메시지"이고, 이 hook은 그 조건을 두 가지 모양으로 근사한다.
+질문 모양이거나 읽기 요청 모양이면 리마인더 한 줄을 stdout으로 출력한다.
+UserPromptSubmit에서 exit 0의 stdout이 모델 컨텍스트에 추가되는 것은 훅 도입
+당시 확인된 제품 동작으로, 이 출력이 answer-first 규칙(읽을 것을 요청하는
+메시지에는 답변이 이번 턴의 산출물)을 위반 시점에 재공급한다. 규칙의 발동
+조건은 "답장에서 읽을 것을 요청하는 메시지"이고, 이 hook은 그 조건을 두 가지
+모양으로 근사한다.
 
 질문 휴리스틱 (경량 — 형태소 분석 아님):
 
@@ -23,14 +24,13 @@ exit 0의 stdout이 모델 컨텍스트에 추가되는 것은 훅 도입 당시
    공백과 ' " ’ ” ‘ “ ( ) [ ] < > … ~ 를 떼고도 남는 마지막 조각을 절로
    삼는다. 그 절이 요청 어미(해 줘/해줘/주세요/하자/보자/도록 등)로 끝나고,
    어미(와 그 앞 공백)를 뗀 나머지의 끝 5자 안에 읽기 동사 어간(설명/보고/
-   확인/검토/추천/판단 등)이 있으면 읽기 요청. 어미 일치는 절 끝에
-   고정되어 어간의 한 글자를 가져갈 수 있다("답해 주세요"는 포착, "답해 줘"는
-   미탐 — 일치한 해 줘가 해를 가져간다). 답해는 센서스 목록 충실성 때문에
-   그대로 둔다.
-   어미 17개와 어간 21개는 #149 센서스 분류기의 정의를 그대로 가져왔고, 어간
-   5개(제시/판단/추천/찾아/받아)는 센서스 목록에 없던 것으로 2026-10-16 측정의
-   읽기 요청에 각각 2회 이상 나타나 더했다(측정 표본 554턴: 읽기 요청 86턴 중
-   75턴 포착, 오탐 7턴).
+   확인/검토/추천/판단 등)이 있으면 읽기 요청. 어미 일치는 절 끝에 고정되어
+   어간의 한 글자를 가져갈 수 있다("답해 주세요"는 포착, "답해 줘"는 미탐 —
+   일치한 해 줘가 해를 가져간다). 답해는 센서스 목록 충실성 때문에 그대로
+   둔다. 어미 17개와 어간 21개는 #149 센서스 분류기의 정의를 그대로
+   가져왔고, 어간 5개(제시/판단/추천/찾아/받아)는 센서스 목록에 없던 것으로
+   2026-10-16 측정의 읽기 요청에 각각 2회 이상 나타나 더했다(측정 표본
+   554턴: 읽기 요청 86턴 중 75턴 포착, 오탐 7턴).
 
 의도적 한계 (오탐·미탐 모두 무해가 설계 전제):
 
@@ -45,11 +45,12 @@ exit 0의 stdout이 모델 컨텍스트에 추가되는 것은 훅 도입 당시
   할게·맨 해로 끝나는 평서문("내가 확인할게", "나도 그렇게 생각해"). 실행
   요청을 answer-first 대상에서 빼는 판단은 규칙 본문을 읽는 모델의 몫이다.
   리마인더 문구가 사실 단정이 아니라 관측 서술인 이유다.
-- 모양이 안 맞으면 읽기 요청이라도 미탐이다 — 마지막 절 밖의 요청("설명해 줘.
-  그리고 커밋해."), 목록 밖 어간("세어 줘"), 어미(와 그 앞 공백)를 뗀 뒤 남은
-  끝 5자 밖의 어간("설명을 좀 자세히 해 줘": 끝 5자는 '좀 자세히'), 목록 밖 어미("설명해줘요",
-  "부탁드려요", "바랍니다"), 어미 뒤에 노이즈 제거가 걷지 않는 글자가 붙은
-  것("확인해 줘ㅋㅋ"). 모두 claude-md 현상 유지로 퇴화한다.
+- 모양이 안 맞으면 읽기 요청이라도 미탐이다 — 마지막 절 밖의 요청("설명해
+  줘. 그리고 커밋해."), 목록 밖 어간("세어 줘"), 어미(와 그 앞 공백)를 뗀 뒤
+  남은 끝 5자 밖의 어간("설명을 좀 자세히 해 줘": 끝 5자는 '좀 자세히'),
+  목록 밖 어미("설명해줘요", "부탁드려요", "바랍니다"), 어미 뒤에 노이즈
+  제거가 걷지 않는 글자가 붙은 것("확인해 줘ㅋㅋ"). 모두 claude-md 현상
+  유지로 퇴화한다.
 - 줄 끝 연결형("...보니"), 해요체 평서문("먼저 가요"), 한국어 문장 속 영어
   단어("명령은 what부터"), 영어 조동사 문두("Should work now"), 닫히지 않은
   펜스 속 `?` 등의 오탐은 감수한다 — 비용은 무해한 리마인더 한 줄.
@@ -91,8 +92,26 @@ _CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 
 _SENTENCE_SPLIT_RE = re.compile(r"[.!。！?？\n]")
 
-# 문장 끝의 공백·따옴표(전각 포함)·괄호류·말줄임·물결 등 어미 검사를 가리는 노이즈.
-_TRAILING_NOISE_RE = re.compile(r"[\s'\"’”‘“()\[\]<>…~.]+$")
+# 조각 끝에서 떼는 노이즈: 공백(str.isspace)과 아래 문자들. `[...]+$` 정규식은 긴
+# 공백 열의 시작 위치마다 끝까지 훑고 `$`에서 실패하기를 반복해 2차 시간이
+# 되므로(#195) 뒤에서 한 글자씩 보는 선형 루프로 뗀다.
+_TRAILING_NOISE_CHARS = frozenset("'\"’”‘“()[]<>…~.")
+
+
+def _strip_trailing_noise(text: str) -> str:
+    """조각 끝의 공백과 노이즈 문자를 뗀다.
+
+    Args:
+        text: 분리된 조각 하나.
+
+    Returns:
+        끝의 공백·노이즈 문자를 뗀 조각.
+    """
+    end = len(text)
+    while end and (text[end - 1].isspace() or text[end - 1] in _TRAILING_NOISE_CHARS):
+        end -= 1
+    return text[:end]
+
 
 _FIRST_ENGLISH_WORD_RE = re.compile(r"[a-zA-Z]+")
 
@@ -133,7 +152,7 @@ def contains_question(text: str) -> bool:
     if "?" in stripped or "？" in stripped:
         return True
     for raw_sentence in _SENTENCE_SPLIT_RE.split(stripped):
-        sentence = _TRAILING_NOISE_RE.sub("", raw_sentence)
+        sentence = _strip_trailing_noise(raw_sentence)
         if sentence.endswith(_KO_QUESTION_ENDINGS):
             return True
         first_word = _FIRST_ENGLISH_WORD_RE.search(sentence)
@@ -146,10 +165,9 @@ def contains_read_request(text: str) -> bool:
     """텍스트의 마지막 절이 읽기 요청 모양인지 경량 휴리스틱으로 판정한다.
 
     코드 펜스를 제거하고 . ! 。 ！ ? ？ 와 줄바꿈 문자(\n)에서 나눈 조각마다
-    끝 노이즈(_TRAILING_NOISE_RE)를 뗀 뒤, 비어 있지 않은 마지막 조각을 절로
-    삼는다. 그 절이 요청
-    어미로 끝나고, 어미(와 그 앞 공백)를 뗀 나머지의 끝 5자 안에 읽기 동사
-    어간이 있으면 True.
+    끝 노이즈(_strip_trailing_noise)를 뗀 뒤, 비어 있지 않은 마지막 조각을 절로
+    삼는다. 그 절이 요청 어미로 끝나고, 어미(와 그 앞 공백)를 뗀 나머지의 끝
+    5자 안에 읽기 동사 어간이 있으면 True.
 
     Args:
         text: 소유자 메시지 원문.
@@ -161,7 +179,7 @@ def contains_read_request(text: str) -> bool:
     # 조각마다 노이즈를 먼저 떼야 문장 부호 뒤의 닫는 따옴표·괄호만 남은 조각이
     # 마지막 절로 뽑히지 않는다 — contains_question과 같은 순서.
     clauses = [
-        c for c in (_TRAILING_NOISE_RE.sub("", piece).strip() for piece in _SENTENCE_SPLIT_RE.split(stripped)) if c
+        c for c in (_strip_trailing_noise(piece).strip() for piece in _SENTENCE_SPLIT_RE.split(stripped)) if c
     ]
     if not clauses:
         return False

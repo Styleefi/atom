@@ -21,16 +21,16 @@ execution resumes after the owner responds.
   should, can, …; the word is matched anywhere in the sentence, not only at
   its start).
 - **Read-request shape** — the text is split at . ! 。 ！ ? ？ and newline
-  characters; trailing whitespace and the characters ' " ’ ” ‘ “ ( ) [ ] < >
-  … ~ are stripped from each piece; the last non-empty piece is the clause. That clause ends with a request ending (해 줘, 해줘, 주세요, 하자,
-  보자, 도록, …) and the last five characters of what precedes the ending,
-  whitespace before the ending removed, contain a read-verb stem (설명, 보고,
-  확인, 검토, 추천, 판단, …). The
-  ending match is anchored to the end of the clause and can take a syllable
-  from the stem: "답해 주세요" fires, "답해 줘" does not (the match 해 줘 takes
-  the 해). 답해 stays in the list for fidelity to the census.
-  The lists are the #149 census classifier's 17 endings and 21 stems, plus
-  five stems (제시 판단 추천 찾아 받아) absent from the census list that the
+  characters; trailing whitespace and the characters ' " ’ ” ‘ “ ( ) [ ] < > …
+  ~ are stripped from each piece; the last non-empty piece is the clause. That
+  clause ends with a request ending (해 줘, 해줘, 주세요, 하자, 보자, 도록, …)
+  and the last five characters of what precedes the ending, whitespace before
+  the ending removed, contain a read-verb stem (설명, 보고, 확인, 검토, 추천,
+  판단, …). The ending match is anchored to the end of the clause and can take
+  a syllable from the stem: "답해 주세요" fires, "답해 줘" does not (the match
+  해 줘 takes the 해). 답해 stays in the list for fidelity to the census. The
+  lists are the #149 census classifier's 17 endings and 21 stems, plus five
+  stems (제시 판단 추천 찾아 받아) absent from the census list that the
   2026-10-16 measurement (#37) found on at least two read-requests each;
   one-off verbs are left out.
 
