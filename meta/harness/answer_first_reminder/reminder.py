@@ -19,9 +19,11 @@ exit 0의 stdout이 모델 컨텍스트에 추가되는 것은 훅 도입 당시
 
 읽기 요청 휴리스틱 (2026-10-16 측정 기반, #37):
 
-5. 코드 펜스를 제거한 뒤 마지막 절만 본다. 그 절이 요청 어미(해 줘/해줘/
-   주세요/하자/보자/도록 등)로 끝나고, 어미를 뗀 나머지의 끝 5자 안에 읽기
-   동사 어간(설명/보고/확인/검토/추천/판단 등)이 있으면 읽기 요청. 어미 일치는 절 끝에
+5. 코드 펜스를 제거하고 . ! 。 ！ ? ？ 와 줄바꿈 문자(\n)에서 나눈 뒤, 끝의
+   공백과 ' " ’ ” ‘ “ ( ) [ ] < > … ~ 를 떼고도 남는 마지막 조각을 절로
+   삼는다. 그 절이 요청 어미(해 줘/해줘/주세요/하자/보자/도록 등)로 끝나고,
+   어미(와 그 앞 공백)를 뗀 나머지의 끝 5자 안에 읽기 동사 어간(설명/보고/
+   확인/검토/추천/판단 등)이 있으면 읽기 요청. 어미 일치는 절 끝에
    고정되어 어간의 한 글자를 가져갈 수 있다("답해 주세요"는 포착, "답해 줘"는
    미탐 — 일치한 해 줘가 해를 가져간다). 답해는 센서스 목록 충실성 때문에
    그대로 둔다.
@@ -143,8 +145,11 @@ def contains_question(text: str) -> bool:
 def contains_read_request(text: str) -> bool:
     """텍스트의 마지막 절이 읽기 요청 모양인지 경량 휴리스틱으로 판정한다.
 
-    마지막 절이 요청 어미로 끝나고, 어미를 뗀 나머지의 끝 5자 안에 읽기 동사
-    어간이 있으면 True. 코드 펜스는 먼저 제거한다.
+    코드 펜스를 제거하고 . ! 。 ！ ? ？ 와 줄바꿈 문자(\n)에서 나눈 조각마다
+    끝 노이즈(_TRAILING_NOISE_RE)를 뗀 뒤, 비어 있지 않은 마지막 조각을 절로
+    삼는다. 그 절이 요청
+    어미로 끝나고, 어미(와 그 앞 공백)를 뗀 나머지의 끝 5자 안에 읽기 동사
+    어간이 있으면 True.
 
     Args:
         text: 소유자 메시지 원문.
@@ -153,10 +158,14 @@ def contains_read_request(text: str) -> bool:
         읽기 요청 모양으로 보이면 True.
     """
     stripped = _CODE_FENCE_RE.sub("", text)
-    clauses = [c for c in _SENTENCE_SPLIT_RE.split(stripped) if c.strip()]
+    # 조각마다 노이즈를 먼저 떼야 문장 부호 뒤의 닫는 따옴표·괄호만 남은 조각이
+    # 마지막 절로 뽑히지 않는다 — contains_question과 같은 순서.
+    clauses = [
+        c for c in (_TRAILING_NOISE_RE.sub("", piece).strip() for piece in _SENTENCE_SPLIT_RE.split(stripped)) if c
+    ]
     if not clauses:
         return False
-    last = _TRAILING_NOISE_RE.sub("", clauses[-1]).strip()
+    last = clauses[-1]
     if not _REQUEST_ENDING_RE.search(last):
         return False
     core = _REQUEST_ENDING_RE.sub("", last).strip()

@@ -161,6 +161,15 @@ def test_read_request_behind_trailing_noise() -> None:
 
 @pytest.mark.parametrize(
     "text",
+    ["“설명해 줘.”", '"설명해 줘."', "(이슈 #37을 설명해 줘.)", "설명해 줘.)", "확인해 줘!”", "설명해 줘. )"],
+)
+def test_read_request_closing_noise_after_split_char(text: str) -> None:
+    # 문장 부호 뒤의 닫는 따옴표·괄호만 남은 조각이 마지막 절로 뽑히면 안 된다.
+    assert reminder.contains_read_request(text)
+
+
+@pytest.mark.parametrize(
+    "text",
     [
         "설명이 부족하다",  # 요청 어미 없음
         "추천대로 진행하자",  # 실행 요청 — 어간이 어미 직전 5자 밖

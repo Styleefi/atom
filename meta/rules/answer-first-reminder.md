@@ -20,9 +20,12 @@ execution resumes after the owner responds.
   whose first English word is an interrogative or auxiliary (what, why,
   should, can, …; the word is matched anywhere in the sentence, not only at
   its start).
-- **Read-request shape** — the last clause ends with a request ending (해 줘,
-  해줘, 주세요, 하자, 보자, 도록, …) and the five characters before that
-  ending contain a read-verb stem (설명, 보고, 확인, 검토, 추천, 판단, …). The
+- **Read-request shape** — the text is split at . ! 。 ！ ? ？ and newline
+  characters; trailing whitespace and the characters ' " ’ ” ‘ “ ( ) [ ] < >
+  … ~ are stripped from each piece; the last non-empty piece is the clause. That clause ends with a request ending (해 줘, 해줘, 주세요, 하자,
+  보자, 도록, …) and the last five characters of what precedes the ending,
+  whitespace before the ending removed, contain a read-verb stem (설명, 보고,
+  확인, 검토, 추천, 판단, …). The
   ending match is anchored to the end of the clause and can take a syllable
   from the stem: "답해 주세요" fires, "답해 줘" does not (the match 해 줘 takes
   the 해). 답해 stays in the list for fidelity to the census.
