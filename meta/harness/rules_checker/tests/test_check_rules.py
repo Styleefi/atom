@@ -561,9 +561,7 @@ def test_hook_local_settings_is_rejected(tmp_path: Path) -> None:
 
 
 def test_hook_pin_skips_wiring_checks(tmp_path: Path) -> None:
-    # 핀 위반이면 대상은 vessel이 아니므로 그 안의 배선은 검사하지 않는다
-    # (claude-md 핀의 import 검사 억제와 대칭). 핀 없이는 모듈 미참조도 함께
-    # 보고됐을 내용물이다.
+    # 핀 없이는 모듈 미참조도 함께 보고됐을 내용물이다.
     root = make_repo(tmp_path)
     local = ".claude/settings.local.json"
     write_rule(root, "my-guard.md", hook_rule("my-guard", deployed_to=local))

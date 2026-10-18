@@ -14,7 +14,7 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
    포함하는지(#38 — 주석/펜스 속 import는 로드되지 않으므로 배포가 아니다,
    _active_lines 동결 스캐너 참조). hook 그릇(v2): deployed-to가 정확히
    `.claude/settings.json`(커밋되는 프로젝트 훅 위치 — raw 문자열
-   비교, #190; 핀 위반이면 존재·패키지 검사만 계속)이고, 그 settings JSON의 hooks 구조
+   비교, #190)이고, 그 settings JSON의 hooks 구조
    안에서 규칙 id에서 도출한 harness 모듈(`harness.<id의 -를 _로>`)을 `-m`으로
    참조하는 커맨드가 1개 이상이고, 참조하는 모든 커맨드가 `blocking`
    frontmatter가 고르는 정본 래퍼 템플릿과 정확히 일치하며, 그 harness
@@ -586,10 +586,7 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         # 저장소는 vessel이 아니라는 rule-deployment 문장을 체커가 집행하는
         # 자리다 — 커밋 여부를 git에 묻지 않고(#108, 순수 파일시스템 체커)
         # 커밋되는 프로젝트 훅 위치를 경로로 고정한다(PR #189 T1이
-        # 이 핀을 가리켰다). 핀 위반이면 대상이 vessel이 아니므로 그 안을
-        # 여는 검사(JSON 로드·모듈 참조·래퍼 템플릿)는 무의미해 건너뛰고,
-        # 존재 검사와 패키지 실존 검사는 유지한다 — claude-md 핀의 import
-        # 검사 억제·존재 검사 유지와 대칭.
+        # 이 핀을 가리켰다).
         hook_pinned = str(data["deployed-to"]) == ".claude/settings.json"
         if not hook_pinned:
             violations.append(
