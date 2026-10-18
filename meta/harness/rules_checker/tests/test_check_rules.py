@@ -452,12 +452,16 @@ def test_unverifiable_vessels_are_rejected(
     assert "is not implemented" in violations[0]
 
 
-def hook_rule(rule_id: str, blocking: str | None = "true") -> str:
-    """유효한 hook 규칙 본문을 만든다. blocking=None이면 필드를 뺀다."""
+def hook_rule(
+    rule_id: str,
+    blocking: str | None = "true",
+    deployed_to: str = ".claude/settings.json",
+) -> str:
+    """hook 규칙 본문을 만든다. blocking=None이면 필드를 뺀다."""
     blocking_line = f"blocking: {blocking}\n" if blocking is not None else ""
     return (
         f"---\nid: {rule_id}\ntier: convention\nenforce: hook\n"
-        f"deployed-to: .claude/settings.json\n{blocking_line}---\n\nbody\n"
+        f"deployed-to: {deployed_to}\n{blocking_line}---\n\nbody\n"
     )
 
 
@@ -538,6 +542,97 @@ def test_hook_rule_without_module_reference(tmp_path: Path) -> None:
     assert len(violations) == 1
     assert "harness.my_guard" in violations[0]
     assert "declared but not actually deployed" in violations[0]
+
+
+def test_hook_local_settings_is_rejected(tmp_path: Path) -> None:
+    # #190: 이슈에 기록된 재현 — 배선이 정본이고 파일이 있어도
+    # settings.local.json은 커밋되지 않는 저장소라 hook vessel이 아니다.
+    root = make_repo(tmp_path)
+    local = ".claude/settings.local.json"
+    write_rule(root, "my-guard.md", hook_rule("my-guard", deployed_to=local))
+    (root / ".claude").mkdir()
+    (root / local).write_text(
+        hook_settings(canonical_command("harness.my_guard")), encoding="utf-8"
+    )
+    make_harness_package(root, "my_guard")
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "exactly '.claude/settings.json'" in violations[0]
+
+
+def test_hook_pin_skips_wiring_checks(tmp_path: Path) -> None:
+    # 핀 없이는 모듈 미참조도 함께 보고됐을 내용물이다.
+    root = make_repo(tmp_path)
+    local = ".claude/settings.local.json"
+    write_rule(root, "my-guard.md", hook_rule("my-guard", deployed_to=local))
+    (root / ".claude").mkdir()
+    (root / local).write_text("{}", encoding="utf-8")
+    make_harness_package(root, "my_guard")
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "exactly '.claude/settings.json'" in violations[0]
+
+
+def test_hook_pin_skips_json_load(tmp_path: Path) -> None:
+    # 핀 위반 대상은 per-rule 분기가 열지 않는다 — 깨진 JSON의 per-rule 보고
+    # ("deployed-to target ... is not valid JSON")가 없어야 한다. 스윕은 그
+    # 파일을 ruled 집합으로 계속 읽으므로 스윕 쪽 보고 하나는 남는다.
+    root = make_repo(tmp_path)
+    other = ".claude/other.json"
+    write_rule(root, "my-guard.md", hook_rule("my-guard", deployed_to=other))
+    (root / ".claude").mkdir()
+    (root / other).write_text("{not json", encoding="utf-8")
+    make_harness_package(root, "my_guard")
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("exactly '.claude/settings.json'" in v for v in violations)
+    assert any("cannot verify hook wiring" in v for v in violations)
+    assert not any("deployed-to target" in v and "JSON" in v for v in violations)
+
+
+def test_hook_pin_skips_template_check(tmp_path: Path) -> None:
+    # 핀 위반 대상 안의 비정본 커맨드는 per-rule 템플릿 비교("does not match
+    # the canonical ... wrapper")를 받지 않는다. 스윕의 형태 보고만 남는다.
+    root = make_repo(tmp_path)
+    other = ".claude/other.json"
+    write_rule(root, "my-guard.md", hook_rule("my-guard", deployed_to=other))
+    (root / ".claude").mkdir()
+    (root / other).write_text(
+        hook_settings("python -m harness.my_guard"), encoding="utf-8"
+    )
+    make_harness_package(root, "my_guard")
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("exactly '.claude/settings.json'" in v for v in violations)
+    assert any("matches neither canonical wrapper" in v for v in violations)
+    assert not any("does not match the canonical" in v for v in violations)
+
+
+def test_hook_pin_does_not_mask_missing_target(tmp_path: Path) -> None:
+    # 핀 위반이 존재 검사를 가리지 않는다(claude-md 핀과 대칭).
+    root = make_repo(tmp_path)
+    write_rule(
+        root, "my-guard.md", hook_rule("my-guard", deployed_to=".claude/other.json")
+    )
+    make_harness_package(root, "my_guard")
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("exactly '.claude/settings.json'" in v for v in violations)
+    assert any("deployed-to target '.claude/other.json' does not exist" in v for v in violations)
+
+
+def test_hook_dot_slash_variant_is_rejected(tmp_path: Path) -> None:
+    # raw 문자열 비교라 논리적 동치 표기도 거부한다(claude-md 핀과 대칭).
+    root = make_repo(tmp_path)
+    write_rule(
+        root, "my-guard.md", hook_rule("my-guard", deployed_to="./.claude/settings.json")
+    )
+    make_hook_deployment(
+        root, "my-guard", hook_settings(canonical_command("harness.my_guard"))
+    )
+    violations = rule_violations(root)
+    assert len(violations) == 1
+    assert "exactly '.claude/settings.json'" in violations[0]
 
 
 def test_hook_rule_without_harness_package(tmp_path: Path) -> None:
@@ -796,8 +891,10 @@ def test_absolute_deployed_to_is_rejected_not_crash(tmp_path: Path) -> None:
     )
     write_rule(root, "my-guard.md", body)
     violations = rule_violations(root)
-    assert len(violations) == 2
+    # 절대경로는 hook 핀(#190)에도 걸린다 — claude-md 절대경로 테스트와 같은 누적.
+    assert len(violations) == 3
     assert any("repo-root-relative" in v for v in violations)
+    assert any("exactly '.claude/settings.json'" in v for v in violations)
     assert any("does not exist" in v for v in violations)
 
 
@@ -894,10 +991,12 @@ def test_bad_grammar_does_not_mask_blocking_and_package(tmp_path: Path) -> None:
     )
     write_rule(root, "my-guard.md", body)
     violations = rule_violations(root)
-    assert len(violations) == 3
+    # + hook 핀(#190): 비표준 경로는 핀에도 걸린다.
+    assert len(violations) == 4
     assert any("must not contain backslashes or colons" in v for v in violations)
+    assert any("exactly '.claude/settings.json'" in v for v in violations)
     assert any("must declare 'blocking" in v for v in violations)
-    assert any("does not exist" in v for v in violations)
+    assert any("'meta/harness/my_guard/' does not exist" in v for v in violations)
 
 
 def test_bad_path_does_not_mask_blocking_and_package(tmp_path: Path) -> None:
@@ -910,10 +1009,12 @@ def test_bad_path_does_not_mask_blocking_and_package(tmp_path: Path) -> None:
     )
     write_rule(root, "my-guard.md", body)
     violations = rule_violations(root)
-    assert len(violations) == 3
+    # + hook 핀(#190): 비표준 경로는 핀에도 걸린다.
+    assert len(violations) == 4
     assert any("repo-root-relative" in v for v in violations)
+    assert any("exactly '.claude/settings.json'" in v for v in violations)
     assert any("must declare 'blocking" in v for v in violations)
-    assert any("does not exist" in v for v in violations)
+    assert any("'meta/harness/my_guard/' does not exist" in v for v in violations)
 
 
 def test_non_object_settings_does_not_mask_package(tmp_path: Path) -> None:
@@ -1316,8 +1417,10 @@ def test_dotdot_deployed_to_is_not_swept(tmp_path: Path) -> None:
     )
     write_rule(root, "my-guard.md", body)
     violations = rule_violations(root)
-    # 경로 위반 + 패키지 부재만 — 밖 파일(outside_rogue)의 위반이 나오면 안 된다.
-    assert len(violations) == 2
+    # 경로 위반 + hook 핀(#190) + 패키지 부재만 — 밖 파일(outside_rogue)의
+    # 위반이 나오면 안 된다.
+    assert len(violations) == 3
+    assert any("exactly '.claude/settings.json'" in v for v in violations)
     assert not any("outside_rogue" in v for v in violations)
 
 
@@ -1333,9 +1436,10 @@ def test_backslash_deployed_to_is_not_swept(tmp_path: Path) -> None:
     write_rule(root, "my-guard.md", body)
     write_legacy_wiring(root)
     violations = rule_violations(root)
-    # 문법 위반 + 패키지 부재(per-rule) + legacy 배선(스윕) = 3건.
-    assert len(violations) == 3
+    # 문법 위반 + hook 핀(#190) + 패키지 부재(per-rule) + legacy 배선(스윕) = 4건.
+    assert len(violations) == 4
     assert any("must not contain backslashes or colons" in v for v in violations)
+    assert any("exactly '.claude/settings.json'" in v for v in violations)
     assert any("harness.legacy" in v for v in violations)
 
 

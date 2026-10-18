@@ -12,7 +12,9 @@ meta/rules/ 아래의 모든 규칙 파일에 대해 다음을 검증한다.
    유일한 claude-md vessel, raw 문자열 비교라 './CLAUDE.md' 같은 동치 표기도
    거부)이고, 그 파일이 `@meta/rules/<파일명>` import를 **활성 독립 줄**로
    포함하는지(#38 — 주석/펜스 속 import는 로드되지 않으므로 배포가 아니다,
-   _active_lines 동결 스캐너 참조). hook 그릇(v2): deployed-to(settings JSON)의 hooks 구조
+   _active_lines 동결 스캐너 참조). hook 그릇(v2): deployed-to가 정확히
+   `.claude/settings.json`(커밋되는 프로젝트 훅 위치 — raw 문자열
+   비교, #190)이고, 그 settings JSON의 hooks 구조
    안에서 규칙 id에서 도출한 harness 모듈(`harness.<id의 -를 _로>`)을 `-m`으로
    참조하는 커맨드가 1개 이상이고, 참조하는 모든 커맨드가 `blocking`
    frontmatter가 고르는 정본 래퍼 템플릿과 정확히 일치하며, 그 harness
@@ -579,12 +581,25 @@ def check_rule_file(rule_path: Path, root: Path) -> list[str]:
         # 실존 검사가 독립 도출로 어긋날 수 있던 이중화 제거(#42).
         package_name = rule_path.stem.replace("-", "_")
         module_name = f"harness.{package_name}"
+        # hook 그릇의 대상 고정(#190): claude-md 핀과 같은 raw 문자열 비교라
+        # './.claude/settings.json' 같은 동치 표기도 거부한다. 커밋되지 않는
+        # 저장소는 vessel이 아니라는 rule-deployment 문장을 체커가 집행하는
+        # 자리다 — 커밋 여부를 git에 묻지 않고(#108, 순수 파일시스템 체커)
+        # 커밋되는 프로젝트 훅 위치를 경로로 고정한다(PR #189 T1이
+        # 이 핀을 가리켰다).
+        hook_pinned = str(data["deployed-to"]) == ".claude/settings.json"
+        if not hook_pinned:
+            violations.append(
+                f"{rel}: hook deployed-to '{data['deployed-to']}' must be "
+                "exactly '.claude/settings.json' — the committed project "
+                "settings file is the only hook vessel"
+            )
         settings: dict | None = None
         if not bad_path:
             target, missing = _resolve_deploy_target(root, rel, data)
             if missing is not None:
                 violations.append(missing)
-            else:
+            elif hook_pinned:
                 settings, problem = _load_settings(target)
                 if problem is not None:
                     violations.append(
@@ -963,6 +978,9 @@ def check_hook_wiring(root: Path) -> list[str]:
     전제를 떠받치는 것은 그 .gitignore 항목 하나뿐이고 체커는 그것을
     검사하지 않는다(#108 — 관례가 강하고, 검사하려면 순수 파일시스템인 이
     체커에 git 의존이 들어온다. 실제 유출이 관측되면 그때 근거가 생긴다).
+    hook 규칙이 그 파일을 deployed-to로 선언하는 쪽은 per-rule 핀(#190)이
+    거부하므로 닫혔다 — 이 스윕은 로컬 파일의 래퍼 형태를 계속 읽되, CI에서
+    그 파일을 검증할 수 없다는 한계는 그대로다.
     읽기·파싱이 불가능한 규칙 파일이 선언한 비표준 deployed-to는 대상을 알
     수 없어 그 파일이 고쳐질 때까지 스윕할 수 없다 — 인벤토리 보류와 같은
     공표된 지연 패턴이며, 그런 규칙 곁에서의 스윕 생존과 규칙 쪽 보고는
