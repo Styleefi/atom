@@ -88,7 +88,8 @@ REQUIRED_FIELDS = ("id", "tier", "enforce", "deployed-to")
 # 감싸(set -e 셸 대응 — rc=$? 단독 패턴은 -e에서 uv 실패 시점에 셸이 uv
 # 코드로 종료해 누출이 재발한 #31의 경위) 가드의 sentinel 42만 차단(2)으로
 # 되매핑하고, 그 외 nonzero(uv 자체 오류 2 포함)는 1(비차단 경고)로 수렴시키는
-# 설계다. 비차단형: 실패를 1로 수렴시켜 차단(2)을 만들지 않는 설계다.
+# 설계다. 비차단형: 문자열이 가진 종료 구문은 `|| exit 1` 하나라 차단 코드 2를
+# 내는 구문이 없다.
 # {module} 치환은 str.format이 아니라 .replace를 쓴다 — 템플릿에 셸 ${VAR}
 # 표기가 들어와도 안전하도록. 래퍼의 실제 종료 코드 되매핑 동작(set -e 포함)은
 # tests/test_hook_command_contract.py에 있다(/bin/sh 실행).
