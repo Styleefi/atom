@@ -298,8 +298,8 @@ def _import_lines(text: str) -> set[str]:
 
     선행 공백 불허(rstrip만 허용) — 들여쓰기 코드 블록 속 import가 인정되는
     fail-open을 스캐너 확장 없이 닫는다. 무공백 연접(`...a.md@meta/...b.md`)
-    은 IMPORT_RE fullmatch를 통과하는 융합 토큰 — 처리는
-    test_active_import_scanner_corpus의 '무공백 연접' 항목에 있다.
+    은 IMPORT_RE fullmatch를 통과하는 융합 토큰이라 집합에 그대로 들어간다 —
+    착지는 test_fused_import_line_lands_as_violations에 있다.
 
     Args:
         text: 대상 파일 전체 내용.

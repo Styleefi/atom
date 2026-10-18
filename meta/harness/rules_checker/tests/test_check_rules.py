@@ -430,6 +430,24 @@ def test_claude_md_commented_import_is_not_deployed(tmp_path: Path) -> None:
     assert "declared but not actually deployed" in violations[0]
 
 
+def test_fused_import_line_lands_as_violations(tmp_path: Path) -> None:
+    # 융합 토큰의 하류 착지: 스캐너 집합에는 들어가지만 규칙의 import 줄과
+    # 같지 않아 미배포로, 레지스트리에 없어 양쪽 동기화 파일에서 고아로 잡힌다.
+    root = make_repo(tmp_path)
+    write_rule(root, "my-rule.md", valid_rule("my-rule"))
+    deploy_claude_md(root, "@meta/rules/my-rule.md@meta/rules/other.md")
+    violations = rule_violations(root)
+    assert len(violations) == 3
+    undeployed = [v for v in violations if "declared but not actually deployed" in v]
+    assert len(undeployed) == 1 and undeployed[0].startswith("meta/rules/my-rule.md:")
+    orphans = sorted(v for v in violations if "orphan rule import" in v)
+    assert [v.split(":")[0] for v in orphans] == [
+        "CLAUDE.md",
+        "meta/templates/CLAUDE.template.md",
+    ]
+    assert not any("internal checker error" in v for v in violations)
+
+
 def test_unverifiable_vessels_are_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
