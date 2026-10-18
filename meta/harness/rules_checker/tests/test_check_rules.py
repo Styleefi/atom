@@ -583,7 +583,7 @@ def test_hook_pin_does_not_mask_missing_target(tmp_path: Path) -> None:
     violations = rule_violations(root)
     assert len(violations) == 2
     assert any("exactly '.claude/settings.json'" in v for v in violations)
-    assert any("does not exist" in v for v in violations)
+    assert any("deployed-to target '.claude/other.json' does not exist" in v for v in violations)
 
 
 def test_hook_dot_slash_variant_is_rejected(tmp_path: Path) -> None:
