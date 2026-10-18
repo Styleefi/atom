@@ -38,9 +38,10 @@ required). This rule binds the agent running the loop, never the owner.
 - The declaration is authored by a fresh-context subagent (not a fork),
   spawned after the PR has its diff and before the first fix, with the Bar
   declaration prompt below: the agent running the loop fills the prompt's
-  slots — the PR's number, merge base, head, and the issues its body closes
-  — and adds nothing to the prompt. The agent running the loop does not
-  draft or edit the initial declaration; one that lacks the floor's class,
+  slots — the PR's number, merge base, head, the issues its body closes,
+  the report cap and its overflow file — and adds nothing to the prompt.
+  The agent running the loop does not draft or edit the initial
+  declaration; one that lacks the floor's class,
   or that it takes to be no declaration in this section's sense, stops the
   loop before its first fix and returns to the owner, not to a raise.
   (Origin: #151.) See meta/rules/review-loop-spawn-record.md.
@@ -120,8 +121,10 @@ the loop writes only its angle-bracket slots.
 >
 > Output only this: the purpose sentence; a table with the columns
 > class, wrong action, bound, with the purpose-failure class marked in its
-> class cell; one or two below-bar examples; and a list of every file you
-> read and every command you ran. No trade-offs, no advice to the loop.
+> class cell; one or two below-bar examples; a list of every file you
+> read and every command you ran; and, if you wrote `<overflow>`, its
+> path. No trade-offs, no advice to the loop. Keep the output within
+> `<cap>` characters; what does not fit goes to `<overflow>`.
 
 ## Rounds
 
@@ -195,6 +198,17 @@ attacked, and the sentences falsified, each with its disposal; owner-accepted
 trade-offs (one-line rationale, recorded at decision time); links to filed
 issues. An edit the agent makes to the PR title or body is recorded like a
 commit.
+
+The ledger is edited from a local copy: the agent writes the change to a
+file, posts it by script, and checks the posted comment by a grep or a
+count, not by reading it back whole. When a separate review session runs
+the passes, it writes its whole round report, Pass report answers included,
+to a file both sessions can read; its message to the agent running the loop
+carries that file's path and, as text, only the findings; the Pass report
+answers are appended to the ledger from the file. Every subagent prompt the
+review session writes states a character cap for the report and names a
+file for whatever the cap leaves out; a report that used the file names its
+path.
 
 Trade-off acceptance is the owner's decision — the agent only proposes. A
 finding matching a recorded trade-off is closed at triage (not counted, not
