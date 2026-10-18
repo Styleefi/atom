@@ -443,6 +443,8 @@ def _deployed_to_screen(raw: str) -> tuple[bool, bool]:
     """
     deployed = PurePosixPath(raw)
     escapes = deployed.is_absolute() or ".." in deployed.parts
+    # 문법 판정은 raw에 백슬래시·콜론 문자가 있는지로만 정해진다 — 경로 의미론도
+    # OS 호출도 거치지 않는다(#94: 표기 단위 방어 대신 문법 거부를 택한 이유).
     bad_grammar = "\\" in raw or ":" in raw
     return escapes, bad_grammar
 
