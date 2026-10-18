@@ -439,13 +439,14 @@ def test_fused_import_line_lands_as_violations(tmp_path: Path) -> None:
     violations = rule_violations(root)
     assert len(violations) == 3
     undeployed = [v for v in violations if "declared but not actually deployed" in v]
-    assert len(undeployed) == 1 and undeployed[0].startswith("meta/rules/my-rule.md:")
+    assert len(undeployed) == 1
+    assert undeployed[0].startswith(f"{Path('meta') / 'rules' / 'my-rule.md'}:")
     orphans = sorted(v for v in violations if "orphan rule import" in v)
     assert [v.split(":")[0] for v in orphans] == [
         "CLAUDE.md",
-        "meta/templates/CLAUDE.template.md",
+        str(Path("meta") / "templates" / "CLAUDE.template.md"),
     ]
-    assert not any("internal checker error" in v for v in violations)
+    assert all("'@meta/rules/my-rule.md@meta/rules/other.md'" in v for v in orphans)
 
 
 def test_unverifiable_vessels_are_rejected(
