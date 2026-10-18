@@ -457,7 +457,7 @@ def hook_rule(
     blocking: str | None = "true",
     deployed_to: str = ".claude/settings.json",
 ) -> str:
-    """유효한 hook 규칙 본문을 만든다. blocking=None이면 필드를 뺀다."""
+    """hook 규칙 본문을 만든다. blocking=None이면 필드를 뺀다."""
     blocking_line = f"blocking: {blocking}\n" if blocking is not None else ""
     return (
         f"---\nid: {rule_id}\ntier: convention\nenforce: hook\n"
