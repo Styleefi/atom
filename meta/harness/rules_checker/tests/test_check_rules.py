@@ -573,6 +573,41 @@ def test_hook_pin_skips_wiring_checks(tmp_path: Path) -> None:
     assert "exactly '.claude/settings.json'" in violations[0]
 
 
+def test_hook_pin_skips_json_load(tmp_path: Path) -> None:
+    # 핀 위반 대상은 per-rule 분기가 열지 않는다 — 깨진 JSON의 per-rule 보고
+    # ("deployed-to target ... is not valid JSON")가 없어야 한다. 스윕은 그
+    # 파일을 ruled 집합으로 계속 읽으므로 스윕 쪽 보고 하나는 남는다.
+    root = make_repo(tmp_path)
+    other = ".claude/other.json"
+    write_rule(root, "my-guard.md", hook_rule("my-guard", deployed_to=other))
+    (root / ".claude").mkdir()
+    (root / other).write_text("{not json", encoding="utf-8")
+    make_harness_package(root, "my_guard")
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("exactly '.claude/settings.json'" in v for v in violations)
+    assert any("cannot verify hook wiring" in v for v in violations)
+    assert not any("deployed-to target" in v and "JSON" in v for v in violations)
+
+
+def test_hook_pin_skips_template_check(tmp_path: Path) -> None:
+    # 핀 위반 대상 안의 비정본 커맨드는 per-rule 템플릿 비교("does not match
+    # the canonical ... wrapper")를 받지 않는다. 스윕의 형태 보고만 남는다.
+    root = make_repo(tmp_path)
+    other = ".claude/other.json"
+    write_rule(root, "my-guard.md", hook_rule("my-guard", deployed_to=other))
+    (root / ".claude").mkdir()
+    (root / other).write_text(
+        hook_settings("python -m harness.my_guard"), encoding="utf-8"
+    )
+    make_harness_package(root, "my_guard")
+    violations = rule_violations(root)
+    assert len(violations) == 2
+    assert any("exactly '.claude/settings.json'" in v for v in violations)
+    assert any("matches neither canonical wrapper" in v for v in violations)
+    assert not any("does not match the canonical" in v for v in violations)
+
+
 def test_hook_pin_does_not_mask_missing_target(tmp_path: Path) -> None:
     # 핀 위반이 존재 검사를 가리지 않는다(claude-md 핀과 대칭).
     root = make_repo(tmp_path)
@@ -961,7 +996,7 @@ def test_bad_grammar_does_not_mask_blocking_and_package(tmp_path: Path) -> None:
     assert any("must not contain backslashes or colons" in v for v in violations)
     assert any("exactly '.claude/settings.json'" in v for v in violations)
     assert any("must declare 'blocking" in v for v in violations)
-    assert any("does not exist" in v for v in violations)
+    assert any("'meta/harness/my_guard/' does not exist" in v for v in violations)
 
 
 def test_bad_path_does_not_mask_blocking_and_package(tmp_path: Path) -> None:
@@ -979,7 +1014,7 @@ def test_bad_path_does_not_mask_blocking_and_package(tmp_path: Path) -> None:
     assert any("repo-root-relative" in v for v in violations)
     assert any("exactly '.claude/settings.json'" in v for v in violations)
     assert any("must declare 'blocking" in v for v in violations)
-    assert any("does not exist" in v for v in violations)
+    assert any("'meta/harness/my_guard/' does not exist" in v for v in violations)
 
 
 def test_non_object_settings_does_not_mask_package(tmp_path: Path) -> None:
