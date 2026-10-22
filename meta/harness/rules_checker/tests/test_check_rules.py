@@ -1096,6 +1096,29 @@ class _Boom(Exception):
     """
 
 
+class _BoomStrDies(Exception):
+    """__str__이 _Boom을 내는 probe 예외(#204).
+
+    서술 단계에서 나는 예외도 프로덕션 코드가 지목할 수 없는 타입이어야 _describe의
+    except 축소가 드러난다(_Boom docstring 참조).
+    """
+
+    def __str__(self) -> str:
+        raise _Boom("str dies")
+
+
+class _NameDiesMeta(type):
+    """__name__ 읽기가 _Boom을 내는 메타클래스 — _describe의 2차 폴백을 겨냥한다(#204)."""
+
+    @property
+    def __name__(cls) -> str:  # type: ignore[override]
+        raise _Boom("name dies")
+
+
+class _BoomNameDies(Exception, metaclass=_NameDiesMeta):
+    """type(exc).__name__ 읽기가 _Boom을 내는 probe 예외(#204)."""
+
+
 class _Nameless:
     """__name__ 없는 호출 가능 객체 — 표준 라이브러리의 Mock·partial과 같은 부류.
 
@@ -1175,8 +1198,65 @@ def test_pathological_rule_yaml_does_not_kill_the_sweep(
     violations = rule_violations(root)
     # "run은 red" 절반(internal error 보고)도 함께 단정한다 — 규칙이 조용히
     # 건너뛰어지는 회귀를 이 테스트만 놓치면 안 된다(최종 게이트 R6).
-    expected = f"{Path('meta') / 'rules' / 'deep.md'}: internal checker error"
-    assert any(expected in v for v in violations)
+    expected = (
+        f"{Path('meta') / 'rules' / 'deep.md'}: internal checker error"
+        " — _Boom: simulated pathological frontmatter"
+    )
+    assert expected in violations
+    assert any("harness.legacy" in v for v in violations)
+
+
+def test_raising_str_exception_does_not_kill_the_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 가드에 잡힌 예외의 str()이 다시 예외를 내면 핸들러 안에서 죽어 탈출하던
+    # 부류(#204, PR #203 커밋 전 공격). 하니스 배선 위반은 살아야 한다.
+    root = make_repo(tmp_path)
+    (root / "meta" / "rules" / "loud.md").write_text(
+        "---\nid: loud\nstr-dies-marker: true\n---\n", encoding="utf-8"
+    )
+    real_parse = check_rules_module.parse_frontmatter
+
+    def exploding_parse(text: str) -> tuple[dict | None, str | None]:
+        if "str-dies-marker" in text:
+            raise _BoomStrDies()
+        return real_parse(text)
+
+    monkeypatch.setattr(check_rules_module, "parse_frontmatter", exploding_parse)
+    write_legacy_wiring(root)
+    violations = rule_violations(root)
+    expected = (
+        f"{Path('meta') / 'rules' / 'loud.md'}: internal checker error"
+        " — _BoomStrDies:"
+    )
+    assert expected in violations
+    assert any("harness.legacy" in v for v in violations)
+
+
+def test_nameless_exception_does_not_kill_the_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 1차 폴백이 읽는 type(exc).__name__ 자체가 예외를 내는 부류(#204, PR #205
+    # 라운드 1 F3). 서술은 상수로 떨어지고 하니스 배선 위반은 살아야 한다.
+    root = make_repo(tmp_path)
+    (root / "meta" / "rules" / "nameless.md").write_text(
+        "---\nid: nameless\nname-dies-marker: true\n---\n", encoding="utf-8"
+    )
+    real_parse = check_rules_module.parse_frontmatter
+
+    def exploding_parse(text: str) -> tuple[dict | None, str | None]:
+        if "name-dies-marker" in text:
+            raise _BoomNameDies()
+        return real_parse(text)
+
+    monkeypatch.setattr(check_rules_module, "parse_frontmatter", exploding_parse)
+    write_legacy_wiring(root)
+    violations = rule_violations(root)
+    expected = (
+        f"{Path('meta') / 'rules' / 'nameless.md'}: internal checker error"
+        " — undescribable exception"
+    )
+    assert expected in violations
     assert any("harness.legacy" in v for v in violations)
 
 
