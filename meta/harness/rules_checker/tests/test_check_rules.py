@@ -1198,8 +1198,11 @@ def test_pathological_rule_yaml_does_not_kill_the_sweep(
     violations = rule_violations(root)
     # "run은 red" 절반(internal error 보고)도 함께 단정한다 — 규칙이 조용히
     # 건너뛰어지는 회귀를 이 테스트만 놓치면 안 된다(최종 게이트 R6).
-    expected = f"{Path('meta') / 'rules' / 'deep.md'}: internal checker error"
-    assert any(expected in v for v in violations)
+    expected = (
+        f"{Path('meta') / 'rules' / 'deep.md'}: internal checker error"
+        " — _Boom: simulated pathological frontmatter"
+    )
+    assert expected in violations
     assert any("harness.legacy" in v for v in violations)
 
 
