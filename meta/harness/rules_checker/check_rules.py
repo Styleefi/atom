@@ -961,6 +961,24 @@ def check_inventory(root: Path) -> list[str]:
     return violations
 
 
+def _describe(exc: BaseException) -> str:
+    """사망 부류 가드의 위반 메시지에 넣을 예외 서술을 돌려준다.
+
+    폴백은 `type(exc).__name__` 하나만 읽는다. per-rule 가드에서 `str(exc)`가
+    Exception을 내는 경우는 test_raising_str_exception_does_not_kill_the_sweep에 있다.
+
+    Args:
+        exc: 가드가 잡은 예외.
+
+    Returns:
+        위반 메시지 꼬리에 들어갈 서술.
+    """
+    try:
+        return f"{type(exc).__name__}: {exc!s}"
+    except Exception:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
+        return type(exc).__name__
+
+
 def check_hook_wiring(root: Path) -> list[str]:
     """harness 훅 커맨드가 전부 정본 래퍼 템플릿인지 검사한다(repo-level).
 
@@ -1049,7 +1067,7 @@ def check_hook_wiring(root: Path) -> list[str]:
             # 배선 위반이 가려진다 — 규칙 순회의 per-rule 가드와 같은 영역
             # 가드로 사망을 대상 단위에 국지화한다(PR #93 R1).
             violations.append(
-                f"{rel}: internal checker error — {type(exc).__name__}: {exc}"
+                f"{rel}: internal checker error — {_describe(exc)}"
             )
     return violations
 
@@ -1128,7 +1146,7 @@ def check_rules(root: Path) -> list[str]:
         except Exception as exc:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
             rule_violations.append(
                 f"{rule_path.relative_to(root)}: internal checker error — "
-                f"{type(exc).__name__}: {exc}"
+                f"{_describe(exc)}"
             )
 
     violations = list(rule_violations)
@@ -1145,7 +1163,7 @@ def check_rules(root: Path) -> list[str]:
         except Exception as exc:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
             violations.append(
                 f"internal checker error in {name} — "
-                f"{type(exc).__name__}: {exc}"
+                f"{_describe(exc)}"
             )
     if rule_violations:
         # 인벤토리의 아티팩트 분류는 규칙 frontmatter에서 파생된다. 깨진
@@ -1162,7 +1180,7 @@ def check_rules(root: Path) -> list[str]:
         except Exception as exc:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
             violations.append(
                 f"internal checker error in check_inventory — "
-                f"{type(exc).__name__}: {exc}"
+                f"{_describe(exc)}"
             )
     return violations
 

@@ -1096,6 +1096,17 @@ class _Boom(Exception):
     """
 
 
+class _BoomStrDies(Exception):
+    """__str__이 _Boom을 내는 probe 예외(#204).
+
+    서술 단계에서 나는 예외도 프로덕션 코드가 지목할 수 없는 타입이어야 _describe의
+    except 축소가 드러난다(_Boom docstring 참조).
+    """
+
+    def __str__(self) -> str:
+        raise _Boom("str dies")
+
+
 class _Nameless:
     """__name__ 없는 호출 가능 객체 — 표준 라이브러리의 Mock·partial과 같은 부류.
 
@@ -1177,6 +1188,31 @@ def test_pathological_rule_yaml_does_not_kill_the_sweep(
     # 건너뛰어지는 회귀를 이 테스트만 놓치면 안 된다(최종 게이트 R6).
     expected = f"{Path('meta') / 'rules' / 'deep.md'}: internal checker error"
     assert any(expected in v for v in violations)
+    assert any("harness.legacy" in v for v in violations)
+
+
+def test_raising_str_exception_does_not_kill_the_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 가드에 잡힌 예외의 str()이 다시 예외를 내면 핸들러 안에서 죽어 탈출하던
+    # 부류(#204, PR #203 커밋 전 공격). 서술은 타입 이름만으로 떨어지고 하니스
+    # 배선 위반은 살아야 한다.
+    root = make_repo(tmp_path)
+    (root / "meta" / "rules" / "loud.md").write_text(
+        "---\nid: loud\nstr-dies-marker: true\n---\n", encoding="utf-8"
+    )
+    real_parse = check_rules_module.parse_frontmatter
+
+    def exploding_parse(text: str) -> tuple[dict | None, str | None]:
+        if "str-dies-marker" in text:
+            raise _BoomStrDies()
+        return real_parse(text)
+
+    monkeypatch.setattr(check_rules_module, "parse_frontmatter", exploding_parse)
+    write_legacy_wiring(root)
+    violations = rule_violations(root)
+    expected = f"{Path('meta') / 'rules' / 'loud.md'}: internal checker error — _BoomStrDies"
+    assert expected in violations
     assert any("harness.legacy" in v for v in violations)
 
 
