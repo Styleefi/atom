@@ -964,8 +964,10 @@ def check_inventory(root: Path) -> list[str]:
 def _describe(exc: BaseException) -> str:
     """사망 부류 가드의 위반 메시지에 넣을 예외 서술을 돌려준다.
 
-    폴백은 `type(exc).__name__` 하나만 읽는다. per-rule 가드에서 `str(exc)`가
-    Exception을 내는 경우는 test_raising_str_exception_does_not_kill_the_sweep에 있다.
+    1차 폴백은 타입 이름을 `!s`로 포맷한 f-string 하나만 평가하고, 그 평가가 Exception을
+    내면 상수 "undescribable exception"을 돌려준다. per-rule 가드에서 `str(exc)`가 Exception을
+    내는 경우는 test_raising_str_exception_does_not_kill_the_sweep에, `__name__` 읽기가
+    Exception을 내는 경우는 test_nameless_exception_does_not_kill_the_sweep에 있다.
 
     Args:
         exc: 가드가 잡은 예외.
@@ -976,7 +978,11 @@ def _describe(exc: BaseException) -> str:
     try:
         return f"{type(exc).__name__}: {exc!s}"
     except Exception:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
-        return type(exc).__name__
+        pass
+    try:
+        return f"{type(exc).__name__!s}: <str() raised>"
+    except Exception:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
+        return "undescribable exception"
 
 
 def check_hook_wiring(root: Path) -> list[str]:
