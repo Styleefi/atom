@@ -1210,8 +1210,7 @@ def test_raising_str_exception_does_not_kill_the_sweep(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # 가드에 잡힌 예외의 str()이 다시 예외를 내면 핸들러 안에서 죽어 탈출하던
-    # 부류(#204, PR #203 커밋 전 공격). 서술은 타입 이름만으로 떨어지고 하니스
-    # 배선 위반은 살아야 한다.
+    # 부류(#204, PR #203 커밋 전 공격). 하니스 배선 위반은 살아야 한다.
     root = make_repo(tmp_path)
     (root / "meta" / "rules" / "loud.md").write_text(
         "---\nid: loud\nstr-dies-marker: true\n---\n", encoding="utf-8"
@@ -1228,7 +1227,7 @@ def test_raising_str_exception_does_not_kill_the_sweep(
     violations = rule_violations(root)
     expected = (
         f"{Path('meta') / 'rules' / 'loud.md'}: internal checker error"
-        " — _BoomStrDies: <str() raised>"
+        " — _BoomStrDies:"
     )
     assert expected in violations
     assert any("harness.legacy" in v for v in violations)

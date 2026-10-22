@@ -980,7 +980,7 @@ def _describe(exc: BaseException) -> str:
     except Exception:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
         pass
     try:
-        return f"{type(exc).__name__!s}: <str() raised>"
+        return f"{type(exc).__name__!s}:"
     except Exception:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
         return "undescribable exception"
 
