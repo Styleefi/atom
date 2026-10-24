@@ -398,18 +398,6 @@ _KNOWN_FALSE_BLOCKS = [
      "규격 위반인 두 번째 제목까지 감지돼 차단된다 — 기록만",
      'git commit -m "feat(x): a" # ; git commit -m "Bad."',
      ("feat(x): a", "Bad."), "#74 시금석(구성 발견)"),
-    ("`{ cd /x; }`는 `{`가 세그먼트 선두라 _changes_repository가 `cd`를 놓쳐 "
-     "branch_check_unsafe가 서지 않는다 — bash: 실행됨(cd가 성공하면 /x의 "
-     "저장소에서 — 그 브랜치는 가드가 보지 않으며 비보호일 때만 오차단, 실패하면 "
-     "페이로드 cwd에서). 현재 브랜치가 보호 브랜치면 차단",
-     '{ cd /x; }; git commit -m "feat: a"', ("feat: a",),
-     "#213(PR #210 리뷰 루프 발견)"),
-    ("`{ git checkout -b feat/x; }`는 `{`가 세그먼트 선두라 _git_subcommand가 "
-     "None을 돌려줘 브랜치 래치가 서지 않는다 — bash: 실행됨(checkout이 성공하면 "
-     "feat/x에서, 브랜치가 이미 있으면 현재 브랜치에서 — 그때는 차단이 맞다). 현재 "
-     "브랜치가 보호 브랜치면 차단",
-     '{ git checkout -b feat/x; }; git commit -m "feat: a"', ("feat: a",),
-     "#213(PR #210 리뷰 루프 발견)"),
 ]
 
 # 설명이 bash 실행 상태를 밝히는 세 가지 형식 (sibling 규약과 동일).
@@ -437,8 +425,7 @@ def test_known_false_blocks() -> None:
 
 
 def test_brace_hidden_cd_and_checkout_do_not_raise_latches() -> None:
-    # 알려진 한계(#213)의 플래그 고정 — 위 표는 제목 튜플만 비교하므로 래치는
-    # 여기서 잠근다(`then` 형태는 표에 없고 여기에만 있다).
+    # 알려진 한계(#213)의 플래그 고정.
     for cmd in ('{ cd /x; }; git commit -m "feat: a"',
                 '{ git checkout -b feat/x; }; git commit -m "feat: a"',
                 'if true; then cd /x; fi; git commit -m "feat: a"',
