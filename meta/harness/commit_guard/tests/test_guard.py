@@ -338,7 +338,7 @@ def test_other_git_subcommands_not_detected() -> None:
 def test_unparseable_command_is_fully_fail_open() -> None:
     # 폴백 제거 pin (#45): shlex가 줄 단위·전체 두 단계 모두 실패하는 명령은
     # 감지 자체를 포기한다. 문자열 리터럴 속 커밋 텍스트를 정규식이 실행으로
-    # 오인해 무관한 Bash를 차단했던 경로 — 감지 공백은 commit_backstop이 받는다.
+    # 오인해 무관한 Bash를 차단했던 경로.
     heredoc_45 = (
         "uv run python - <<'PY'\n"
         "cases = [\n"

@@ -401,9 +401,9 @@ def detect_invocations(command: str) -> list[CommitInvocation]:
     """Bash 명령 문자열에서 모든 git commit 명령을 감지한다.
 
     줄 단위 토큰화 → 전체 문자열 토큰화 순서로 내려가고, 둘 다 실패하면
-    전면 fail-open이다(정규식 폴백은 #45 오차단으로 제거 — 공백은
-    commit_backstop이 받는다). 판정 기준은 두 갈래로 추적한다. `cd`는 저장소
-    자체를 옮기므로 한 번 켜지면 유지되고(되돌릴 방법이 없다), 브랜치 변경은
+    전면 fail-open이다(정규식 폴백은 #45 오차단으로 제거). 판정 기준은 두
+    갈래로 추적한다. `cd`는 저장소 자체를 옮기므로 한 번 켜지면
+    유지되고(되돌릴 방법이 없다), 브랜치 변경은
     **마지막 것이 이긴다** — `git checkout feat/x && git checkout main`이면
     커밋은 main에 얹히므로 검사를 되살려야 한다.
 
