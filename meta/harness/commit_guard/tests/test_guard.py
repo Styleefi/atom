@@ -424,6 +424,20 @@ def test_known_false_blocks() -> None:
         )
 
 
+def test_brace_hidden_cd_and_checkout_do_not_raise_latches() -> None:
+    # 알려진 한계(#213)의 플래그 고정.
+    for cmd in ('{ cd /x; }; git commit -m "feat: a"',
+                '{ git checkout -b feat/x; }; git commit -m "feat: a"',
+                'if true; then cd /x; fi; git commit -m "feat: a"',
+                'if true; then git checkout -b feat/x; fi; git commit -m "feat: a"'):
+        invs = guard.detect_invocations(cmd)
+        assert len(invs) == 1 and invs[0].branch_check_unsafe is False, cmd
+    for cmd in ('cd /x; git commit -m "feat: a"',
+                'git checkout -b feat/x && git commit -m "feat: a"'):
+        invs = guard.detect_invocations(cmd)
+        assert len(invs) == 1 and invs[0].branch_check_unsafe is True, cmd
+
+
 # --- 판정 흐름 ---------------------------------------------------------------
 
 
