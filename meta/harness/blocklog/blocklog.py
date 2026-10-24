@@ -77,8 +77,7 @@ commit_backstop이 커밋 제목을 stderr로 되울리지 않는 것과 같은 
 
 수동 실행·테스트 주의:
     이 모듈을 부르는 코드를 손으로 돌릴 때는 `XDG_STATE_HOME`을 임시 경로로 돌려
-    실제 원장을 오염시키지 말 것. 하니스 테스트는 각 tests 패키지의 conftest가
-    autouse fixture로 처리한다.
+    실제 원장을 오염시키지 말 것.
 """
 
 from __future__ import annotations
