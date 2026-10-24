@@ -30,6 +30,7 @@ Alternatives were reviewed and rejected on 2026-07-21 (see issue #17): dind requ
 
 # run an arbitrary payload while the environment is up (teardown guaranteed):
 ./run.sh uv run --directory meta pytest -m gitlab   # e.g. #9 integration tests
+./run.sh ./verify_ci.sh                              # the root .gitlab-ci.yml against the seeded instance
 ```
 
 Manual steps for debugging:
