@@ -63,7 +63,9 @@ ATOM_COMMIT_OVERRIDE=1.
   - 대상이 원격 ref 모양이면 접두를 벗긴 이름도 함께 대조하므로,
     `git checkout origin/main`처럼 detached HEAD가 되는 형태나 마지막 성분이
     보호 브랜치와 같은 브랜치(`feat/main`)도 오차단된다.
-  - 감지는 세그먼트 선두가 `git`인 경우만 본다(`env`/`xargs`/별칭 경유).
+  - 감지는 세그먼트 선두가 `git`인 경우만 본다(`env`/`xargs`/별칭 경유, `{`·`then`
+    뒤). `cd` 래치도 세그먼트 선두의 `cd`만 본다 — `{ cd /x; }`·`then cd /x`는
+    놓친다(tests에 잠금, #213).
   - shlex가 두 단계(줄 단위→전체) 모두 실패하는 명령은 전면 fail-open이다 —
     정규식 폴백은 문자열 리터럴 속 텍스트를 실행으로 오인해 무관한 Bash를
     차단했으므로 제거했다(#45). 그 감지 공백은 commit_backstop이 받는다.
