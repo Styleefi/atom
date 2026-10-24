@@ -409,7 +409,6 @@ def _reasons(cwd: str | None, sha: str, parts: tuple[str, str, str, str]) -> lis
 
 
 def _log(**kwargs) -> None:
-    # 원장 기록은 제어 흐름에 영향을 주지 않는다 — commit_backstop의 `_log`와 같은 근거.
     try:
         from harness.blocklog.blocklog import record_block
 

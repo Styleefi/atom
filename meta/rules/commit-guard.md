@@ -24,9 +24,8 @@ them). All seven issues of the family tabled in #52 (#30 #44 #45 #47 #49
 #50 #51) closed with it: six left their gap frozen for the backstop to
 catch afterwards — #47 for the shared branch ref only, as #64 scoped it —
 while #45 had its cause, the regex fallback, deleted, and the detection gap
-that deletion opened is absorbed the same way. All
-failure paths are fail-open (never block unrelated Bash), and
-every block message includes the `ATOM_COMMIT_OVERRIDE=1` re-run escape for
+that deletion opened is absorbed the same way.
+Every block message includes the `ATOM_COMMIT_OVERRIDE=1` re-run escape for
 deliberate exceptions. Non-mechanical guidance (semantic units, branch naming,
 PR-only merges, no pushes to main) lives in the commit-discipline rule.
 

@@ -593,7 +593,7 @@ def _header_report(problems: list[tuple[str, str]], prescribe: bool = True) -> s
 
 
 def _log(**kwargs) -> None:
-    """이벤트 원장에 한 줄을 남긴다 — 절대 제어 흐름에 영향을 주지 않는다.
+    """이벤트 원장에 한 줄을 남긴다.
 
     맨몸 호출을 금지하는 이유가 둘이다. (1) 인자 불일치 TypeError는 record_block
     본문 진입 **전에** 나므로 그 안의 방어가 못 잡고, 예외가 main() 밖으로 나가면

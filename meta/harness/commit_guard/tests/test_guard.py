@@ -3,7 +3,7 @@
 
 git 호출은 전부 mock: 감지 로직은 detect_invocations를 직접, 판정 흐름은
 stdin JSON + _current_branch monkeypatch로 검증한다. 설계 불변식 —
-오차단 금지(문자열 내부 언급·타 저장소), 실패는 전부 통과 방향, 차단
+오차단 금지(문자열 내부 언급·타 저장소), 차단
 메시지의 override 안내 — 를 케이스로 고정한다.
 """
 
