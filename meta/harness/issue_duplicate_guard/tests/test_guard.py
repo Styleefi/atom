@@ -300,6 +300,18 @@ def test_cd_after_invocation_does_not_mark() -> None:
     assert len(invs) == 1 and invs[0].cwd_unsafe is False
 
 
+def test_cd_behind_brace_is_not_latched_when_marks_misalign() -> None:
+    # 알려진 한계(#104 측정 S1457, #209): 같은 줄의 낱말 중간 큰따옴표가 인용 표식
+    # 정렬을 깨면 `{`·`then`이 세그먼트에 남아 _changes_directory가 `cd`를 놓친다.
+    # 검색은 페이로드 cwd에서 돈다. 정렬이 멀쩡하면 래치가 선다.
+    for cmd in ('{ cd /x; }; echo a"b c"d; gh issue create -t T',
+                'if true; then cd /x; fi; echo a"b c"d; gh issue create -t T'):
+        invs = guard.detect_invocations(cmd)
+        assert len(invs) == 1 and invs[0].cwd_unsafe is False, cmd
+    control = guard.detect_invocations('{ cd /x; }; gh issue create -t T')
+    assert len(control) == 1 and control[0].cwd_unsafe is True
+
+
 def test_override_prefix_alone_and_in_compound() -> None:
     assert guard.detect_invocations(f"{guard.OVERRIDE_TOKEN} gh issue create -t x")[0].override
     invs = guard.detect_invocations(f"cd y && {guard.OVERRIDE_TOKEN} gh issue create -t x")
@@ -540,6 +552,11 @@ _SEGMENT_CORPUS = [
     # 정탐 하나를 잃고 위 오차단을 막는 교환이다.
     ("교환 관계: 롤백 구역이라 결합하지 않아 미감지 — bash: 실행됨",
      'cat << E\\\nOF\necho "body"\nE\\\nOF\ngh issue create -t "T"\nEOF', ()),
+    ("같은 줄의 낱말 중간 큰따옴표가 인용 표식 정렬을 깨면 `{ cd /x; }`의 `{`가 "
+     "세그먼트에 남아 `cd` 래치가 서지 않는다(래치는 test_cd_behind_brace_is_not_"
+     "latched_when_marks_misalign이 고정) — bash: gh는 명령 위치, 실행됨(cd가 "
+     "성공하면 /x에서, 실패하면 페이로드 cwd에서)",
+     '{ cd /x; }; echo a"b c"d; gh issue create -t T', ("T",)),
 ]
 
 
@@ -593,6 +610,11 @@ _KNOWN_FALSE_BLOCKS = [
      "create 없음). 실사용 관측 3회(2026-07-29 2회, 2026-08-02 이 표 작성 중 "
      "1회), 전부 override 1회로 복구 — #74 결정으로 기록만",
      "gh issue create --help", (None,), "#74 결정(실사용 관측)"),
+    ("낱말 중간의 큰따옴표(`a\"b c\"d`)가 인용 표식 정렬을 깨고, 폴백의 정확 일치 "
+     "경로가 인용된 `\";\"`를 경계로 읽는다 — bash: 미실행(`;` 뒤는 전부 echo의 "
+     "인자)",
+     'echo a"b c"d ";" gh issue create -t T', ("T",),
+     "#104 측정 S1438(구성 발견) — #209"),
 ]
 
 
