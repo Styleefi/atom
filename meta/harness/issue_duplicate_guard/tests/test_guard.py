@@ -308,8 +308,10 @@ def test_cd_behind_brace_is_not_latched_when_marks_misalign() -> None:
                 'if true; then cd /x; fi; echo a"b c"d; gh issue create -t T'):
         invs = guard.detect_invocations(cmd)
         assert len(invs) == 1 and invs[0].cwd_unsafe is False, cmd
-    control = guard.detect_invocations('{ cd /x; }; gh issue create -t T')
-    assert len(control) == 1 and control[0].cwd_unsafe is True
+    for cmd in ('{ cd /x; }; gh issue create -t T',
+                'if true; then cd /x; fi; gh issue create -t T'):
+        control = guard.detect_invocations(cmd)
+        assert len(control) == 1 and control[0].cwd_unsafe is True, cmd
 
 
 def test_override_prefix_alone_and_in_compound() -> None:
@@ -553,9 +555,9 @@ _SEGMENT_CORPUS = [
     ("교환 관계: 롤백 구역이라 결합하지 않아 미감지 — bash: 실행됨",
      'cat << E\\\nOF\necho "body"\nE\\\nOF\ngh issue create -t "T"\nEOF', ()),
     ("같은 줄의 낱말 중간 큰따옴표가 인용 표식 정렬을 깨면 `{ cd /x; }`의 `{`가 "
-     "세그먼트에 남아 `cd` 래치가 서지 않는다(래치는 test_cd_behind_brace_is_not_"
-     "latched_when_marks_misalign이 고정) — bash: gh는 명령 위치, 실행됨(cd가 "
-     "성공하면 /x에서, 실패하면 페이로드 cwd에서)",
+     "세그먼트에 남아 `cd` 래치가 서지 않는다(래치는 "
+     "test_cd_behind_brace_is_not_latched_when_marks_misalign이 고정) — bash: "
+     "gh는 명령 위치, 실행됨(cd가 성공하면 /x에서, 실패하면 페이로드 cwd에서)",
      '{ cd /x; }; echo a"b c"d; gh issue create -t T', ("T",)),
 ]
 
