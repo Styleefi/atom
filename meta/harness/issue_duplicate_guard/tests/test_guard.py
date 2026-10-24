@@ -3,7 +3,7 @@
 
 외부 CLI(gh/glab)는 전부 mock: 감지 로직은 detect_invocations를 직접,
 판정 흐름은 stdin JSON + _run_search monkeypatch로 검증한다.
-설계 불변식 — 오차단 금지(문자열 내부 언급), 실패는 전부 통과 방향 —
+설계 불변식 — 오차단 금지(문자열 내부 언급) —
 을 케이스로 고정한다.
 """
 
