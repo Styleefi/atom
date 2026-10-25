@@ -62,6 +62,7 @@ Conventions:
 - Test runner: {{TEST_RUNNER}}
 - Formatter / linter: {{FORMATTER_AND_LINTER}}
 - Package manager: {{PACKAGE_MANAGER}}
+- Issue tracker: {{ISSUE_TRACKER: GitHub Issues or GitLab Issues}}
 
 ## Architecture
 
