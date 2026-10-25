@@ -252,14 +252,15 @@ style preferences and speculation count as neither. One not worth fixing is
 recorded with that answer. (2) **How large is the fix?** Fold-sized (above)
 is fixed in its own commit after the round's above-bar fix commits, except
 in a round with zero above-bar findings, where it is recorded instead;
-anything else is proposed to the owner at round end — bundled by defect
-class, with the two answers, the verified scenario or improvement, provenance
-(PR, round) and a recommended disposal: file an issue or leave as is. The
-proposal, and the owner's decision when it comes, are recorded in the ledger;
-an issue is created only on a decision to file, per the issue-workflow rule,
-its body citing the ledger comment that records the decision. A proposal
-without a decision files nothing. (Origin: #125; #217, decisions recorded on
-#111.) Duplicate prevention is the issue-duplicate-guard hook's job.
+anything else is proposed to the owner at round end, bundled by defect
+class. A proposal — this one, or the Scope bullet's for an unrelated defect
+— carries the answers given, the verified scenario or improvement,
+provenance (PR, round) and a recommended disposal, file an issue or leave as
+is; an issue is created only on a decision to file, per the issue-workflow
+rule, its body citing the ledger comment that records the decision. A
+proposal without a decision files nothing. (Origin: #125; #217, decisions
+recorded on #111.) Duplicate prevention is the issue-duplicate-guard hook's
+job.
 
 ## Divergence trigger
 
