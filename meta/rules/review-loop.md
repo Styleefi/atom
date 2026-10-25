@@ -86,7 +86,8 @@ required). This rule binds the agent running the loop, never the owner.
   raise, re-match the ledger's past triage records — findings that now match
   return to the above-bar lane (they join the fix backlog but never the
   divergence count). Lowering the bar, or relaxing a declared bound,
-  requires owner approval. Uncertain matches escalate to the owner.
+  requires owner approval. Uncertain matches escalate to the owner and
+  block the exit observation as an unresolved case.
   Authority over the bar is asymmetric: the agent running the loop never
   authors the initial declaration and may raise on the terms above.
 - If a review ran before any declaration, that pass counts retroactively as
@@ -318,14 +319,14 @@ Exactly two endings:
 
 1. **Observed exit** — never declared. A round scoped per the Rounds section
    — so every fix has been covered by a completed round — run with the
-   procedure recorded in the ledger, finds zero above-bar findings, with no
-   unresolved borderline or pending-decision case and no above-bar backlog
-   (including findings returned by a bar raise). The observation is valid only
-   if the HEAD, title and body the round's passes reviewed are still the
-   PR's when its last pass completes — any new commit, whoever pushed it, or
-   any edit to the title or body, invalidates the observation (not their
-   findings) and requires a new round. Below-bar findings from this round
-   are proposed or recorded per Triage lanes, then the loop ends.
+   procedure recorded in the ledger, finds zero above-bar findings and no
+   above-bar backlog (including findings returned by a bar raise). The
+   observation is valid only if the HEAD, title and body the round's passes
+   reviewed are still the PR's when its last pass completes — any new commit,
+   whoever pushed it, or any edit to the title or body, invalidates the
+   observation (not their findings) and requires a new round. Below-bar
+   findings from this round are proposed or recorded per Triage lanes, then
+   the loop ends.
 2. **Owner decision** — at any point, typically in response to a checkpoint
    or escalation report.
 
