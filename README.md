@@ -45,6 +45,9 @@ git remote rename origin upstream
 git remote add origin https://github.com/<your-account>/myproject.git
 #   or: git remote add origin https://gitlab.example.com/<group>/myproject.git
 git push -u origin main
+#    then protect `main` on the forge (PR required, enforced for admins, force-push
+#    and deletion off) — the clone inherits the hooks, not atom's branch protection;
+#    pushing a branch straight to main is the layer only the server can block
 
 # 2. adapt the skeleton
 #    - install uv once per machine (https://docs.astral.sh/uv/) — runs the meta harnesses
