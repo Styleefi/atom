@@ -18,6 +18,8 @@ import subprocess
 import sys
 import tokenize
 
+from harness.hookio.payload import bash_call, read_payload
+
 TAG = "[review-loop-trailer-check]"
 
 # 보고 사유. 규칙 파일의 "`report` reasons:" 행과 test_reasons_sync가 결속한다.
@@ -423,28 +425,6 @@ def _emit(reports: dict[str, list[str]]) -> None:
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": context}}))
 
 
-def _read_payload() -> tuple[str, str | None, str | None] | None:
-    """stdin의 hook 페이로드에서 (command, cwd, session_id)를 꺼낸다.
-
-    Returns:
-        Bash 도구 호출이 아니거나 명령이 비어 있으면 None.
-    """
-    payload = json.loads(sys.stdin.read())
-    if not isinstance(payload, dict) or payload.get("tool_name") != "Bash":
-        return None
-    tool_input = payload.get("tool_input")
-    command = tool_input.get("command") if isinstance(tool_input, dict) else None
-    if not isinstance(command, str) or not command.strip():
-        return None
-    cwd = payload.get("cwd")
-    session_id = payload.get("session_id")
-    return (
-        command,
-        cwd if isinstance(cwd, str) and cwd else None,
-        session_id if isinstance(session_id, str) and session_id else None,
-    )
-
-
 def main() -> int:
     """페이로드를 읽고 새 커밋을 점검한다.
 
@@ -452,13 +432,14 @@ def main() -> int:
         0이면 통과(보고가 있으면 stdout JSON에 실린다), 1이면 fail-open 경고.
     """
     try:
-        payload = _read_payload()
+        payload = read_payload()
     except ValueError:
         print(f"{TAG} malformed hook input (fail-open)", file=sys.stderr)
         return 1
-    if payload is None:
+    call = bash_call(payload) if payload is not None else None
+    if call is None:
         return 0
-    _command, cwd, session_id = payload
+    cwd, session_id = call.cwd, call.session_id
     dirs = _repo_dirs(cwd)
     if dirs is None:
         return 0

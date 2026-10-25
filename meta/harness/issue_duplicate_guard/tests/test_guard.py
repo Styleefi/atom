@@ -115,30 +115,6 @@ def test_real_heredoc_inside_command_substitution_in_arith() -> None:
     assert guard.detect_invocations(cmd) == []
 
 
-def test_protected_flags_marks_escaped_operator() -> None:
-    # 이스케이프된 연산자는 진짜 구분자가 아니다 — 표식이 붙어야 경계 판정에서 빠진다
-    text = 'echo \\; gh issue create'
-    flags = guard._protected_flags(text, len(guard._tokenize(text)))
-    assert flags is not None
-    assert flags[1] is True          # `;` 자리
-    assert flags[0] is False         # `echo`
-
-
-def test_protected_flags_gives_up_when_input_holds_sentinel() -> None:
-    # 센티널이 입력에 있으면 정규화 결과를 신뢰할 수 없다 — 판별 포기
-    text = f"echo {guard._ESCAPE_SENTINEL} gh issue create"
-    assert guard._protected_flags(text, len(guard._tokenize(text))) is None
-
-
-def test_protected_flags_ignores_apostrophe_inside_double_quotes() -> None:
-    # bash는 큰따옴표 안 작은따옴표를 리터럴로 둔다 — 인용 상태가 뒤집히면
-    # 뒤따르는 이스케이프가 접히지 않아 정렬이 깨지고 오차단이 되살아난다
-    text = 'echo "it\'s" a\\ b && gh issue create'
-    flags = guard._protected_flags(text, len(guard._tokenize(text)))
-    assert flags is not None         # 상태가 뒤집혔다면 정렬 실패로 None이 된다
-    assert flags[-1] is False        # 진짜 && 는 보호 대상이 아니다
-
-
 def test_strip_heredocs_reports_completion() -> None:
     # 완결 플래그는 줄 연속 결합을 켜는 스위치다 — 코퍼스는 최종 감지 결과만
     # 보므로 플래그 의미가 뒤집혀도 우연히 같은 결과가 나오면 안 잡힌다

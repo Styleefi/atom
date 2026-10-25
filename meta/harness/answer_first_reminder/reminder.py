@@ -72,9 +72,10 @@ UserPromptSubmit에서 exit 0의 stdout이 모델 컨텍스트에 추가되는 �
 
 from __future__ import annotations
 
-import json
 import re
 import sys
+
+from harness.hookio.payload import read_payload
 
 # 컨텍스트에 주입되는 유일한 출력. 재공급 대상인 answer-first 규칙 본문과
 # 같은 언어(영어)·같은 용어를 써서 로드된 규칙과 즉시 연결되게 한다.
@@ -197,12 +198,11 @@ def main() -> int:
         종료 코드 (0 통과 — 질문·읽기 요청 모양이면 stdout으로 리마인더, 1 내부 경고).
     """
     try:
-        payload = json.loads(sys.stdin.buffer.read().decode("utf-8"))
+        payload = read_payload()
     except ValueError:
-        # UnicodeDecodeError도 ValueError의 하위 클래스라 여기서 잡힌다.
         print("[answer-first-reminder] malformed hook input (fail-open)", file=sys.stderr)
         return 1
-    if not isinstance(payload, dict):
+    if payload is None:
         return 0
     prompt = payload.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip():
