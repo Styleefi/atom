@@ -140,7 +140,7 @@ the loop writes only its angle-bracket slots.
   latent defect ("the root cause is pre-existing" is not an exemption) and
   a sentence the PR's diff leaves untouched and makes false. Defects
   unrelated to the PR do not block this PR and are never fixed in it: one
-  worth fixing per the Triage lanes' first question is filed as an issue
+  worth fixing per the Triage lanes' first question is proposed to the owner
   immediately, even an above-bar-grade one.
 - A fix that changes a documented behavior or semantic — or the wording
   that describes one — must, in the same commit, align every live copy
@@ -196,9 +196,10 @@ below, as returned, and who gave them; per round, the verified findings →
 matched class → assigned lane, the above-bar count, the class names each fix
 addresses, and per commit the attacking model, whether the message was
 attacked, and the sentences falsified, each with its disposal; owner-accepted
-trade-offs (one-line rationale, recorded at decision time); links to filed
-issues. An edit the agent makes to the PR title or body is recorded like a
-commit.
+trade-offs (one-line rationale, recorded at decision time); proposals to the
+owner (Triage lanes), each recorded when made, and the owner's decision on
+each, recorded when it comes; links to filed issues. An edit the agent makes
+to the PR title or body is recorded like a commit.
 
 The ledger is edited from a local copy: the agent fetches the comment to a
 file, applies the change there, posts the whole file by script, and checks
@@ -250,10 +251,14 @@ style preferences and speculation count as neither. One not worth fixing is
 recorded with that answer. (2) **How large is the fix?** Fold-sized (above)
 is fixed in its own commit after the round's above-bar fix commits, except
 in a round with zero above-bar findings, where it is recorded instead;
-anything else is filed as an issue per the issue-workflow rule — bundled by
-defect class, at round end, with provenance (PR, round) and the verified
-scenario or improvement. (Origin: #125.) Duplicate prevention is the
-issue-duplicate-guard hook's job.
+anything else is proposed to the owner at round end — bundled by defect
+class, with the two answers, the verified scenario or improvement, provenance
+(PR, round) and a recommended disposal: file an issue or leave as is. The
+proposal, and the owner's decision when it comes, are recorded in the ledger;
+an issue is created only on a decision to file, per the issue-workflow rule,
+its body citing the ledger comment that records the decision. A proposal
+without a decision files nothing. (Origin: #125; #217, decisions recorded on
+#111.) Duplicate prevention is the issue-duplicate-guard hook's job.
 
 ## Divergence trigger
 
@@ -320,7 +325,7 @@ Exactly two endings:
    PR's when its last pass completes — any new commit, whoever pushed it, or
    any edit to the title or body, invalidates the observation (not their
    findings) and requires a new round. Below-bar findings from this round
-   are filed or recorded in the ledger per Triage lanes, then the loop ends.
+   are proposed or recorded per Triage lanes, then the loop ends.
 2. **Owner decision** — at any point, typically in response to a checkpoint
    or escalation report.
 
