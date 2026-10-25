@@ -7,7 +7,7 @@ deployed-to: CLAUDE.md
 
 # Issue workflow
 
-The work backlog's SSOT is the project's issue tracker — GitHub Issues or GitLab Issues (the project's CLAUDE.md "Toolchain & conventions" declares which). Never mirror the backlog into files.
+The work backlog's SSOT is the project's issue tracker — GitHub Issues or GitLab Issues (the project's CLAUDE.md declares which). Never mirror the backlog into files.
 
 - Find work with `gh issue list` / `gh issue view <n>` (GitLab: `glab issue list` / `glab issue view <n>`).
 - A PR/MR that completes an issue links it with `Closes #<n>` in its body — both platforms auto-close on merge, keeping work↔code traceable.
