@@ -62,6 +62,7 @@ def test_bash_call_normalises_missing_or_empty_optional_fields() -> None:
 
 
 @pytest.mark.parametrize("obj", [
+    None,
     {"tool_name": "Write", "tool_input": {"command": "ls"}},
     {"tool_name": "Bash"},
     {"tool_name": "Bash", "tool_input": "ls"},

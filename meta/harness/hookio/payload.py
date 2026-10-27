@@ -62,16 +62,18 @@ def read_payload(*, strict_utf8: bool = False) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
-def bash_call(payload: dict) -> BashCall | None:
+def bash_call(payload: dict | None) -> BashCall | None:
     """Bash 도구 호출의 명령·cwd·session_id를 꺼낸다.
 
     Args:
-        payload: read_payload가 돌려준 훅 JSON 객체.
+        payload: read_payload가 돌려준 훅 JSON 객체. None(객체가 아닌 입력)은
+            그대로 "Bash 호출 아님"으로 본다 — 네 하네스가 같은 판정을 각자
+            들고 있던 것을 여기로 모았다.
 
     Returns:
         Bash 호출이 아니거나 명령이 비어 있으면(공백뿐이면) None.
     """
-    if payload.get("tool_name") != "Bash":
+    if payload is None or payload.get("tool_name") != "Bash":
         return None
     tool_input = payload.get("tool_input")
     command = tool_input.get("command") if isinstance(tool_input, dict) else None

@@ -501,7 +501,7 @@ def main() -> int:
     except ValueError:
         print("[commit-guard] malformed hook input (fail-open)", file=sys.stderr)
         return 1
-    call = bash_call(payload) if payload is not None else None
+    call = bash_call(payload)
     if call is None:
         return 0
     command, cwd, session_id = call.command, call.cwd, call.session_id
