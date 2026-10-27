@@ -198,7 +198,7 @@ def main() -> int:
         종료 코드 (0 통과 — 질문·읽기 요청 모양이면 stdout으로 리마인더, 1 내부 경고).
     """
     try:
-        payload = read_payload()
+        payload = read_payload(strict_utf8=True)
     except ValueError:
         print("[answer-first-reminder] malformed hook input (fail-open)", file=sys.stderr)
         return 1

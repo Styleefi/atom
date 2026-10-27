@@ -15,13 +15,23 @@ def test_read_payload_returns_object_from_text_stream(monkeypatch) -> None:
     assert payload.read_payload() == {"tool_name": "Bash"}
 
 
-def test_read_payload_decodes_bytes_strictly(monkeypatch) -> None:
-    # 버퍼가 닿으면 바이트로 읽는다 — 깨진 UTF-8은 ValueError(UnicodeDecodeError)
-    monkeypatch.setattr(
-        sys, "stdin", io.TextIOWrapper(io.BytesIO(b'{"a": "\xff"}'), encoding="utf-8")
-    )
+def test_read_payload_default_keeps_text_mode_reading(monkeypatch) -> None:
+    # 기본 읽기는 이동 전 다섯 하네스의 `sys.stdin.read()`와 같다: surrogateescape
+    # 스트림에서 깨진 UTF-8은 예외 없이 통과한다(2026-10-27 재공격이 잡은 C1 드리프트).
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(
+        io.BytesIO(b'{"tool_name": "Bash", "tool_input": {"command": "\xff"}}'),
+        encoding="utf-8", errors="surrogateescape",
+    ))
+    assert payload.read_payload()["tool_name"] == "Bash"
+
+
+def test_read_payload_strict_decodes_bytes(monkeypatch) -> None:
+    # strict_utf8은 answer_first_reminder의 이동 전 읽기 — 깨진 UTF-8은 ValueError
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(
+        io.BytesIO(b'{"a": "\xff"}'), encoding="utf-8", errors="surrogateescape",
+    ))
     with pytest.raises(ValueError):
-        payload.read_payload()
+        payload.read_payload(strict_utf8=True)
 
 
 @pytest.mark.parametrize("raw", ["", "{not json"])

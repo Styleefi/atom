@@ -36,23 +36,28 @@ class BashCall:
     session_id: str | None
 
 
-def read_payload() -> dict | None:
+def read_payload(*, strict_utf8: bool = False) -> dict | None:
     """stdin의 훅 JSON을 객체로 돌려준다.
 
-    바이트 스트림이 닿으면(`sys.stdin.buffer`) 바이트로 읽어 UTF-8로 엄격히
-    디코드한다 — 텍스트 모드 stdin은 UTF-8 모드·C 로케일에서 surrogateescape로
-    깨진 바이트를 조용히 통과시킨다. 테스트의 `io.StringIO`처럼 버퍼가 없으면
-    텍스트로 읽는다. UnicodeDecodeError는 ValueError의 하위 클래스라 호출자는
-    ValueError 하나만 잡으면 된다.
+    기본은 텍스트 모드 `sys.stdin.read()` — 다섯 하네스가 이동 전에 쓰던 읽기
+    그대로다. 텍스트 모드 stdin은 UTF-8 모드·C 로케일에서 surrogateescape로
+    깨진 바이트를 조용히 통과시키는데, 그 동작도 그대로 둔다(동작 불변이 이
+    모듈의 목적이다; 통일 여부는 별도 결정). answer_first_reminder만 이동 전에
+    바이트로 읽어 엄격히 디코드했으므로 `strict_utf8=True`로 그 동작을 지킨다.
+    UnicodeDecodeError는 ValueError의 하위 클래스라 호출자는 ValueError 하나만
+    잡으면 된다.
+
+    Args:
+        strict_utf8: True면 `sys.stdin.buffer`에서 바이트로 읽어 UTF-8로 엄격히
+            디코드한다.
 
     Returns:
         JSON 객체(dict). 파싱은 됐지만 객체가 아니면 None.
 
     Raises:
-        ValueError: 디코드 실패 또는 JSON 문법 오류.
+        ValueError: 디코드 실패(strict_utf8) 또는 JSON 문법 오류.
     """
-    buffer = getattr(sys.stdin, "buffer", None)
-    raw = buffer.read().decode("utf-8") if buffer is not None else sys.stdin.read()
+    raw = sys.stdin.buffer.read().decode("utf-8") if strict_utf8 else sys.stdin.read()
     payload = json.loads(raw)
     return payload if isinstance(payload, dict) else None
 
