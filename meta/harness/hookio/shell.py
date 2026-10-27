@@ -6,7 +6,8 @@ Bash 명령 문자열을 shlex 토큰으로 쪼개고(tokenize), 토큰별 인�
 (split_segments). 가드는 각 세그먼트의 선두 토큰으로 `git commit`·`gh issue
 create` 같은 호출을 식별한다.
 
-이 계층은 issue_duplicate_guard에 있던 것을 원문 그대로 옮긴 것이다(#4).
+이 계층은 issue_duplicate_guard에서 옮긴 것이다(#4) — 코드는 그대로, 함수
+이름은 공개형으로, 독스트링의 출처·위치 참조를 고쳤다.
 commit_guard가 들고 있던 사본은 `split_segments(tokens, None)`과 같은 판정을
 했으므로 그 호출로 대체된다. **동결 선언(#74)은 위치와 무관하게 이 계층에
 그대로 적용된다** — 잔여 bash 충실도 구멍은 더 수리하지 않으며, 계약은
@@ -92,14 +93,14 @@ def protected_flags(text: str, count: int) -> list[bool] | None:
     둔다(`echo "a\\;b"` → `a\\;b`). 여기서 더 접어도 무해한 이유는 그 자리가 이미
     인용 구간 안이라 어느 토큰화도 낱말 경계로 보지 않기 때문이다 — 이 함수의
     목적은 구조 해석이 아니라 **토큰 개수 맞추기**뿐이다. 확장·산술·백틱·heredoc은
-    모델링하지 않는다(동결된 _mask_arithmetic과 다른 점).
+    모델링하지 않는다(issue_duplicate_guard의 동결된 _mask_arithmetic과 다른 점).
 
     토큰 수가 그래도 어긋나면 **모른다(None)**를 돌려준다. 호출자는 그때 이
-    모듈이 도입한 판정 두 가지를 끄고 정확 일치 연산자만 본다(split_segments).
+    계층이 도입한 판정 두 가지를 끄고 정확 일치 연산자만 본다(split_segments).
 
     사전 존재 오차단 계열이 있다 — `;;`처럼 case 밖에서는 문법 오류인
     토큰, 인용·이스케이프된 연산자가 명령 이름 자리에 오는 형태 등. 전부 정확 일치
-    OPERATORS 경로에서 나오며 이 판정 도입 이전부터 있었다. 알려진 것은 테스트의
+    OPERATORS 경로에서 나오며 이 판정 도입 이전부터 있었다. 알려진 것은 issue_duplicate_guard tests의
     _KNOWN_FALSE_BLOCKS 표에 잠겨 있으나 **그 목록이 망라적이라고 증명된 바 없다.**
     전부 owner가 수용한 한계다. 실사용 발생의 자동 기록은 차단 이력 원장(#76,
     harness.blocklog)이 맡고, 수리 여부는 그 기록을 근거로 한 owner
@@ -173,7 +174,7 @@ def split_segments(
     뒤의 `;`·`then`은 그냥 낱말이다. posix 토큰화가 그 구분을 지우므로
     protected_flags가 복원한 표식을 받아 쓴다.
 
-    표식이 없으면(None = 보호 여부 불명) 이 모듈이 새로 도입한 판정 두
+    표식이 없으면(None = 보호 여부 불명) 이 계층이 새로 도입한 판정 두
     가지 — 결합 연산자 토큰과 명령 위치 예약어 — 를 끄고 정확 일치
     연산자만 경계로 본다. 두 판정은 토큰의 **내용**을 셸 구조의 근거로
     삼기 때문에, 보호 여부를 모르는 상태에서 적용하면 인용 리터럴을
