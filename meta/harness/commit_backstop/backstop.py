@@ -160,7 +160,12 @@ from harness.hookio.payload import EXIT_BLOCK, bash_call, read_payload
 
 try:
     from harness.commit_guard.guard import validate_subject
-except ImportError:  # commit_guard를 제거한 자식 프로젝트: 헤더 검사만 생략
+except ModuleNotFoundError as exc:
+    # commit_guard를 제거한 자식 프로젝트만 헤더 검사를 생략한다. commit_guard
+    # 안쪽의 import 실패(hookio.shell 부재 등)는 삼키지 않고 올린다 — 삼키면
+    # 헤더 검사가 stderr 한 줄 없이 꺼진다(PR #219 라운드 2 V2, #43의 패턴).
+    if exc.name not in ("harness.commit_guard", "harness.commit_guard.guard"):
+        raise
     validate_subject = None  # type: ignore[assignment]
 
 # override 마커: 규칙 예외 선언. 명령 텍스트에 있으면 평가·보고만 생략한다
