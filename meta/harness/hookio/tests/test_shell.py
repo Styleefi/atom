@@ -14,7 +14,7 @@ from harness.hookio import shell
 
 def test_protected_flags_marks_escaped_operator() -> None:
     # 이스케이프된 연산자는 진짜 구분자가 아니다 — 표식이 붙어야 경계 판정에서 빠진다
-    text = 'echo \; gh issue create'
+    text = 'echo \\; gh issue create'
     flags = shell.protected_flags(text, len(shell.tokenize(text)))
     assert flags is not None
     assert flags[1] is True          # `;` 자리
@@ -53,7 +53,7 @@ def test_split_with_flags_skips_command_position_keywords() -> None:
 
 
 def test_split_with_flags_keeps_protected_operator_inside_segment() -> None:
-    text = "echo \; git commit -m x"
+    text = "echo \\; git commit -m x"
     tokens = shell.tokenize(text)
     flags = shell.protected_flags(text, len(tokens))
     assert shell.split_segments(tokens, flags) == [["echo", ";", "git", "commit", "-m", "x"]]

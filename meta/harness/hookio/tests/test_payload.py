@@ -73,5 +73,5 @@ def test_bash_call_returns_none_when_not_a_bash_command(obj: dict) -> None:
     assert payload.bash_call(obj) is None
 
 
-def test_exit_block_is_the_wrapper_sentinel() -> None:
+def test_exit_block_is_42() -> None:
     assert payload.EXIT_BLOCK == 42
