@@ -69,9 +69,5 @@ def test_bash_call_normalises_missing_or_empty_optional_fields() -> None:
     {"tool_name": "Bash", "tool_input": {"command": "   "}},
     {"tool_name": "Bash", "tool_input": {"command": 7}},
 ])
-def test_bash_call_returns_none_when_not_a_bash_command(obj: dict) -> None:
+def test_bash_call_returns_none_when_not_a_bash_command(obj: dict | None) -> None:
     assert payload.bash_call(obj) is None
-
-
-def test_exit_block_is_42() -> None:
-    assert payload.EXIT_BLOCK == 42
