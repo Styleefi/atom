@@ -167,9 +167,6 @@ except ImportError:  # commit_guard를 제거한 자식 프로젝트: 헤더 검
 # (tip 기록은 수행 — 해당 1회만 면제되고 이후 위반은 다시 적발된다).
 OVERRIDE_TOKEN = "ATOM_COMMIT_OVERRIDE=1"
 
-# 차단 sentinel 종료 코드 — commit_guard와 동일한 계약(#31 참고).
-EXIT_BLOCK = 42
-
 PROTECTED_BRANCHES = ("main", "master")
 
 GIT_TIMEOUT_SECONDS = 10
