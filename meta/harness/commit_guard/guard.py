@@ -91,25 +91,16 @@ ATOM_COMMIT_OVERRIDE=1.
 
 from __future__ import annotations
 
-import json
 import re
-import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
 
+from harness.hookio.payload import EXIT_BLOCK, bash_call, read_payload
+from harness.hookio.shell import split_segments, tokenize
+
 # override 마커: 규칙 예외를 선언했다는 표시. 세그먼트 선두에 있으면 통과.
 OVERRIDE_TOKEN = "ATOM_COMMIT_OVERRIDE=1"
-
-# 차단 sentinel 종료 코드. Claude Code의 차단 코드는 2지만 uv(자체 오류 2)와
-# python(예외 1, CLI 오류 2)이 같은 코드를 낼 수 있어, exec 배선에서는 도구
-# 실패가 차단으로 샜다(#31). 자연 발생 불가능한 42를 반환하고 settings.json의
-# 셸 래퍼가 42만 차단(2)으로 되매핑하고 그 외 nonzero는 1(비차단 경고)로
-# 수렴시키는 설계다(계약은 rules_checker의 test_hook_command_contract.py에 있다).
-EXIT_BLOCK = 42
-
-# shlex(punctuation_chars=True)가 별도 토큰으로 분리하는 셸 연산자.
-OPERATORS = {"&&", "||", "|", ";", ";;", "&", "(", ")"}
 
 PROTECTED_BRANCHES = {"main", "master"}
 
@@ -157,41 +148,6 @@ class CommitInvocation:
 
 def _basename(token: str) -> str:
     return token.rsplit("/", 1)[-1]
-
-
-def _tokenize(text: str) -> list[str]:
-    """셸 문법을 인식해 토큰화한다 (dup guard와 동일한 규약의 의식적 복제).
-
-    따옴표 문자열은 단일 토큰이 되고 연산자는 별도 토큰으로 분리된다.
-
-    Args:
-        text: Bash 명령 문자열.
-
-    Returns:
-        토큰 목록.
-
-    Raises:
-        ValueError: 미폐쇄 따옴표 등 shlex가 소화 못 하는 구문.
-    """
-    lex = shlex.shlex(text, posix=True, punctuation_chars=True)
-    lex.whitespace_split = True
-    lex.commenters = ""
-    return list(lex)
-
-
-def _split_segments(tokens: list[str]) -> list[list[str]]:
-    segments: list[list[str]] = []
-    current: list[str] = []
-    for token in tokens:
-        if token in OPERATORS:
-            if current:
-                segments.append(current)
-                current = []
-        else:
-            current.append(token)
-    if current:
-        segments.append(current)
-    return segments
 
 
 def _extract_subject(raw_message: str | None) -> str | None:
@@ -417,10 +373,10 @@ def detect_invocations(command: str) -> list[CommitInvocation]:
     """
     token_groups: list[list[str]] | None = None
     try:
-        token_groups = [_tokenize(line) for line in command.split("\n")]
+        token_groups = [tokenize(line) for line in command.split("\n")]
     except ValueError:
         try:
-            token_groups = [_tokenize(command)]
+            token_groups = [tokenize(command)]
         except ValueError:
             return []
 
@@ -428,7 +384,7 @@ def detect_invocations(command: str) -> list[CommitInvocation]:
     other_repository = False
     branch_unsafe = False
     for tokens in token_groups:
-        for segment in _split_segments(tokens):
+        for segment in split_segments(tokens, None):
             parsed = _parse_segment(segment)
             if parsed is not None:
                 subject, c_path, override = parsed
@@ -541,22 +497,14 @@ def main() -> int:
         종료 코드 (0 통과, 1 내부 경고, 42 차단 — 래퍼가 2로 되매핑).
     """
     try:
-        payload = json.loads(sys.stdin.read())
+        payload = read_payload()
     except ValueError:
         print("[commit-guard] malformed hook input (fail-open)", file=sys.stderr)
         return 1
-    if not isinstance(payload, dict) or payload.get("tool_name") != "Bash":
+    call = bash_call(payload)
+    if call is None:
         return 0
-    tool_input = payload.get("tool_input")
-    command = tool_input.get("command") if isinstance(tool_input, dict) else None
-    if not isinstance(command, str) or not command.strip():
-        return 0
-    cwd = payload.get("cwd")
-    if not isinstance(cwd, str) or not cwd:
-        cwd = None
-    session_id = payload.get("session_id")
-    if not isinstance(session_id, str) or not session_id:
-        session_id = None
+    command, cwd, session_id = call.command, call.cwd, call.session_id
 
     for invocation in detect_invocations(command):
         if invocation.override:

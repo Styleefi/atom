@@ -18,6 +18,7 @@ import sys
 from datetime import datetime, timezone
 
 from harness.blocklog.blocklog import ledger_path
+from harness.hookio.payload import read_payload
 
 TAG = "[review-loop-spawn-record]"
 RULE_PATH = "meta/rules/review-loop-spawn-record.md"
@@ -339,11 +340,11 @@ def main() -> int:
         0이면 통과(알림이 있으면 stdout JSON에 실린다), 1이면 경고.
     """
     try:
-        payload = json.loads(sys.stdin.read())
+        payload = read_payload()
     except ValueError:
         print(f"{TAG} malformed hook input (nothing recorded)", file=sys.stderr)
         return 1
-    if not isinstance(payload, dict):
+    if payload is None:
         return 0
     path = record_path()
     event = payload.get("hook_event_name")

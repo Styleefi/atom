@@ -156,6 +156,8 @@ import os
 import subprocess
 import sys
 
+from harness.hookio.payload import EXIT_BLOCK, bash_call, read_payload
+
 try:
     from harness.commit_guard.guard import validate_subject
 except ImportError:  # commit_guard를 제거한 자식 프로젝트: 헤더 검사만 생략
@@ -164,9 +166,6 @@ except ImportError:  # commit_guard를 제거한 자식 프로젝트: 헤더 검
 # override 마커: 규칙 예외 선언. 명령 텍스트에 있으면 평가·보고만 생략한다
 # (tip 기록은 수행 — 해당 1회만 면제되고 이후 위반은 다시 적발된다).
 OVERRIDE_TOKEN = "ATOM_COMMIT_OVERRIDE=1"
-
-# 차단 sentinel 종료 코드 — commit_guard와 동일한 계약(#31 참고).
-EXIT_BLOCK = 42
 
 PROTECTED_BRANCHES = ("main", "master")
 
@@ -643,22 +642,14 @@ def main() -> int:
         42 위반 — 래퍼가 2로 되매핑).
     """
     try:
-        payload = json.loads(sys.stdin.read())
+        payload = read_payload()
     except ValueError:
         print("[commit-backstop] malformed hook input (fail-open)", file=sys.stderr)
         return 1
-    if not isinstance(payload, dict) or payload.get("tool_name") != "Bash":
+    call = bash_call(payload)
+    if call is None:
         return 0
-    tool_input = payload.get("tool_input")
-    command = tool_input.get("command") if isinstance(tool_input, dict) else None
-    if not isinstance(command, str) or not command.strip():
-        return 0
-    cwd = payload.get("cwd")
-    if not isinstance(cwd, str) or not cwd:
-        cwd = None
-    session_id = payload.get("session_id")
-    if not isinstance(session_id, str) or not session_id:
-        session_id = None
+    command, cwd, session_id = call.command, call.cwd, call.session_id
     override = OVERRIDE_TOKEN in command
 
     dirs = _repo_dirs(cwd)
