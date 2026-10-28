@@ -100,8 +100,8 @@ def protected_flags(text: str, count: int) -> list[bool] | None:
 
     사전 존재 오차단 계열이 있다 — `;;`처럼 case 밖에서는 문법 오류인
     토큰, 인용·이스케이프된 연산자가 명령 이름 자리에 오는 형태 등. 전부 정확 일치
-    OPERATORS 경로에서 나오며 이 판정 도입 이전부터 있었다. 알려진 것은 issue_duplicate_guard와
-    commit_guard 각 tests의 _KNOWN_FALSE_BLOCKS 표에 잠겨 있으나 **그 목록이 망라적이라고 증명된 바 없다.**
+    OPERATORS 경로에서 나오며 이 판정 도입 이전부터 있었다. 알려진 것은 issue_duplicate_guard tests의
+    _KNOWN_FALSE_BLOCKS 표에 잠겨 있으나 **그 목록이 망라적이라고 증명된 바 없다.**
     전부 owner가 수용한 한계다. 실사용 발생의 자동 기록은 차단 이력 원장(#76,
     harness.blocklog)이 맡고, 수리 여부는 그 기록을 근거로 한 owner
     결정이다(모듈 docstring의 동결 선언 참조).
