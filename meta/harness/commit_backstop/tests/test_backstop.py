@@ -1522,6 +1522,10 @@ def _reimport_backstop(monkeypatch, missing: str) -> object:
     """
     import importlib
 
+    import harness.commit_backstop as package
+
+    # 재import는 패키지 속성 `backstop`도 새 모듈로 바꾼다 — 원래 객체를 돌려놓는다.
+    monkeypatch.setattr(package, "backstop", package.backstop, raising=False)
     for name in ("harness.commit_backstop.backstop", "harness.commit_guard.guard"):
         monkeypatch.delitem(sys.modules, name, raising=False)
     monkeypatch.setitem(sys.modules, missing, None)
