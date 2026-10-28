@@ -78,7 +78,7 @@ Packages under `meta/harness/` whose enforcement point is the pytest suite itsel
 
 ### Shared modules
 
-Packages under `meta/harness/` that other harnesses import rather than run. They have no entry point of their own, but they own owner-visible state, which is why they are listed here.
+Packages under `meta/harness/` that other harnesses import rather than run. They have no entry point of their own.
 
 | name | engagement | owner interface | behavior |
 |---|---|---|---|
