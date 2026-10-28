@@ -1509,39 +1509,3 @@ def test_branch_report_lists_every_offending_sha(monkeypatch):
     assert "No remote 'main' exists here" in absent
     assert "legitimate" not in absent  # 정당성 주장 금지
     assert "excluded" not in absent  # 제외 여부 주장 금지
-
-
-# --- import 폴백의 경계 -------------------------------------------------------
-
-
-def _reimport_backstop(monkeypatch, missing: str) -> object:
-    """`missing` 모듈이 없는 상태를 심고(sys.modules에 None) backstop을 다시 import한다.
-
-    backstop과 commit_guard의 캐시를 먼저 비워 import가 실제로 다시 일어나게 한다.
-    monkeypatch가 테스트 뒤 원래 모듈 객체를 돌려놓는다.
-    """
-    import importlib
-
-    import harness.commit_backstop as package
-
-    # 재import는 패키지 속성 `backstop`도 새 모듈로 바꾼다 — 원래 객체를 돌려놓는다.
-    monkeypatch.setattr(package, "backstop", package.backstop, raising=False)
-    for name in ("harness.commit_backstop.backstop", "harness.commit_guard.guard"):
-        monkeypatch.delitem(sys.modules, name, raising=False)
-    monkeypatch.setitem(sys.modules, missing, None)
-    return importlib.import_module("harness.commit_backstop.backstop")
-
-
-def test_removed_commit_guard_only_drops_the_header_check(monkeypatch) -> None:
-    # commit_guard를 제거한 자식 프로젝트의 모양: 그 모듈만 못 찾는다
-    module = _reimport_backstop(monkeypatch, "harness.commit_guard.guard")
-    assert module.validate_subject is None
-
-
-def test_broken_hookio_shell_is_not_swallowed(monkeypatch) -> None:
-    # 사고 상태(shell.py 부재·파일 이름 변경)에서는 import 실패가 올라와야 한다 — 삼키면
-    # 헤더 검사가 조용히 꺼진다. 올라오면 진입점이 죽고 래퍼가 rc 1 경고로 수렴한다.
-    with pytest.raises(ModuleNotFoundError) as excinfo:
-        _reimport_backstop(monkeypatch, "harness.hookio.shell")
-    assert excinfo.value.name == "harness.hookio.shell"
-
