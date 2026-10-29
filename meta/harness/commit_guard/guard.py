@@ -424,7 +424,7 @@ def _current_branch(cwd: str | None, c_path: str | None) -> str | None:
             capture_output=True,
             text=True,
             timeout=GIT_TIMEOUT_SECONDS,
-            cwd=cwd,
+            cwd=cwd, check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -463,8 +463,8 @@ def _block_message(reason: str) -> str:
         [
             f"[commit-guard] {reason}",
             "See the commit-discipline rule (meta/rules/commit-discipline.md).",
-            "If this commit is a deliberate exception, re-run the SAME command "
-            f"prefixed with: {OVERRIDE_TOKEN} git commit ...",
+            ("If this commit is a deliberate exception, re-run the SAME command "
+            f"prefixed with: {OVERRIDE_TOKEN} git commit ..."),
         ]
     )
 
@@ -485,7 +485,7 @@ def _log(**kwargs) -> None:
         from harness.blocklog.blocklog import record_block
 
         record_block(**kwargs)
-    except Exception:  # noqa: BLE001 — fail-open이 설계 요구사항
+    except Exception:  # noqa: BLE001, S110 — fail-open이 설계 요구사항
         pass
 
 

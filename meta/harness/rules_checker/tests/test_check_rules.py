@@ -1561,21 +1561,21 @@ def test_checker_never_raises_on_malformed_inputs(tmp_path: Path) -> None:
     """
     cases = [
         # (규칙 본문, settings 내용 — None이면 파일 없음)
-        ("---\nid: my-guard\ntier: convention\nenforce: hook\n"
-         "deployed-to: /abs/x\nblocking: true\n---\n\nbody\n", None),
-        ("---\nid: my-guard\ntier: convention\nenforce: hook\n"
-         "deployed-to: ../up/x\nblocking: true\n---\n\nbody\n", None),
-        ("---\nid: my-guard\ntier: convention\nenforce: hook\n"
-         "deployed-to: .claude/settings.json\nblocking: [list]\n---\n\nbody\n",
+        (("---\nid: my-guard\ntier: convention\nenforce: hook\n"
+         "deployed-to: /abs/x\nblocking: true\n---\n\nbody\n"), None),
+        (("---\nid: my-guard\ntier: convention\nenforce: hook\n"
+         "deployed-to: ../up/x\nblocking: true\n---\n\nbody\n"), None),
+        (("---\nid: my-guard\ntier: convention\nenforce: hook\n"
+         "deployed-to: .claude/settings.json\nblocking: [list]\n---\n\nbody\n"),
          "{not json"),
-        ("---\nid: my-guard\ntier: convention\nenforce: hook\n"
-         "deployed-to: .claude/settings.json\nblocking: true\n---\n\nbody\n",
+        (("---\nid: my-guard\ntier: convention\nenforce: hook\n"
+         "deployed-to: .claude/settings.json\nblocking: true\n---\n\nbody\n"),
          '{"hooks": 42}'),
-        ("---\nid: my-guard\ntier: convention\nenforce: hook\n"
-         "deployed-to: .claude/settings.json\nblocking: true\n---\n\nbody\n",
+        (("---\nid: my-guard\ntier: convention\nenforce: hook\n"
+         "deployed-to: .claude/settings.json\nblocking: true\n---\n\nbody\n"),
          '{"hooks": {"PreToolUse": [{"hooks": [{"command": 42}]}]}}'),
-        ("---\nid: [1, 2]\ntier: {a: b}\nenforce: hook\n"
-         "deployed-to: 5\nblocking: yes\n---\n\nbody\n", "[]"),
+        (("---\nid: [1, 2]\ntier: {a: b}\nenforce: hook\n"
+         "deployed-to: 5\nblocking: yes\n---\n\nbody\n"), "[]"),
     ]
     for i, (rule_body, settings_text) in enumerate(cases):
         root = make_repo(tmp_path / str(i))

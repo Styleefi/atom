@@ -103,7 +103,7 @@ def _adapter_search(state: dict, title: str) -> subprocess.CompletedProcess[str]
     ]
     return subprocess.run(
         argv, cwd=_STATE_DIR, env=state["env"], stdin=subprocess.DEVNULL,
-        capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT,
+        capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT, check=False,
     )
 
 
@@ -173,7 +173,7 @@ def gitlab_state() -> dict:
             "--git-protocol", "http",
         ],
         cwd=_STATE_DIR, env=env, stdin=subprocess.DEVNULL,
-        capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT,
+        capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT, check=False,
     )
     if login.returncode != 0:
         pytest.fail(
@@ -297,7 +297,7 @@ def test_module_entrypoint_blocks_duplicate(
         [sys.executable, "-m", "harness.issue_duplicate_guard"],
         input=payload, cwd=_STATE_DIR,
         env={**os.environ, "PYTHONPATH": str(_META_DIR)},
-        capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT,
+        capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT, check=False,
     )
     assert result.returncode == 42, (
         f"expected exit 42, got {result.returncode} — stderr:\n{result.stderr}"

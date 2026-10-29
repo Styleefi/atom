@@ -375,32 +375,32 @@ _ORACLE_CORPUS = [
     ("R5-1: arith 안 brace 내부도 마스킹 관통 — bash: 출력 4, create 실행됨",
      'echo $(( ${SHIFT:-1<<2 } ))\ngh issue create --title "T"\n2',
      ("T",)),
-    ("R5-2: dq 안 brace 안 작은따옴표는 리터럴, 산술은 활성 — bash: 출력 '4', "
-     "다음 heredoc 본문은 미실행",
+    (("R5-2: dq 안 brace 안 작은따옴표는 리터럴, 산술은 활성 — bash: 출력 '4', "
+     "다음 heredoc 본문은 미실행"),
      'echo "${u:-\'$((1<<2))\'}"\ncat > /dev/null <<EOF\ntrue && gh issue create --title "T"\nEOF',
      ()),
     # --- 이하 라운드 6 Critical 수정분 ---
     ("C1: dq 안 brace가 정상 닫혀 이후 마스킹 유지 — bash: create 실행됨",
      'echo "${u:-x}" ; (( 1 << 2 ))\ngh issue create --title "T"\n2',
      ("T",)),
-    ("C1 오차단 방향: brace 누수로 뒤 heredoc 본문이 파싱되면 안 됨 — "
-     "bash: create 미실행 (본문)",
+    (("C1 오차단 방향: brace 누수로 뒤 heredoc 본문이 파싱되면 안 됨 — "
+     "bash: create 미실행 (본문)"),
      'echo "${x:-y}"; (( 1<<2 )); cat > /dev/null <<EOF\ngh issue create --title "T"\nEOF',
      ()),
-    ("C2: 백틱 안 작은따옴표 안 이스케이프 백틱은 닫지 않음 — bash: 출력 a`b, "
-     "create 실행됨",
+    (("C2: 백틱 안 작은따옴표 안 이스케이프 백틱은 닫지 않음 — bash: 출력 a`b, "
+     "create 실행됨"),
      'echo `echo \'a\\`b\'` ; (( 1 << 2 ))\ngh issue create --title "T"\n2',
      ("T",)),
     # --- 이하 라운드 7 Critical 수정분 ---
     ("R7-A: 큰따옴표 문맥은 중첩 brace로 상속 — bash: 출력 '4', create 실행됨",
      'echo "${u:-${v:-\'$((1<<2))\'}}"\ngh issue create --title "T"\n2',
      ("T",)),
-    ("R7-A 오차단 방향: 중첩 brace의 산술이 마스킹돼야 뒤 heredoc 본문이 "
-     "보존됨 — bash: create 미실행 (본문)",
+    (("R7-A 오차단 방향: 중첩 brace의 산술이 마스킹돼야 뒤 heredoc 본문이 "
+     "보존됨 — bash: create 미실행 (본문)"),
      'echo "${u:-${v:-\'$((1<<2))\'}}"\ncat > /dev/null <<EOF\ngh issue create --title "T"\nEOF',
      ()),
-    ("R7-B: 백틱 렉서 이스케이프 집합 밖의 백슬래시-작은따옴표는 인용을 "
-     "닫음 — bash: 출력 a\\ 4, create 실행됨",
+    (("R7-B: 백틱 렉서 이스케이프 집합 밖의 백슬래시-작은따옴표는 인용을 "
+     "닫음 — bash: 출력 a\\ 4, create 실행됨"),
      "echo `echo 'a\\' ; echo $((1<<2))`\ngh issue create --title \"T\"\n2",
      ("T",)),
     ("R7-B 오차단 방향 — bash: create 미실행 (본문)",
@@ -487,13 +487,13 @@ _SEGMENT_CORPUS = [
      'echo ";" gh issue create -t "T"', ()),
     ("오차단 방향: `&&` 인용 리터럴(도입 이전부터의 오차단) — bash: 미실행",
      'echo "&&" gh issue create -t "T"', ()),
-    ("오차단 방향: 인용된 예약어는 예약어가 아니다 — bash: 미실행"
-     "(`then: command not found`)",
+    (("오차단 방향: 인용된 예약어는 예약어가 아니다 — bash: 미실행"
+     "(`then: command not found`)"),
      '"then" gh issue create -t "T"', ()),
     ("오차단 방향: 작은따옴표 예약어도 동일 — bash: 미실행",
      "'time' gh issue create -t \"T\"", ()),
-    ("오차단 방향: 따옴표가 낱말에 붙어 정렬이 깨져도 오차단이 되면 안 됨 — "
-     "bash: 미실행(`();;)` 를 명령으로 취급)",
+    (("오차단 방향: 따옴표가 낱말에 붙어 정렬이 깨져도 오차단이 되면 안 됨 — "
+     "bash: 미실행(`();;)` 를 명령으로 취급)"),
      'echo x && "();;"\')\' gh issue create -t "T"', ()),
     ("이스케이프가 섞여도 정확 일치 연산자는 경계로 남는다 — bash: 실행됨",
      'echo a\\ b && gh issue create -t "T"', ("T",)),
@@ -521,8 +521,8 @@ _SEGMENT_CORPUS = [
      "echo 'text \\\ngh issue create -t T'", ()),
     ("오차단 방향: 결합돼야 마커가 되는 heredoc(`E\\`+`OF`) — bash: 본문, 미실행",
      'cat << E\\\nOF\ngh issue create -t "T"\nEOF', ()),
-    ("오차단 방향: 미종결 heredoc 본문의 쪼개진 토큰(`g\\`+`h`)을 결합해 "
-     "gh를 조립하면 안 됨 — bash: 경고 후 본문 출력, 미실행",
+    (("오차단 방향: 미종결 heredoc 본문의 쪼개진 토큰(`g\\`+`h`)을 결합해 "
+     "gh를 조립하면 안 됨 — bash: 경고 후 본문 출력, 미실행"),
      'cat << "EOF"\ng\\\nh issue create -t "T"', ()),
     # 교환 관계 잠금: bash는 본문 안 `E\`+`OF`도 결합해 heredoc을 조기 종결하므로
     # 이 create를 **실제로 실행한다**(실측: 뒤 명령 실행됨, 마지막 EOF는 command
@@ -530,10 +530,10 @@ _SEGMENT_CORPUS = [
     # 정탐 하나를 잃고 위 오차단을 막는 교환이다.
     ("교환 관계: 롤백 구역이라 결합하지 않아 미감지 — bash: 실행됨",
      'cat << E\\\nOF\necho "body"\nE\\\nOF\ngh issue create -t "T"\nEOF', ()),
-    ("같은 줄의 낱말 중간 큰따옴표가 인용 표식 정렬을 깨면 `{ cd /x; }`의 `{`가 "
+    (("같은 줄의 낱말 중간 큰따옴표가 인용 표식 정렬을 깨면 `{ cd /x; }`의 `{`가 "
      "세그먼트에 남아 `cd` 래치가 서지 않는다(래치는 "
      "test_cd_behind_brace_is_not_latched_when_marks_misalign이 고정) — bash: "
-     "gh는 명령 위치, 실행됨(cd가 성공하면 /x에서, 실패하면 페이로드 cwd에서)",
+     "gh는 명령 위치, 실행됨(cd가 성공하면 /x에서, 실패하면 페이로드 cwd에서)"),
      '{ cd /x; }; echo a"b c"d; gh issue create -t T', ("T",)),
 ]
 
@@ -569,28 +569,28 @@ def test_segment_corpus() -> None:
 # 형식: (설명, 명령, 현재 감지되는 제목 튜플, 출처).
 
 _KNOWN_FALSE_BLOCKS = [
-    ("이스케이프된 큰따옴표가 낱말 경계를 가로질러 인용 표식 정렬이 깨지고, "
-     "폴백의 정확 일치 경로가 인용된 구분자를 경계로 읽는다 — bash: 미실행",
+    (("이스케이프된 큰따옴표가 낱말 경계를 가로질러 인용 표식 정렬이 깨지고, "
+     "폴백의 정확 일치 경로가 인용된 구분자를 경계로 읽는다 — bash: 미실행"),
      'echo "a\\" "a\\" ";" gh issue create -t "T"', ("T",), "PR #72 수용 한계"),
-    ("`;;`는 case 밖에서 문법 오류라 bash가 명령 전체를 거부하는데, 가드는 "
+    (("`;;`는 case 밖에서 문법 오류라 bash가 명령 전체를 거부하는데, 가드는 "
      "정확 일치로 경계를 만든다 — bash: 미실행(syntax error). 인용과 무관한 "
-     "사전 존재 계열이며 main도 동일",
+     "사전 존재 계열이며 main도 동일"),
      'echo ;; gh issue create -t "T"', ("T",), "PR #75 라운드 1 발견"),
-    ("인용된 연산자가 명령 이름 자리에 오면 bash는 그 이름을 찾다 실패한다 — "
-     "bash: 미실행(`&: command not found`). 사전 존재 계열이며 main도 동일",
+    (("인용된 연산자가 명령 이름 자리에 오면 bash는 그 이름을 찾다 실패한다 — "
+     "bash: 미실행(`&: command not found`). 사전 존재 계열이며 main도 동일"),
      'echo ;"&"\'\' gh issue create -t "T"', ("T",), "PR #75 라운드 1 발견"),
-    ("주석 해석이 꺼져 있어(리터럴 `#` 보존) 주석 뒤 텍스트가 명령으로 읽힌다 "
+    (("주석 해석이 꺼져 있어(리터럴 `#` 보존) 주석 뒤 텍스트가 명령으로 읽힌다 "
      "— bash: 미실행(`#` 뒤는 주석). 수리하면 낱말 중간 `#`(`feat:#12`, "
-     "`${#arr[@]}`)이 잘려 새 오분류가 생긴다(실측) — #74 결정으로 기록만",
+     "`${#arr[@]}`)이 잘려 새 오분류가 생긴다(실측) — #74 결정으로 기록만"),
      'echo x # ; gh issue create -t "T"', ("T",), "#74 시금석(구성 발견)"),
-    ("gh는 --help에서 도움말만 출력하고 생성하지 않는데, _parse_segment가 "
+    (("gh는 --help에서 도움말만 출력하고 생성하지 않는데, _parse_segment가 "
      "--help를 몰라 제목 없는 create로 차단된다 — bash: 실행됨(gh 도움말, "
      "create 없음). 실사용 관측 3회(2026-07-29 2회, 2026-08-02 이 표 작성 중 "
-     "1회), 전부 override 1회로 복구 — #74 결정으로 기록만",
+     "1회), 전부 override 1회로 복구 — #74 결정으로 기록만"),
      "gh issue create --help", (None,), "#74 결정(실사용 관측)"),
-    ("낱말 중간의 큰따옴표(`a\"b c\"d`)가 인용 표식 정렬을 깨고, 폴백의 정확 일치 "
+    (("낱말 중간의 큰따옴표(`a\"b c\"d`)가 인용 표식 정렬을 깨고, 폴백의 정확 일치 "
      "경로가 인용된 `\";\"`를 경계로 읽는다 — bash: 미실행(`;` 뒤는 전부 echo의 "
-     "인자)",
+     "인자)"),
      'echo a"b c"d ";" gh issue create -t T', ("T",),
      "#104 측정 S1438(구성 발견) — #209"),
 ]
@@ -858,7 +858,7 @@ def test_entry_point_never_blocks_on_malformed_input() -> None:
         input="",
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=30, check=False,
     )
     # 태그가 없으면 하네스가 자기 코드에 도달조차 못 한 것이다. 그 경우
     # 종료 코드는 42가 아니어서 아래 단언만으로는 초록으로 지나간다.

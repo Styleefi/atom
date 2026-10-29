@@ -1473,7 +1473,7 @@ def test_entry_point_never_blocks_on_malformed_input() -> None:
         input="",
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=30, check=False,
     )
     # 태그가 없으면 하네스가 자기 코드에 도달조차 못 한 것이다. 그 경우
     # 종료 코드는 42가 아니어서 아래 단언만으로는 초록으로 지나간다.

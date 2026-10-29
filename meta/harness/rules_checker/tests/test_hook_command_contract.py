@@ -66,7 +66,7 @@ def _run_hook(
         env=env,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=30, check=False,
     )
 
 
@@ -167,6 +167,6 @@ def test_real_uv_propagates_sentinel_42() -> None:
         ["uv", "run", "--directory", str(meta_dir), "python", "-c", "raise SystemExit(42)"],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=120, check=False,
     )
     assert result.returncode == 42, result.stderr

@@ -423,8 +423,8 @@ def _skill_path_shape_violations(rel: Path, deployed_to: str) -> list[str]:
         or len(deployed.parts) != 4
     ):
         return [
-            f"{rel}: skill deployed-to '{deployed_to}' must be a "
-            "SKILL.md under .claude/skills/"
+            (f"{rel}: skill deployed-to '{deployed_to}' must be a "
+            "SKILL.md under .claude/skills/")
         ]
     return []
 
@@ -942,8 +942,8 @@ def check_inventory(root: Path) -> list[str]:
     inventory = root / INVENTORY_PATH
     if not inventory.is_file():
         return [
-            f"{INVENTORY_PATH}: owner-facing interface inventory is missing "
-            "— restore it; every meta-layer artifact must be listed there"
+            (f"{INVENTORY_PATH}: owner-facing interface inventory is missing "
+            "— restore it; every meta-layer artifact must be listed there")
         ]
 
     text = inventory.read_text(encoding="utf-8")
@@ -977,7 +977,7 @@ def _describe(exc: BaseException) -> str:
     """
     try:
         return f"{type(exc).__name__}: {exc!s}"
-    except Exception:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
+    except Exception:  # noqa: BLE001, S110 — 사망 부류 방어가 설계 요구사항
         pass
     try:
         return f"{type(exc).__name__!s}:"
@@ -1033,7 +1033,7 @@ def check_hook_wiring(root: Path) -> list[str]:
     for rule_path in rule_files(root):
         try:
             data, error = parse_frontmatter(rule_path.read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001 — 아래 참조
+        except Exception:  # noqa: BLE001, S112 — 아래 참조
             # 규칙 파일 하나가 스윕 전체를 뭉개면 안 된다. 가드는 예외 "타입"이
             # 아니라 반복 "영역"을 감싼다 — OSError만(깨진 symlink), 다음엔
             # UnicodeDecodeError(비UTF-8), 다음엔 파싱 예외(YAML RecursionError)

@@ -138,7 +138,7 @@ def _behind(tmp_path):
     tip = _commit(a, "chore: pushed by someone else")
     _git(a, "push", "-q", "origin", "main")
     assert subprocess.run(["git", "-C", str(b), "cat-file", "-e", tip],
-                          capture_output=True, env=_GIT_ENV).returncode != 0, \
+                          capture_output=True, env=_GIT_ENV, check=False).returncode != 0, \
         "the fixture must leave B without the remote tip"
     return b, base, tip
 
@@ -548,7 +548,7 @@ def test_malformed_sha_is_caller_error_and_unresolvable_is_undecided(
 ):
     # 형식 위반은 exit 2, 형식은 맞지만 이 저장소가 모르는 SHA 하나는 exit 3. not-on 이
     # 없으므로 5 가 아니다 — 미해석을 not-on 으로 읽는 구현은 여기서 5 를 낸다.
-    src, pub, _ = _published(tmp_path)
+    src, _pub, _ = _published(tmp_path)
     assert _run(monkeypatch, src, "zzzz") == check.EXIT_CALLER
     capsys.readouterr()
     assert _run(monkeypatch, src, "deadbeefdead") == check.EXIT_UNDECIDED
@@ -622,7 +622,7 @@ def test_an_ownership_refusal_reports_both_exit_codes(monkeypatch, capsys, tmp_p
         ["git", "rev-parse", "--is-shallow-repository"],
         cwd=src,
         capture_output=True,
-        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")}, check=False,
     )
     assert raw.returncode == 128, f"raw git through the wrapper exited {raw.returncode}"
 

@@ -118,8 +118,8 @@ def decide_mode(root: Path) -> tuple[str, str]:
     if missing:
         return (
             "fail",
-            f"{MARKER} declares the dual-forge contract but CI file(s) are "
-            f"missing: {', '.join(missing)}. {OPT_OUT_HINT}",
+            (f"{MARKER} declares the dual-forge contract but CI file(s) are "
+            f"missing: {', '.join(missing)}. {OPT_OUT_HINT}"),
         )
     return ("strict", "")
 
@@ -133,8 +133,8 @@ def _string_items(value: object, label: str) -> tuple[list[str] | None, list[str
     if value is None:
         return None, [f"{label} is missing — cannot read the contract"]
     return None, [
-        f"{label} has an unreadable entry (tags like !reference and nested "
-        "structures are unsupported) — write literal strings"
+        (f"{label} has an unreadable entry (tags like !reference and nested "
+        "structures are unsupported) — write literal strings")
     ]
 
 

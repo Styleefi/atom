@@ -211,5 +211,5 @@ def record_block(
                 view = view[written:]
         finally:
             os.close(fd)
-    except Exception:  # noqa: BLE001 — fail-open이 설계 요구사항
+    except Exception:  # noqa: BLE001, S110 — fail-open이 설계 요구사항
         pass

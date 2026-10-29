@@ -393,9 +393,9 @@ def test_validate_rejects_bad_headers() -> None:
 # 형식: (설명, 명령, 현재 감지되는 제목 튜플, 출처).
 
 _KNOWN_FALSE_BLOCKS = [
-    ("주석 해석이 꺼져 있어(리터럴 `#` 보존) 주석 뒤 텍스트가 명령으로 읽힌다 "
+    (("주석 해석이 꺼져 있어(리터럴 `#` 보존) 주석 뒤 텍스트가 명령으로 읽힌다 "
      "— bash: 첫 커밋만 실행됨(`#` 뒤는 주석). 규격인 첫 제목만 실행되는데 "
-     "규격 위반인 두 번째 제목까지 감지돼 차단된다 — 기록만",
+     "규격 위반인 두 번째 제목까지 감지돼 차단된다 — 기록만"),
      'git commit -m "feat(x): a" # ; git commit -m "Bad."',
      ("feat(x): a", "Bad."), "#74 시금석(구성 발견)"),
 ]
@@ -695,7 +695,7 @@ def test_entry_point_never_blocks_on_malformed_input() -> None:
         input="",
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=30, check=False,
     )
     # 태그가 없으면 하네스가 자기 코드에 도달조차 못 한 것이다. 그 경우
     # 종료 코드는 42가 아니어서 아래 단언만으로는 초록으로 지나간다.

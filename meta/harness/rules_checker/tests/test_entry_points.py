@@ -80,7 +80,7 @@ def _run_entry_point(package: str, state_home: Path) -> subprocess.CompletedProc
         capture_output=True,
         text=True,
         timeout=_SUBPROCESS_TIMEOUT,
-        env={**os.environ, "XDG_STATE_HOME": str(state_home)},
+        env={**os.environ, "XDG_STATE_HOME": str(state_home)}, check=False,
     )
 
 
@@ -131,7 +131,7 @@ def test_rules_checker_entry_point_propagates_the_exit_code(tmp_path: Path) -> N
         capture_output=True,
         text=True,
         timeout=_SUBPROCESS_TIMEOUT,
-        env={**os.environ, "XDG_STATE_HOME": str(tmp_path)},
+        env={**os.environ, "XDG_STATE_HOME": str(tmp_path)}, check=False,
     )
     assert "rules_checker:" in result.stdout
     assert result.returncode == 1

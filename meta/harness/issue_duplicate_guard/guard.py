@@ -729,7 +729,7 @@ def _run_search(argv: list[str], cwd: str | None = None) -> str | None:
             capture_output=True,
             text=True,
             timeout=SEARCH_TIMEOUT_SECONDS,
-            cwd=cwd,
+            cwd=cwd, check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -820,7 +820,7 @@ def _log(**kwargs) -> None:
         from harness.blocklog.blocklog import record_block
 
         record_block(**kwargs)
-    except Exception:  # noqa: BLE001 — fail-open이 설계 요구사항
+    except Exception:  # noqa: BLE001, S110 — fail-open이 설계 요구사항
         pass
 
 

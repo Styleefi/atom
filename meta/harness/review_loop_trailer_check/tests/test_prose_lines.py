@@ -79,48 +79,48 @@ def _judge(tmp_path: Path, before: dict[str, str], after: dict[str, str | None])
 REFLOW_CASES = {
     # e8cd23e
     "e8cd23e": (
-        "- A fix stays within every declared bound, each per its own wording;\n"
+        ("- A fix stays within every declared bound, each per its own wording;\n"
         "  a fix that cannot is remade, or the bound is relaxed with owner approval.\n"
-        "  (Origin: #113.)\n",
-        "- A fix stays within every declared bound, each per its own wording; a fix\n"
+        "  (Origin: #113.)\n"),
+        ("- A fix stays within every declared bound, each per its own wording; a fix\n"
         "  that cannot is remade, or the bound is relaxed with owner approval. (Origin:\n"
-        "  #113.)\n",
+        "  #113.)\n"),
     ),
     # 417039a
     "417039a": (
-        "   edit to the title or body, invalidates the observation (not the pass)\n"
+        ("   edit to the title or body, invalidates the observation (not the pass)\n"
         "   and requires a new pass. Below-bar findings\n"
         "   from this pass are filed or recorded in the ledger per Triage lanes,\n"
-        "   then the loop ends.\n",
-        "   edit to the title or body, invalidates the observation (not the pass) and\n"
+        "   then the loop ends.\n"),
+        ("   edit to the title or body, invalidates the observation (not the pass) and\n"
         "   requires a new pass. Below-bar findings from this pass are filed or\n"
-        "   recorded in the ledger per Triage lanes, then the loop ends.\n",
+        "   recorded in the ledger per Triage lanes, then the loop ends.\n"),
     ),
     # f5a8d0e
     "f5a8d0e": (
-        "  and a sentence the new diff leaves untouched and makes false.\n"
+        ("  and a sentence the new diff leaves untouched and makes false.\n"
         "  Whether a fix commit actually removed its target finding is always in\n"
         "  scope for the next pass. Defects unrelated to the new diff do not block\n"
         "  this PR and are never fixed in it: one worth fixing per the Triage lanes'\n"
         "  first question is filed as an issue immediately, even an above-bar-grade\n"
-        "  one.\n",
-        "  and a sentence the new diff leaves untouched and makes false. Whether a\n"
+        "  one.\n"),
+        ("  and a sentence the new diff leaves untouched and makes false. Whether a\n"
         "  fix commit actually removed its target finding is always in scope for the\n"
         "  next pass. Defects unrelated to the new diff do not block this PR and are\n"
         "  never fixed in it: one worth fixing per the Triage lanes' first question\n"
-        "  is filed as an issue immediately, even an above-bar-grade one.\n",
+        "  is filed as an issue immediately, even an above-bar-grade one.\n"),
     ),
     # f82cd72 — 문단 안 절 삭제 + 재래핑 + `rewritten` 뒤 마침표 재부착
     "f82cd72": (
-        "  deleted, not rewritten — two attacks per fix at most. Text the agent writes\n"
+        ("  deleted, not rewritten — two attacks per fix at most. Text the agent writes\n"
         "  into the PR title or body in this loop passes the same attack before it is\n"
         "  posted. A PR title falsified on its second attack with no clause left\n"
         "  standing stops the loop before its next fix and returns to the owner.\n"
-        "  (Origin: #125; #139.)\n",
-        "  deleted, not rewritten. Text the agent writes into the PR title or body in\n"
+        "  (Origin: #125; #139.)\n"),
+        ("  deleted, not rewritten. Text the agent writes into the PR title or body in\n"
         "  this loop passes the same attack before it is posted. A PR title falsified\n"
         "  on its second attack with no clause left standing stops the loop before its\n"
-        "  next fix and returns to the owner. (Origin: #125; #139.)\n",
+        "  next fix and returns to the owner. (Origin: #125; #139.)\n"),
     ),
 }
 
