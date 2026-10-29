@@ -97,7 +97,8 @@ def _run_git(cwd: str | None, *args: str) -> str | None:
             capture_output=True,
             text=True,
             errors="replace",
-            timeout=GIT_TIMEOUT_SECONDS, check=False,
+            timeout=GIT_TIMEOUT_SECONDS,
+            check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -120,7 +121,17 @@ _DIRECTIVE_RE = re.compile(
     r"|pragma:\s*[a-z ]+|fmt:\s*(?:on|off|skip))"
 )
 _DOCSTRING_LABELS = frozenset(
-    {"Args:", "Returns:", "Raises:", "Yields:", "Attributes:", "Example:", "Examples:", "Note:", "Notes:"}
+    {
+        "Args:",
+        "Returns:",
+        "Raises:",
+        "Yields:",
+        "Attributes:",
+        "Example:",
+        "Examples:",
+        "Note:",
+        "Notes:",
+    }
 )
 _TABLE_RULE_RE = re.compile(r"^\|?[\s:|-]+\|?$")
 _HUNK_RE = re.compile(r"^@@ -\S+ \+(\d+)")
@@ -179,14 +190,18 @@ def _prose_lines_py(text: str) -> dict[int, str | None]:
     except (SyntaxError, ValueError, RecursionError):
         return lines
     for node in ast.walk(tree):
-        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+        if not isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
             continue
         body = node.body
         if not body or not isinstance(body[0], ast.Expr):
             continue
         value = body[0].value
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
-            for number in range(body[0].lineno, (body[0].end_lineno or body[0].lineno) + 1):
+            for number in range(
+                body[0].lineno, (body[0].end_lineno or body[0].lineno) + 1
+            ):
                 lines[number] = None
     return lines
 
@@ -251,8 +266,18 @@ def _parse_diff(diff: str) -> tuple[dict[str, list[tuple[int, str]]], list[str]]
 def prose_lines_added(cwd: str | None, sha: str) -> bool:
     """커밋이 산문 줄을 새로 썼는가."""
     diff = _run_git(
-        cwd, "-c", "core.quotePath=false", "show", "--format=", "--no-show-signature", "-U0",
-        "--no-color", "--inter-hunk-context=0", "--src-prefix=a/", "--dst-prefix=b/", sha,
+        cwd,
+        "-c",
+        "core.quotePath=false",
+        "show",
+        "--format=",
+        "--no-show-signature",
+        "-U0",
+        "--no-color",
+        "--inter-hunk-context=0",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        sha,
     )
     if diff is None:
         return False
@@ -303,7 +328,9 @@ _MESSAGE_FORMAT = (
 def _repo_dirs(cwd: str | None) -> tuple[str, str] | None:
     # commit_backstop/backstop.py의 같은 이름 함수와 의도적으로 동일 — 세 번째
     # 사용자가 생기면 공용화한다.
-    out = _run_git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir")
+    out = _run_git(
+        cwd, "rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"
+    )
     if out is None:
         return None
     lines = out.splitlines()
@@ -374,7 +401,13 @@ def _new_commits(
 ) -> list[str] | None:
     span = new if old is None else f"{old}..{new}"
     out = _run_git(
-        cwd, "rev-list", "--no-merges", f"--max-count={COMMIT_LIMIT}", span, "--not", *exclusions
+        cwd,
+        "rev-list",
+        "--no-merges",
+        f"--max-count={COMMIT_LIMIT}",
+        span,
+        "--not",
+        *exclusions,
     )
     if out is None:
         return None
@@ -382,7 +415,9 @@ def _new_commits(
 
 
 def _message_parts(cwd: str | None, sha: str) -> tuple[str, str, str, str] | None:
-    out = _run_git(cwd, "log", "-1", "--no-show-signature", f"--format={_MESSAGE_FORMAT}", sha)
+    out = _run_git(
+        cwd, "log", "-1", "--no-show-signature", f"--format={_MESSAGE_FORMAT}", sha
+    )
     if out is None:
         return None
     parts = out.split("\0")
@@ -420,9 +455,20 @@ def _log(**kwargs) -> None:
 
 
 def _emit(reports: dict[str, list[str]]) -> None:
-    summary = "; ".join(f"{sha[:7]}: {'+'.join(reasons)}" for sha, reasons in reports.items())
+    summary = "; ".join(
+        f"{sha[:7]}: {'+'.join(reasons)}" for sha, reasons in reports.items()
+    )
     context = f"{TAG} {summary} — see {RULE_PATH}"
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": context}}))
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": context,
+                }
+            }
+        )
+    )
 
 
 def main() -> int:

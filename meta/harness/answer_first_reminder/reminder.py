@@ -116,12 +116,38 @@ def _strip_trailing_noise(text: str) -> str:
 
 _FIRST_ENGLISH_WORD_RE = re.compile(r"[a-zA-Z]+")
 
-_KO_QUESTION_ENDINGS = ("까", "까요", "나요", "가요", "은가", "는가", "인가", "니", "냐")
+_KO_QUESTION_ENDINGS = (
+    "까",
+    "까요",
+    "나요",
+    "가요",
+    "은가",
+    "는가",
+    "인가",
+    "니",
+    "냐",
+)
 
-_EN_QUESTION_STARTERS = frozenset({
-    "what", "why", "how", "when", "where", "who", "which",
-    "should", "can", "could", "would", "is", "are", "do", "does", "did",
-})
+_EN_QUESTION_STARTERS = frozenset(
+    {
+        "what",
+        "why",
+        "how",
+        "when",
+        "where",
+        "who",
+        "which",
+        "should",
+        "can",
+        "could",
+        "would",
+        "is",
+        "are",
+        "do",
+        "does",
+        "did",
+    }
+)
 
 # 요청 어미: 절 끝에서만 본다($ 고정). #149 센서스 분류기의 목록 그대로.
 _REQUEST_ENDING_RE = re.compile(
@@ -132,9 +158,32 @@ _REQUEST_ENDING_RE = re.compile(
 # 분류기의 목록, 뒤 5개는 그 목록에 없던 어간으로 측정(2026-10-16)의 읽기
 # 요청에 각각 2회 이상 나타난 것 — 단발 어간은 표본에 과적합하므로 넣지 않는다.
 _KO_READ_STEMS = (
-    "설명", "보고", "확인", "검토", "알려", "정리", "비교", "분석", "리뷰", "평가",
-    "조사", "보여", "요약", "살펴", "읽어", "답해", "답변", "의견", "생각", "짚어",
-    "소개", "제시", "판단", "추천", "찾아", "받아",
+    "설명",
+    "보고",
+    "확인",
+    "검토",
+    "알려",
+    "정리",
+    "비교",
+    "분석",
+    "리뷰",
+    "평가",
+    "조사",
+    "보여",
+    "요약",
+    "살펴",
+    "읽어",
+    "답해",
+    "답변",
+    "의견",
+    "생각",
+    "짚어",
+    "소개",
+    "제시",
+    "판단",
+    "추천",
+    "찾아",
+    "받아",
 )
 
 
@@ -180,7 +229,12 @@ def contains_read_request(text: str) -> bool:
     # 조각마다 노이즈를 먼저 떼야 문장 부호 뒤의 닫는 따옴표·괄호만 남은 조각이
     # 마지막 절로 뽑히지 않는다 — contains_question과 같은 순서.
     clauses = [
-        c for c in (_strip_trailing_noise(piece).strip() for piece in _SENTENCE_SPLIT_RE.split(stripped)) if c
+        c
+        for c in (
+            _strip_trailing_noise(piece).strip()
+            for piece in _SENTENCE_SPLIT_RE.split(stripped)
+        )
+        if c
     ]
     if not clauses:
         return False
@@ -200,7 +254,9 @@ def main() -> int:
     try:
         payload = read_payload(strict_utf8=True)
     except ValueError:
-        print("[answer-first-reminder] malformed hook input (fail-open)", file=sys.stderr)
+        print(
+            "[answer-first-reminder] malformed hook input (fail-open)", file=sys.stderr
+        )
         return 1
     if payload is None:
         return 0
@@ -224,5 +280,8 @@ def run() -> int:
     try:
         return main()
     except Exception as exc:  # noqa: BLE001 — fail-open이 설계 요구사항
-        print(f"[answer-first-reminder] internal error (fail-open): {exc}", file=sys.stderr)
+        print(
+            f"[answer-first-reminder] internal error (fail-open): {exc}",
+            file=sys.stderr,
+        )
         return 1

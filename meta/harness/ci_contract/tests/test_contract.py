@@ -107,10 +107,13 @@ def test_patch_version_in_python_version_file_passes():
 
 def test_product_job_with_unknown_tag_is_ignored():
     """harness 밖 product 잡의 !reference는 파싱을 죽이지 않고 무시된다."""
-    gitlab = GITLAB_OK + """\
+    gitlab = (
+        GITLAB_OK
+        + """\
 product:
   script: !reference [.base, script]
 """
+    )
     assert check(gitlab) == []
 
 
@@ -134,7 +137,10 @@ def test_image_tag_mismatch():
 def test_python_version_mismatch():
     """양쪽 이미지가 같아도 .python-version과 다르면 양쪽 모두 위반이다."""
     violations = check(py="3.13\n")
-    assert sum("image Python 3.14 != meta/.python-version 3.13" in v for v in violations) == 2
+    assert (
+        sum("image Python 3.14 != meta/.python-version 3.13" in v for v in violations)
+        == 2
+    )
 
 
 def test_unreadable_python_version_fails_closed():
@@ -147,7 +153,9 @@ def test_unreadable_python_version_fails_closed():
 
 def test_command_flag_drift():
     """한쪽만 --locked가 빠지면 명령 목록 불일치다 (#85 유형의 드리프트)."""
-    github = GITHUB_OK.replace("uv sync --locked --directory meta", "uv sync --directory meta")
+    github = GITHUB_OK.replace(
+        "uv sync --locked --directory meta", "uv sync --directory meta"
+    )
     violations = check(github=github)
     assert any("command list mismatch" in v for v in violations)
 
@@ -172,7 +180,10 @@ def test_pytest_removed_from_both_sides():
     gitlab = GITLAB_OK.replace("    - uv run --directory meta pytest\n", "")
     github = GITHUB_OK.replace("      - run: uv run --directory meta pytest\n", "")
     violations = check(gitlab, github)
-    assert sum("deviates from the canonical harness commands" in v for v in violations) == 2
+    assert (
+        sum("deviates from the canonical harness commands" in v for v in violations)
+        == 2
+    )
 
 
 @pytest.mark.parametrize(
@@ -196,7 +207,10 @@ def test_non_canonical_pytest_forms_do_not_satisfy_invariant_4(replacement):
     gitlab = GITLAB_OK.replace("uv run --directory meta pytest", replacement)
     github = GITHUB_OK.replace("uv run --directory meta pytest", replacement)
     violations = check(gitlab, github)
-    assert sum("deviates from the canonical harness commands" in v for v in violations) == 2
+    assert (
+        sum("deviates from the canonical harness commands" in v for v in violations)
+        == 2
+    )
 
 
 @pytest.mark.parametrize(
@@ -214,9 +228,14 @@ def test_symmetric_injected_line_violates_canonical_list(gitlab_line, github_lin
     (4)는 목록 전체를 고정해 주입·삭제·재배열을 일괄 차단한다(라운드 3).
     """
     gitlab = GITLAB_OK.replace("    - uv sync", gitlab_line + "    - uv sync")
-    github = GITHUB_OK.replace("      - run: uv sync", github_line + "      - run: uv sync")
+    github = GITHUB_OK.replace(
+        "      - run: uv sync", github_line + "      - run: uv sync"
+    )
     violations = check(gitlab, github)
-    assert sum("deviates from the canonical harness commands" in v for v in violations) == 2
+    assert (
+        sum("deviates from the canonical harness commands" in v for v in violations)
+        == 2
+    )
 
 
 # --- 우회로 차단 가드 ---

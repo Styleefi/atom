@@ -115,7 +115,17 @@ NEW_BRANCH_LONG_FLAGS = ("--create=", "--force-create=")
 
 GIT_TIMEOUT_SECONDS = 10
 
-COMMIT_TYPES = ("feat", "fix", "refactor", "test", "docs", "chore", "build", "perf", "style")
+COMMIT_TYPES = (
+    "feat",
+    "fix",
+    "refactor",
+    "test",
+    "docs",
+    "chore",
+    "build",
+    "perf",
+    "style",
+)
 
 _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
@@ -127,6 +137,7 @@ _MESSAGE_FLAG_RE = re.compile(r"^-[a-zA-Z]*m$")
 
 # heredoc 마커 다음 첫 줄 추출: <<EOF / <<'EOF' / << "EOF" 변형 모두.
 _HEREDOC_FIRST_LINE_RE = re.compile(r"<<\s*['\"]?\w+['\"]?[ \t]*\n([^\n]*)")
+
 
 @dataclass
 class CommitInvocation:
@@ -212,7 +223,7 @@ def _git_subcommand(
             i += 1
     if i >= len(rest):
         return None
-    return rest[i], rest[i + 1:], c_path, override
+    return rest[i], rest[i + 1 :], c_path, override
 
 
 def _parse_segment(segment: list[str]) -> tuple[str | None, str | None, bool] | None:
@@ -240,7 +251,7 @@ def _parse_segment(segment: list[str]) -> tuple[str | None, str | None, bool] | 
                 raw_message = args[j + 1]
             break
         if token.startswith("--message="):
-            raw_message = token[len("--message="):]
+            raw_message = token[len("--message=") :]
             break
         j += 1
     return _extract_subject(raw_message), c_path, override
@@ -292,8 +303,12 @@ def _checkout_target(args: list[str]) -> str | None:
             return args[i + 1] if i + 1 < len(args) else None
         for prefix in NEW_BRANCH_LONG_FLAGS:
             if token.startswith(prefix):
-                return token[len(prefix):] or None
-        if not token.startswith("--") and token[:2] in NEW_BRANCH_FLAGS and len(token) > 2:
+                return token[len(prefix) :] or None
+        if (
+            not token.startswith("--")
+            and token[:2] in NEW_BRANCH_FLAGS
+            and len(token) > 2
+        ):
             return token[2:]
     return next((t for t in args if not t.startswith("-")), None)
 
@@ -424,7 +439,8 @@ def _current_branch(cwd: str | None, c_path: str | None) -> str | None:
             capture_output=True,
             text=True,
             timeout=GIT_TIMEOUT_SECONDS,
-            cwd=cwd, check=False,
+            cwd=cwd,
+            check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -463,8 +479,10 @@ def _block_message(reason: str) -> str:
         [
             f"[commit-guard] {reason}",
             "See the commit-discipline rule (meta/rules/commit-discipline.md).",
-            ("If this commit is a deliberate exception, re-run the SAME command "
-            f"prefixed with: {OVERRIDE_TOKEN} git commit ..."),
+            (
+                "If this commit is a deliberate exception, re-run the SAME command "
+                f"prefixed with: {OVERRIDE_TOKEN} git commit ..."
+            ),
         ]
     )
 

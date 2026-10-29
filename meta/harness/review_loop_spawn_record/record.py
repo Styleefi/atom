@@ -27,7 +27,9 @@ SCHEMA_VERSION = 2
 
 # Bar declaration prompt의 고정 첫머리(공백을 접은 형태). test_phrase_sync가 규칙 파일의
 # 프롬프트 블록과 결속한다.
-PHRASE = "You author the severity-bar declaration for a review loop on pull or merge request"
+PHRASE = (
+    "You author the severity-bar declaration for a review loop on pull or merge request"
+)
 # Pass prompt opening의 고정 첫머리. test_phrase_sync가 규칙 파일의 `### Pass prompt opening`
 # 블록과 결속한다.
 PASS_PHRASE = "You run a review pass for a review loop on pull or merge request"
@@ -149,7 +151,10 @@ def _transcript_models(path: object) -> tuple[list[str] | None, str | None]:
         assistant 항목이 하나도 없으면 목록은 None이고 경고가 그 까닭을 말한다.
     """
     if not isinstance(path, str) or not path:
-        return None, f"{TAG} no agent_transcript_path on SubagentStop (models not recorded)"
+        return (
+            None,
+            f"{TAG} no agent_transcript_path on SubagentStop (models not recorded)",
+        )
     models: list[str] = []
     try:
         # 열기뿐 아니라 읽기 실패(디렉터리, NUL이 든 경로 등)도 여기서 받는다.
@@ -171,7 +176,10 @@ def _transcript_models(path: object) -> tuple[list[str] | None, str | None]:
     except (OSError, ValueError) as exc:
         return None, f"{TAG} transcript not readable ({type(exc).__name__}): {path!r}"
     if not models:
-        return None, f"{TAG} transcript has no assistant entry with message.model: {path!r}"
+        return (
+            None,
+            f"{TAG} transcript has no assistant entry with message.model: {path!r}",
+        )
     return models, None
 
 
@@ -222,10 +230,14 @@ def _on_agent(payload: dict, tool_input: dict, response: dict, path: str) -> str
         texts = [
             block["text"]
             for block in content
-            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
+            if isinstance(block, dict)
+            and block.get("type") == "text"
+            and isinstance(block.get("text"), str)
         ]
         result = _base("return", payload)
-        result.update({"agent_id": agent_id, "via": "result", **_text_fields("\n".join(texts))})
+        result.update(
+            {"agent_id": agent_id, "via": "result", **_text_fields("\n".join(texts))}
+        )
         entries.append(result)
     _append(path, entries)
     return (
@@ -272,7 +284,9 @@ def _message_target(tool_input: dict, response: dict) -> str | None:
     return _str_or_none(tool_input.get("to"))
 
 
-def _on_send_message(payload: dict, tool_input: dict, response: dict, path: str) -> str | None:
+def _on_send_message(
+    payload: dict, tool_input: dict, response: dict, path: str
+) -> str | None:
     ids = _recorded_ids(path)
     if not ids:
         return None
@@ -286,7 +300,14 @@ def _on_send_message(payload: dict, tool_input: dict, response: dict, path: str)
     if target in ids:
         delivered = response.get("success") is True
         entry = _base("message", payload)
-        entry.update({"caller": sender, "agent_id": target, "delivered": delivered, **_text_fields(text)})
+        entry.update(
+            {
+                "caller": sender,
+                "agent_id": target,
+                "delivered": delivered,
+                **_text_fields(text),
+            }
+        )
         entries.append(entry)
         length = len(text) if isinstance(text, str) else 0
         notice = (

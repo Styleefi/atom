@@ -66,7 +66,9 @@ def _entry_point_path(package: str) -> Path:
     return find_repo_root() / "meta" / "harness" / package / "__main__.py"
 
 
-def _run_entry_point(package: str, state_home: Path) -> subprocess.CompletedProcess[str]:
+def _run_entry_point(
+    package: str, state_home: Path
+) -> subprocess.CompletedProcess[str]:
     """진입점을 `python -m`으로 실행한다.
 
     `input=""`는 위생이 아니라 필수다 — 넘기지 않으면 자식이 부모의 stdin을
@@ -80,7 +82,8 @@ def _run_entry_point(package: str, state_home: Path) -> subprocess.CompletedProc
         capture_output=True,
         text=True,
         timeout=_SUBPROCESS_TIMEOUT,
-        env={**os.environ, "XDG_STATE_HOME": str(state_home)}, check=False,
+        env={**os.environ, "XDG_STATE_HOME": str(state_home)},
+        check=False,
     )
 
 
@@ -131,7 +134,8 @@ def test_rules_checker_entry_point_propagates_the_exit_code(tmp_path: Path) -> N
         capture_output=True,
         text=True,
         timeout=_SUBPROCESS_TIMEOUT,
-        env={**os.environ, "XDG_STATE_HOME": str(tmp_path)}, check=False,
+        env={**os.environ, "XDG_STATE_HOME": str(tmp_path)},
+        check=False,
     )
     assert "rules_checker:" in result.stdout
     assert result.returncode == 1

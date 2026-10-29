@@ -127,7 +127,12 @@ def _stop(agent_id: str, last: str | None, transcript: str | None = TRANSCRIPT) 
     return payload
 
 
-def _skill(skill: str, args: str | None = "low 191", agent_id: str = PASS_AGENT, forked: bool = True) -> dict:
+def _skill(
+    skill: str,
+    args: str | None = "low 191",
+    agent_id: str = PASS_AGENT,
+    forked: bool = True,
+) -> dict:
     # 측정한 PostToolUse(Skill) 페이로드 모양 — fork면 agentId·status가 붙고, 인라인이면 둘 다 없다.
     tool_input: dict[str, object] = {"skill": skill}
     if args is not None:
@@ -135,7 +140,12 @@ def _skill(skill: str, args: str | None = "low 191", agent_id: str = PASS_AGENT,
     tool_response: dict[str, object] = {"success": True, "commandName": skill}
     if forked:
         tool_response.update(
-            {"status": "forked", "background": True, "agentId": agent_id, "result": f"Running in the background as @{skill}"}
+            {
+                "status": "forked",
+                "background": True,
+                "agentId": agent_id,
+                "result": f"Running in the background as @{skill}",
+            }
         )
     return _base(
         "PostToolUse",
@@ -252,13 +262,18 @@ def test_request_number_follows_the_phrase(tail: str, expected: int | None) -> N
 
 
 def test_prompt_copied_with_quote_markers_is_recorded(monkeypatch, capsys) -> None:
-    quoted = "\n".join("> " + line if line else ">" for line in PR180_PROMPT.splitlines())
+    quoted = "\n".join(
+        "> " + line if line else ">" for line in PR180_PROMPT.splitlines()
+    )
     nested = "\n".join("> > " + line for line in PR180_PROMPT.splitlines())
     for prompt in (quoted, nested):
         rc, _, _ = _run(monkeypatch, capsys, _spawn(prompt))
         assert rc == 0
     rows = _rows()
-    assert [(row["request"], row["prefix"]) for row in rows] == [(180, True), (180, True)]
+    assert [(row["request"], row["prefix"]) for row in rows] == [
+        (180, True),
+        (180, True),
+    ]
     assert [row["text"] for row in rows] == [quoted, nested]
 
 
@@ -266,7 +281,9 @@ def test_quote_marker_inside_a_line_is_not_removed() -> None:
     assert record.match_prompt(PR180_PROMPT.replace("pull or\n", "pull or > ")) is None
 
 
-def test_record_ending_mid_line_does_not_swallow_the_next_spawn(monkeypatch, capsys) -> None:
+def test_record_ending_mid_line_does_not_swallow_the_next_spawn(
+    monkeypatch, capsys
+) -> None:
     path = Path(record.record_path())
     path.parent.mkdir(parents=True)
     path.write_text('{"kind": "spawn", "agent_id": "zz"')
@@ -302,7 +319,10 @@ def test_foreground_result_is_recorded_as_a_return(monkeypatch, capsys) -> None:
     rc, _, _ = _run(monkeypatch, capsys, payload)
     assert rc == 0
     rows = _rows()
-    assert [(row["kind"], row.get("via")) for row in rows] == [("spawn", None), ("return", "result")]
+    assert [(row["kind"], row.get("via")) for row in rows] == [
+        ("spawn", None),
+        ("return", "result"),
+    ]
     assert rows[1]["agent_id"] == DECLARER
     assert rows[1]["text"] == DECLARATION
 
@@ -311,7 +331,11 @@ def test_returns_of_other_agents_are_not_recorded(monkeypatch, capsys) -> None:
     _run(monkeypatch, capsys, _spawn(PR180_PROMPT))
     _run(monkeypatch, capsys, _stop("a0000000000000000", "OTHER"))
     _run(monkeypatch, capsys, _handback("a0000000000000000", "OTHER"))
-    _run(monkeypatch, capsys, _send("main", "OTHER", {"success": True}, sender="a0000000000000000"))
+    _run(
+        monkeypatch,
+        capsys,
+        _send("main", "OTHER", {"success": True}, sender="a0000000000000000"),
+    )
     assert [row["kind"] for row in _rows()] == ["spawn"]
 
 
@@ -332,13 +356,19 @@ def test_message_to_a_declarer_is_recorded_and_announced(monkeypatch, capsys) ->
         "resumedAgentId": DECLARER,
         "pin": {"id": DECLARER, "name": "declarer", "ref": "2b2379"},
     }
-    rc, out, _ = _run(monkeypatch, capsys, _send("declarer", "Lower the bar.", response))
+    rc, out, _ = _run(
+        monkeypatch, capsys, _send("declarer", "Lower the bar.", response)
+    )
     assert rc == 0
     notice = _notice(out)
     assert DECLARER in notice and "14 chars" in notice and "delivered yes" in notice
     assert "Lower the bar." not in notice
     message = _rows()[-1]
-    assert (message["kind"], message["agent_id"], message["delivered"]) == ("message", DECLARER, True)
+    assert (message["kind"], message["agent_id"], message["delivered"]) == (
+        "message",
+        DECLARER,
+        True,
+    )
     assert message["text"] == "Lower the bar."
 
 
@@ -352,16 +382,26 @@ def test_undelivered_message_to_a_declarer_id_is_recorded(monkeypatch, capsys) -
 
 def test_message_to_another_agent_is_not_recorded(monkeypatch, capsys) -> None:
     _run(monkeypatch, capsys, _spawn(PR180_PROMPT))
-    response = {"success": True, "pin": {"id": "atom-5b", "name": "atom-5b", "ref": "x"}}
+    response = {
+        "success": True,
+        "pin": {"id": "atom-5b", "name": "atom-5b", "ref": "x"},
+    }
     rc, out, _ = _run(monkeypatch, capsys, _send("atom-5b", "Review request", response))
     assert (rc, out) == (0, "")
     assert [row["kind"] for row in _rows()] == ["spawn"]
 
 
-def test_message_sent_by_a_declarer_is_recorded_as_a_return(monkeypatch, capsys) -> None:
+def test_message_sent_by_a_declarer_is_recorded_as_a_return(
+    monkeypatch, capsys
+) -> None:
     _run(monkeypatch, capsys, _spawn(PR180_PROMPT))
-    response = {"success": True, "message": "Message queued for the main conversation's next turn."}
-    rc, out, _ = _run(monkeypatch, capsys, _send("main", DECLARATION, response, sender=DECLARER))
+    response = {
+        "success": True,
+        "message": "Message queued for the main conversation's next turn.",
+    }
+    rc, out, _ = _run(
+        monkeypatch, capsys, _send("main", DECLARATION, response, sender=DECLARER)
+    )
     assert (rc, out) == (0, "")
     last = _rows()[-1]
     assert (last["kind"], last["via"], last["agent_id"], last["text"]) == (
@@ -387,7 +427,9 @@ def test_malformed_input_warns_and_exits_1(monkeypatch, capsys) -> None:
     assert record.TAG in err
 
 
-def test_unwritable_record_path_warns_and_exits_1(monkeypatch, capsys, tmp_path) -> None:
+def test_unwritable_record_path_warns_and_exits_1(
+    monkeypatch, capsys, tmp_path
+) -> None:
     state = tmp_path / "blocked"
     state.mkdir()
     (state / "atom").write_text("not a directory")
@@ -444,11 +486,18 @@ def test_forked_skill_launch_is_recorded_as_a_pass(monkeypatch, capsys) -> None:
     rc, out, err = _run(monkeypatch, capsys, _skill("code-review"))
     assert (rc, err) == (0, "")
     notice = _notice(out)
-    assert "pass recorded" in notice and "code-review" in notice and PASS_AGENT in notice
+    assert (
+        "pass recorded" in notice and "code-review" in notice and PASS_AGENT in notice
+    )
     assert "7 chars" in notice and "low 191" not in notice
     (row,) = _rows()
     assert row["v"] == 2
-    assert (row["kind"], row["launcher"], row["agent_id"], row["caller"]) == ("pass", "skill", PASS_AGENT, None)
+    assert (row["kind"], row["launcher"], row["agent_id"], row["caller"]) == (
+        "pass",
+        "skill",
+        PASS_AGENT,
+        None,
+    )
     assert (row["skill"], row["args"], row["command_name"], row["status"]) == (
         "code-review",
         "low 191",
@@ -473,10 +522,22 @@ def test_agent_pass_prompt_is_recorded_with_prefix(monkeypatch, capsys) -> None:
     rc, out, _ = _run(monkeypatch, capsys, _spawn(PASS_PROMPT, agent_id=PASS_AGENT))
     assert rc == 0
     notice = _notice(out)
-    assert "pass recorded" in notice and "request 191" in notice and "prefix yes" in notice
+    assert (
+        "pass recorded" in notice and "request 191" in notice and "prefix yes" in notice
+    )
     (row,) = _rows()
-    assert (row["kind"], row["launcher"], row["request"], row["prefix"]) == ("pass", "agent", 191, True)
-    assert (row["agent_id"], row["subagent_type"], row["model"], row["resolved_model"]) == (
+    assert (row["kind"], row["launcher"], row["request"], row["prefix"]) == (
+        "pass",
+        "agent",
+        191,
+        True,
+    )
+    assert (
+        row["agent_id"],
+        row["subagent_type"],
+        row["model"],
+        row["resolved_model"],
+    ) == (
         PASS_AGENT,
         "general-purpose",
         "opus",
@@ -487,7 +548,9 @@ def test_agent_pass_prompt_is_recorded_with_prefix(monkeypatch, capsys) -> None:
     assert row["len"] == len(PASS_PROMPT)
 
 
-def test_wrapped_agent_pass_prompt_is_recorded_without_prefix(monkeypatch, capsys) -> None:
+def test_wrapped_agent_pass_prompt_is_recorded_without_prefix(
+    monkeypatch, capsys
+) -> None:
     wrapped = "Second pass of round 3.\n\n" + PASS_PROMPT
     rc, out, _ = _run(monkeypatch, capsys, _spawn(wrapped))
     assert rc == 0 and "prefix no" in _notice(out)
@@ -496,7 +559,9 @@ def test_wrapped_agent_pass_prompt_is_recorded_without_prefix(monkeypatch, capsy
 
 
 def test_agent_pass_without_the_phrase_is_not_recorded(monkeypatch, capsys) -> None:
-    prompt = "You are reviewing the commit messages of GitHub PR #191 in the repository."
+    prompt = (
+        "You are reviewing the commit messages of GitHub PR #191 in the repository."
+    )
     rc, out, _ = _run(monkeypatch, capsys, _spawn(prompt))
     assert (rc, out) == (0, "")
     assert _rows() == []
@@ -512,18 +577,29 @@ def test_agent_pass_without_the_phrase_is_not_recorded(monkeypatch, capsys) -> N
         (" 1234567890", None),
     ],
 )
-def test_pass_request_number_follows_the_pass_phrase(tail: str, expected: int | None) -> None:
-    assert record.match_prompt(record.PASS_PHRASE + tail, record.PASS_PHRASE) == (True, expected)
+def test_pass_request_number_follows_the_pass_phrase(
+    tail: str, expected: int | None
+) -> None:
+    assert record.match_prompt(record.PASS_PHRASE + tail, record.PASS_PHRASE) == (
+        True,
+        expected,
+    )
 
 
-@pytest.mark.parametrize("prompt", [PR180_PROMPT + "\n\n" + PASS_PROMPT, PASS_PROMPT + "\n\n" + PR180_PROMPT])
-def test_bar_phrase_wins_when_both_phrases_appear(monkeypatch, capsys, prompt: str) -> None:
+@pytest.mark.parametrize(
+    "prompt", [PR180_PROMPT + "\n\n" + PASS_PROMPT, PASS_PROMPT + "\n\n" + PR180_PROMPT]
+)
+def test_bar_phrase_wins_when_both_phrases_appear(
+    monkeypatch, capsys, prompt: str
+) -> None:
     rc, out, _ = _run(monkeypatch, capsys, _spawn(prompt))
     assert rc == 0 and "spawn recorded" in _notice(out)
     assert [(row["kind"], row["request"]) for row in _rows()] == [("spawn", 180)]
 
 
-def test_forked_skill_without_agent_id_is_recorded_with_null_id(monkeypatch, capsys) -> None:
+def test_forked_skill_without_agent_id_is_recorded_with_null_id(
+    monkeypatch, capsys
+) -> None:
     payload = _skill("code-review")
     del payload["tool_response"]["agentId"]
     rc, out, _ = _run(monkeypatch, capsys, payload)
@@ -531,39 +607,64 @@ def test_forked_skill_without_agent_id_is_recorded_with_null_id(monkeypatch, cap
     assert _rows()[0]["agent_id"] is None
 
 
-def test_stop_of_a_recorded_pass_records_models_from_the_transcript(monkeypatch, capsys) -> None:
+def test_stop_of_a_recorded_pass_records_models_from_the_transcript(
+    monkeypatch, capsys
+) -> None:
     _run(monkeypatch, capsys, _skill("code-review"))
     rc, out, err = _run(monkeypatch, capsys, _stop(PASS_AGENT, "(none)"))
     assert (rc, out, err) == (0, "", "")
     stop = _rows()[-1]
-    assert (stop["kind"], stop["via"], stop["agent_id"], stop["text"]) == ("return", "stop", PASS_AGENT, "(none)")
+    assert (stop["kind"], stop["via"], stop["agent_id"], stop["text"]) == (
+        "return",
+        "stop",
+        PASS_AGENT,
+        "(none)",
+    )
     assert stop["models"] == TRANSCRIPT_MODELS
     assert stop["transcript_path"] == TRANSCRIPT
 
 
-def test_stop_with_a_transcript_lacking_assistant_entries_warns(monkeypatch, capsys) -> None:
+def test_stop_with_a_transcript_lacking_assistant_entries_warns(
+    monkeypatch, capsys
+) -> None:
     _run(monkeypatch, capsys, _skill("code-review"))
-    rc, out, err = _run(monkeypatch, capsys, _stop(PASS_AGENT, "x", transcript=EMPTY_TRANSCRIPT))
+    rc, out, err = _run(
+        monkeypatch, capsys, _stop(PASS_AGENT, "x", transcript=EMPTY_TRANSCRIPT)
+    )
     assert (rc, out) == (1, "")
     assert record.TAG in err and "no assistant entry" in err
     stop = _rows()[-1]
-    assert (stop["kind"], stop["models"], stop["transcript_path"]) == ("return", None, EMPTY_TRANSCRIPT)
+    assert (stop["kind"], stop["models"], stop["transcript_path"]) == (
+        "return",
+        None,
+        EMPTY_TRANSCRIPT,
+    )
 
 
-def test_stop_with_a_missing_transcript_file_warns(monkeypatch, capsys, tmp_path) -> None:
+def test_stop_with_a_missing_transcript_file_warns(
+    monkeypatch, capsys, tmp_path
+) -> None:
     missing = str(tmp_path / "gone.jsonl")
     _run(monkeypatch, capsys, _skill("code-review"))
     rc, out, err = _run(monkeypatch, capsys, _stop(PASS_AGENT, "x", transcript=missing))
     assert (rc, out) == (1, "")
     assert record.TAG in err and "FileNotFoundError" in err
     stop = _rows()[-1]
-    assert (stop["kind"], stop["models"], stop["transcript_path"]) == ("return", None, missing)
+    assert (stop["kind"], stop["models"], stop["transcript_path"]) == (
+        "return",
+        None,
+        missing,
+    )
 
 
-def test_stop_with_a_directory_as_transcript_warns_and_still_writes(monkeypatch, capsys, tmp_path) -> None:
+def test_stop_with_a_directory_as_transcript_warns_and_still_writes(
+    monkeypatch, capsys, tmp_path
+) -> None:
     # 디렉터리는 열리지만 읽을 수 없다 — 열기 실패와 같이 null·경고·줄 기록으로 끝나야 한다.
     _run(monkeypatch, capsys, _skill("code-review"))
-    rc, out, err = _run(monkeypatch, capsys, _stop(PASS_AGENT, "x", transcript=str(tmp_path)))
+    rc, out, err = _run(
+        monkeypatch, capsys, _stop(PASS_AGENT, "x", transcript=str(tmp_path))
+    )
     assert (rc, out) == (1, "")
     assert record.TAG in err and "IsADirectoryError" in err
     stop = _rows()[-1]
@@ -576,10 +677,17 @@ def test_stop_without_a_transcript_path_warns(monkeypatch, capsys) -> None:
     assert (rc, out) == (1, "")
     assert record.TAG in err and "no agent_transcript_path" in err
     stop = _rows()[-1]
-    assert (stop["kind"], stop["text"], stop["models"], stop["transcript_path"]) == ("return", SUMMARY, None, None)
+    assert (stop["kind"], stop["text"], stop["models"], stop["transcript_path"]) == (
+        "return",
+        SUMMARY,
+        None,
+        None,
+    )
 
 
-def test_stop_of_an_unrecorded_agent_does_not_open_the_transcript(monkeypatch, capsys) -> None:
+def test_stop_of_an_unrecorded_agent_does_not_open_the_transcript(
+    monkeypatch, capsys
+) -> None:
     _run(monkeypatch, capsys, _skill("code-review"))
     opened: list[str] = []
     real_open = record.os.open
@@ -597,9 +705,18 @@ def test_stop_of_an_unrecorded_agent_does_not_open_the_transcript(monkeypatch, c
 def test_recorded_ids_include_pass_agents(monkeypatch, capsys) -> None:
     _run(monkeypatch, capsys, _skill("code-review"))
     _run(monkeypatch, capsys, _handback(PASS_AGENT, "No findings."))
-    _run(monkeypatch, capsys, _send("main", "No findings.", {"success": True}, sender=PASS_AGENT))
-    response = {"success": True, "pin": {"id": PASS_AGENT, "name": "code-review", "ref": "x"}}
-    rc, out, _ = _run(monkeypatch, capsys, _send("code-review", "Narrow the scope.", response))
+    _run(
+        monkeypatch,
+        capsys,
+        _send("main", "No findings.", {"success": True}, sender=PASS_AGENT),
+    )
+    response = {
+        "success": True,
+        "pin": {"id": PASS_AGENT, "name": "code-review", "ref": "x"},
+    }
+    rc, out, _ = _run(
+        monkeypatch, capsys, _send("code-review", "Narrow the scope.", response)
+    )
     assert rc == 0 and "recorded agent" in _notice(out)
     assert [(row["kind"], row.get("via")) for row in _rows()] == [
         ("pass", None),
@@ -609,7 +726,9 @@ def test_recorded_ids_include_pass_agents(monkeypatch, capsys) -> None:
     ]
 
 
-def test_foreground_agent_pass_result_is_recorded_as_a_return(monkeypatch, capsys) -> None:
+def test_foreground_agent_pass_result_is_recorded_as_a_return(
+    monkeypatch, capsys
+) -> None:
     payload = _spawn(
         PASS_PROMPT,
         agent_id=PASS_AGENT,
@@ -620,7 +739,10 @@ def test_foreground_agent_pass_result_is_recorded_as_a_return(monkeypatch, capsy
     rc, _, _ = _run(monkeypatch, capsys, payload)
     assert rc == 0
     rows = _rows()
-    assert [(row["kind"], row.get("via")) for row in rows] == [("pass", None), ("return", "result")]
+    assert [(row["kind"], row.get("via")) for row in rows] == [
+        ("pass", None),
+        ("return", "result"),
+    ]
     assert rows[1]["agent_id"] == PASS_AGENT and rows[1]["text"] == "No findings."
 
 

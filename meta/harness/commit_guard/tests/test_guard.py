@@ -79,7 +79,9 @@ def test_skips_git_config_global_option() -> None:
 
 
 def test_heredoc_subject_extracted() -> None:
-    command = 'git commit -m "$(cat <<\'EOF\'\nfeat(core): add parser\n\nbody text\nEOF\n)"'
+    command = (
+        "git commit -m \"$(cat <<'EOF'\nfeat(core): add parser\n\nbody text\nEOF\n)\""
+    )
     (inv,) = guard.detect_invocations(command)
     assert inv.subject == "feat(core): add parser"
 
@@ -310,16 +312,12 @@ def test_commit_before_branch_change_is_still_checked() -> None:
 
 
 def test_branch_change_latch_spans_lines() -> None:
-    (inv,) = guard.detect_invocations(
-        'git checkout -b feat/x\ngit commit -m "feat: x"'
-    )
+    (inv,) = guard.detect_invocations('git checkout -b feat/x\ngit commit -m "feat: x"')
     assert inv.branch_check_unsafe
 
 
 def test_override_prefix_detected() -> None:
-    (inv,) = guard.detect_invocations(
-        'ATOM_COMMIT_OVERRIDE=1 git commit -m "whatever"'
-    )
+    (inv,) = guard.detect_invocations('ATOM_COMMIT_OVERRIDE=1 git commit -m "whatever"')
     assert inv.override
 
 
@@ -347,13 +345,13 @@ def test_unparseable_command_is_fully_fail_open() -> None:
         "PY\n"
     )
     assert guard.detect_invocations(heredoc_45) == []
-    assert guard.detect_invocations("echo it's broken\ngit commit -m \"feat: x\"") == []
+    assert guard.detect_invocations('echo it\'s broken\ngit commit -m "feat: x"') == []
 
 
 def test_unparseable_command_passes_end_to_end(monkeypatch) -> None:
     # 보호 브랜치 위였더라도 파싱 불가 명령은 차단 없이 통과해야 한다 (#45).
     _set_branch(monkeypatch, "main")
-    payload = _bash_payload("echo it's broken\ngit commit -m \"feat: x\"")
+    payload = _bash_payload('echo it\'s broken\ngit commit -m "feat: x"')
     assert _run_main(monkeypatch, payload) == 0
 
 
@@ -393,11 +391,16 @@ def test_validate_rejects_bad_headers() -> None:
 # 형식: (설명, 명령, 현재 감지되는 제목 튜플, 출처).
 
 _KNOWN_FALSE_BLOCKS = [
-    (("주석 해석이 꺼져 있어(리터럴 `#` 보존) 주석 뒤 텍스트가 명령으로 읽힌다 "
-     "— bash: 첫 커밋만 실행됨(`#` 뒤는 주석). 규격인 첫 제목만 실행되는데 "
-     "규격 위반인 두 번째 제목까지 감지돼 차단된다 — 기록만"),
-     'git commit -m "feat(x): a" # ; git commit -m "Bad."',
-     ("feat(x): a", "Bad."), "#74 시금석(구성 발견)"),
+    (
+        (
+            "주석 해석이 꺼져 있어(리터럴 `#` 보존) 주석 뒤 텍스트가 명령으로 읽힌다 "
+            "— bash: 첫 커밋만 실행됨(`#` 뒤는 주석). 규격인 첫 제목만 실행되는데 "
+            "규격 위반인 두 번째 제목까지 감지돼 차단된다 — 기록만"
+        ),
+        'git commit -m "feat(x): a" # ; git commit -m "Bad."',
+        ("feat(x): a", "Bad."),
+        "#74 시금석(구성 발견)",
+    ),
 ]
 
 # 설명이 bash 실행 상태를 밝히는 세 가지 형식 (sibling 규약과 동일).
@@ -426,14 +429,18 @@ def test_known_false_blocks() -> None:
 
 def test_brace_hidden_cd_and_checkout_do_not_raise_latches() -> None:
     # 알려진 한계(#213)의 플래그 고정.
-    for cmd in ('{ cd /x; }; git commit -m "feat: a"',
-                '{ git checkout -b feat/x; }; git commit -m "feat: a"',
-                'if true; then cd /x; fi; git commit -m "feat: a"',
-                'if true; then git checkout -b feat/x; fi; git commit -m "feat: a"'):
+    for cmd in (
+        '{ cd /x; }; git commit -m "feat: a"',
+        '{ git checkout -b feat/x; }; git commit -m "feat: a"',
+        'if true; then cd /x; fi; git commit -m "feat: a"',
+        'if true; then git checkout -b feat/x; fi; git commit -m "feat: a"',
+    ):
         invs = guard.detect_invocations(cmd)
         assert len(invs) == 1 and invs[0].branch_check_unsafe is False, cmd
-    for cmd in ('cd /x; git commit -m "feat: a"',
-                'git checkout -b feat/x && git commit -m "feat: a"'):
+    for cmd in (
+        'cd /x; git commit -m "feat: a"',
+        'git checkout -b feat/x && git commit -m "feat: a"',
+    ):
         invs = guard.detect_invocations(cmd)
         assert len(invs) == 1 and invs[0].branch_check_unsafe is True, cmd
 
@@ -522,7 +529,9 @@ def test_checkout_to_main_from_feature_branch_passes(monkeypatch) -> None:
 @pytest.mark.parametrize("branch", ["main", "master"])
 def test_track_to_protected_remote_still_blocks(monkeypatch, branch: str) -> None:
     _set_branch(monkeypatch, branch)
-    payload = _bash_payload('git checkout --track origin/main && git commit -m "feat: x"')
+    payload = _bash_payload(
+        'git checkout --track origin/main && git commit -m "feat: x"'
+    )
     assert _run_main(monkeypatch, payload) == 42
 
 
@@ -540,7 +549,9 @@ def test_track_to_main_from_feature_branch_passes(monkeypatch) -> None:
     # 설계상 통과한다(#44). calls 단언이 있어야 "래치가 안 켜졌다"가 고정된다 —
     # 반환값만 보면 래치가 켜져도 0이라 아무것도 증명하지 못한다.
     calls = _set_branch(monkeypatch, "feat/x")
-    payload = _bash_payload('git checkout --track origin/main && git commit -m "feat: x"')
+    payload = _bash_payload(
+        'git checkout --track origin/main && git commit -m "feat: x"'
+    )
     assert _run_main(monkeypatch, payload) == 0
     assert calls == [(None, None)]
 
@@ -596,7 +607,7 @@ def test_bad_message_is_blocked(monkeypatch) -> None:
 
 def test_bad_heredoc_message_is_blocked(monkeypatch) -> None:
     _set_branch(monkeypatch, "feat/thing")
-    command = 'git commit -m "$(cat <<\'EOF\'\nbad subject line\nEOF\n)"'
+    command = "git commit -m \"$(cat <<'EOF'\nbad subject line\nEOF\n)\""
     assert _run_main(monkeypatch, _bash_payload(command)) == 42
 
 
@@ -695,7 +706,8 @@ def test_entry_point_never_blocks_on_malformed_input() -> None:
         input="",
         capture_output=True,
         text=True,
-        timeout=30, check=False,
+        timeout=30,
+        check=False,
     )
     # 태그가 없으면 하네스가 자기 코드에 도달조차 못 한 것이다. 그 경우
     # 종료 코드는 42가 아니어서 아래 단언만으로는 초록으로 지나간다.
@@ -775,7 +787,9 @@ def test_ledger_records_subject_rejected_block(monkeypatch, tmp_path) -> None:
 def test_ledger_records_override(monkeypatch, tmp_path) -> None:
     _set_branch(monkeypatch, "main")
 
-    _run_main(monkeypatch, _bash_payload('ATOM_COMMIT_OVERRIDE=1 git commit -m "hotfix"'))
+    _run_main(
+        monkeypatch, _bash_payload('ATOM_COMMIT_OVERRIDE=1 git commit -m "hotfix"')
+    )
 
     entry = _ledger_entries(tmp_path)[0]
     assert entry["event"] == "override"

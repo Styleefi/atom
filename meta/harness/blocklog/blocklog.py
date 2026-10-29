@@ -112,8 +112,10 @@ def ledger_path() -> str:
         `<base>/atom/guard-blocklog.jsonl`의 절대 경로.
     """
     raw = os.environ.get("XDG_STATE_HOME")
-    base = raw if raw and os.path.isabs(raw) else os.path.join(
-        os.path.expanduser("~"), ".local", "state"
+    base = (
+        raw
+        if raw and os.path.isabs(raw)
+        else os.path.join(os.path.expanduser("~"), ".local", "state")
     )
     return os.path.join(base, "atom", "guard-blocklog.jsonl")
 

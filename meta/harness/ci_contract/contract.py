@@ -118,8 +118,10 @@ def decide_mode(root: Path) -> tuple[str, str]:
     if missing:
         return (
             "fail",
-            (f"{MARKER} declares the dual-forge contract but CI file(s) are "
-            f"missing: {', '.join(missing)}. {OPT_OUT_HINT}"),
+            (
+                f"{MARKER} declares the dual-forge contract but CI file(s) are "
+                f"missing: {', '.join(missing)}. {OPT_OUT_HINT}"
+            ),
         )
     return ("strict", "")
 
@@ -133,8 +135,10 @@ def _string_items(value: object, label: str) -> tuple[list[str] | None, list[str
     if value is None:
         return None, [f"{label} is missing — cannot read the contract"]
     return None, [
-        (f"{label} has an unreadable entry (tags like !reference and nested "
-        "structures are unsupported) — write literal strings")
+        (
+            f"{label} has an unreadable entry (tags like !reference and nested "
+            "structures are unsupported) — write literal strings"
+        )
     ]
 
 
@@ -149,7 +153,11 @@ def extract_gitlab(doc: object) -> tuple[str | None, list[str] | None, list[str]
         violations에 사유가 담긴다.
     """
     if not isinstance(doc, dict):
-        return None, None, [f"{GITLAB_CI}: top level is not a mapping — cannot read the contract"]
+        return (
+            None,
+            None,
+            [f"{GITLAB_CI}: top level is not a mapping — cannot read the contract"],
+        )
 
     violations: list[str] = []
     # 우회로 가드 — 명령은 harness.script 밖에도 실릴 수 있다 (레거시 전역 문법 포함).
@@ -221,16 +229,22 @@ def extract_github(doc: object) -> tuple[str | None, list[str] | None, list[str]
         violations에 사유가 담긴다.
     """
     if not isinstance(doc, dict):
-        return None, None, [
-            f"{GITHUB_WORKFLOW}: top level is not a mapping — cannot read the contract"
-        ]
+        return (
+            None,
+            None,
+            [
+                f"{GITHUB_WORKFLOW}: top level is not a mapping — cannot read the contract"
+            ],
+        )
 
     jobs = doc.get("jobs")
     harness = jobs.get("harness") if isinstance(jobs, dict) else None
     if not isinstance(harness, dict):
-        return None, None, [
-            f"{GITHUB_WORKFLOW}: no jobs.harness job — cannot read the contract"
-        ]
+        return (
+            None,
+            None,
+            [f"{GITHUB_WORKFLOW}: no jobs.harness job — cannot read the contract"],
+        )
 
     violations: list[str] = []
     image = harness.get("container")
@@ -382,7 +396,10 @@ def check_contract(
                 "support > folded blocks — write commands explicitly per script "
                 "entry / run step, using | or list form)"
             )
-        for label, commands in ((GITLAB_CI, gl_commands), (GITHUB_WORKFLOW, gh_commands)):
+        for label, commands in (
+            (GITLAB_CI, gl_commands),
+            (GITHUB_WORKFLOW, gh_commands),
+        ):
             if commands != CANONICAL_COMMANDS:
                 violations.append(
                     f"{label}: command list deviates from the canonical harness "

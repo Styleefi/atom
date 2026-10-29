@@ -66,7 +66,8 @@ def _run_hook(
         env=env,
         capture_output=True,
         text=True,
-        timeout=30, check=False,
+        timeout=30,
+        check=False,
     )
 
 
@@ -154,7 +155,7 @@ def test_blocking_template_remaps_the_guards_sentinel(module_name: str) -> None:
         if exc.name in (module_name, module_name.rsplit(".", 1)[0]):
             pytest.skip(f"guard module removed: {exc.name}")
         raise
-    assert f'-eq {guard.EXIT_BLOCK} ' in HOOK_COMMAND_BLOCKING
+    assert f"-eq {guard.EXIT_BLOCK} " in HOOK_COMMAND_BLOCKING
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv not installed")
@@ -164,9 +165,18 @@ def test_real_uv_propagates_sentinel_42() -> None:
     # 절대 경로여야 한다(pytest cwd가 meta/라 상대 경로는 meta/meta로 오해석).
     meta_dir = find_repo_root() / "meta"
     result = subprocess.run(
-        ["uv", "run", "--directory", str(meta_dir), "python", "-c", "raise SystemExit(42)"],
+        [
+            "uv",
+            "run",
+            "--directory",
+            str(meta_dir),
+            "python",
+            "-c",
+            "raise SystemExit(42)",
+        ],
         capture_output=True,
         text=True,
-        timeout=120, check=False,
+        timeout=120,
+        check=False,
     )
     assert result.returncode == 42, result.stderr

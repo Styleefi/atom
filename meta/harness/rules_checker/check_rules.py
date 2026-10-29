@@ -94,12 +94,12 @@ REQUIRED_FIELDS = ("id", "tier", "enforce", "deployed-to")
 # 표기가 들어와도 안전하도록. 래퍼의 실제 종료 코드 되매핑 동작(set -e 포함)은
 # tests/test_hook_command_contract.py에 있다(/bin/sh 실행).
 HOOK_COMMAND_BLOCKING = (
-    'if command -v uv >/dev/null 2>&1; then '
+    "if command -v uv >/dev/null 2>&1; then "
     'if uv run --directory "$CLAUDE_PROJECT_DIR/meta" python -m {module}; '
     'then :; else rc=$?; if [ "$rc" -eq 42 ]; then exit 2; else exit 1; fi; fi; fi'
 )
 HOOK_COMMAND_NON_BLOCKING = (
-    'if command -v uv >/dev/null 2>&1; then '
+    "if command -v uv >/dev/null 2>&1; then "
     'uv run --directory "$CLAUDE_PROJECT_DIR/meta" python -m {module} || exit 1; fi'
 )
 
@@ -423,8 +423,10 @@ def _skill_path_shape_violations(rel: Path, deployed_to: str) -> list[str]:
         or len(deployed.parts) != 4
     ):
         return [
-            (f"{rel}: skill deployed-to '{deployed_to}' must be a "
-            "SKILL.md under .claude/skills/")
+            (
+                f"{rel}: skill deployed-to '{deployed_to}' must be a "
+                "SKILL.md under .claude/skills/"
+            )
         ]
     return []
 
@@ -450,7 +452,9 @@ def _deployed_to_screen(raw: str) -> tuple[bool, bool]:
     return escapes, bad_grammar
 
 
-def _resolve_deploy_target(root: Path, rel: Path, data: dict) -> tuple[Path, str | None]:
+def _resolve_deploy_target(
+    root: Path, rel: Path, data: dict
+) -> tuple[Path, str | None]:
     """deployed-to를 대상 경로로 해석하고 부재 여부를 판정한다.
 
     hook 분기와 일반 분기가 같은 해석·부재 메시지를 복붙하던 것을 단일화한다
@@ -942,8 +946,10 @@ def check_inventory(root: Path) -> list[str]:
     inventory = root / INVENTORY_PATH
     if not inventory.is_file():
         return [
-            (f"{INVENTORY_PATH}: owner-facing interface inventory is missing "
-            "— restore it; every meta-layer artifact must be listed there")
+            (
+                f"{INVENTORY_PATH}: owner-facing interface inventory is missing "
+                "— restore it; every meta-layer artifact must be listed there"
+            )
         ]
 
     text = inventory.read_text(encoding="utf-8")
@@ -1072,9 +1078,7 @@ def check_hook_wiring(root: Path) -> list[str]:
             # _load_settings 분류 밖 예외)이 스윕 전체를 뭉개면 다른 대상의
             # 배선 위반이 가려진다 — 규칙 순회의 per-rule 가드와 같은 영역
             # 가드로 사망을 대상 단위에 국지화한다(PR #93 R1).
-            violations.append(
-                f"{rel}: internal checker error — {_describe(exc)}"
-            )
+            violations.append(f"{rel}: internal checker error — {_describe(exc)}")
     return violations
 
 
@@ -1111,9 +1115,7 @@ def _target_wiring_violations(rel: Path, target: Path) -> list[str]:
             continue
         module = tokens[0]
         expected_blocking = HOOK_COMMAND_BLOCKING.replace("{module}", module)
-        expected_non_blocking = HOOK_COMMAND_NON_BLOCKING.replace(
-            "{module}", module
-        )
+        expected_non_blocking = HOOK_COMMAND_NON_BLOCKING.replace("{module}", module)
         if command not in (expected_blocking, expected_non_blocking):
             violations.append(
                 f"{rel}: hook command referencing '{module}' matches neither "
@@ -1167,10 +1169,7 @@ def check_rules(root: Path) -> list[str]:
         try:
             violations.extend(repo_check(root))
         except Exception as exc:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
-            violations.append(
-                f"internal checker error in {name} — "
-                f"{_describe(exc)}"
-            )
+            violations.append(f"internal checker error in {name} — {_describe(exc)}")
     if rule_violations:
         # 인벤토리의 아티팩트 분류는 규칙 frontmatter에서 파생된다. 깨진
         # 레지스트리 위에서 분류하면 규칙이 뒷받침하던 하니스/스킬을 '규칙 없는
@@ -1185,8 +1184,7 @@ def check_rules(root: Path) -> list[str]:
             violations.extend(check_inventory(root))
         except Exception as exc:  # noqa: BLE001 — 사망 부류 방어가 설계 요구사항
             violations.append(
-                f"internal checker error in check_inventory — "
-                f"{_describe(exc)}"
+                f"internal checker error in check_inventory — {_describe(exc)}"
             )
     return violations
 

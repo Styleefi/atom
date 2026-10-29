@@ -22,7 +22,9 @@ def test_rule_report_reasons_match_the_constant() -> None:
     """규칙 파일의 사유 열거가 REASONS와 순서까지 일치해야 한다."""
     text = RULE_PATH.read_text(encoding="utf-8")
     matches = re.findall(r"`report` reasons:\s*([^.]+)\.", text)
-    assert len(matches) == 1, f"'`report` reasons:' 행이 정확히 1개여야 함: {len(matches)}개"
+    assert len(matches) == 1, (
+        f"'`report` reasons:' 행이 정확히 1개여야 함: {len(matches)}개"
+    )
     parsed = [token.strip().strip("`") for token in matches[0].split(",")]
     assert parsed == list(check.REASONS)
 
@@ -40,6 +42,8 @@ def test_prose_names_the_trailer_read_constant() -> None:
     name = "_MESSAGE_FORMAT"
     assert hasattr(check, name)
     rule = RULE_PATH.read_text(encoding="utf-8")
-    docstring = ast.get_docstring(ast.parse(TEST_CHECK_PATH.read_text(encoding="utf-8"))) or ""
+    docstring = (
+        ast.get_docstring(ast.parse(TEST_CHECK_PATH.read_text(encoding="utf-8"))) or ""
+    )
     assert set(_POINTER_RE.findall(rule)) == {name}
     assert set(_POINTER_RE.findall(docstring)) == {name}

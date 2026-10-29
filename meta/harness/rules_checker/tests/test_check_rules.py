@@ -117,7 +117,9 @@ def _add_inventory_row(root: Path, marker: str, name: str) -> None:
     """마커 바로 앞에 항목 행 하나를 끼워 넣는다."""
     path = root / "meta" / "README.md"
     text = path.read_text(encoding="utf-8")
-    path.write_text(text.replace(marker, f"| `{name}` | fixture |\n{marker}"), encoding="utf-8")
+    path.write_text(
+        text.replace(marker, f"| `{name}` | fixture |\n{marker}"), encoding="utf-8"
+    )
 
 
 def list_artifact(root: Path, name: str) -> None:
@@ -331,7 +333,9 @@ def test_claude_md_arbitrary_file_is_rejected(tmp_path: Path) -> None:
     root = make_repo(tmp_path)
     write_rule(root, "my-rule.md", claude_md_rule("my-rule", "docs/notes.md"))
     (root / "docs").mkdir()
-    (root / "docs" / "notes.md").write_text("@meta/rules/my-rule.md\n", encoding="utf-8")
+    (root / "docs" / "notes.md").write_text(
+        "@meta/rules/my-rule.md\n", encoding="utf-8"
+    )
     violations = rule_violations(root)
     assert len(violations) == 1
     assert "exactly 'CLAUDE.md'" in violations[0]
@@ -378,7 +382,11 @@ _SCANNER_CORPUS = [
     (f"<!-- {_SCANNER_IMP} -->\n", False, "단일 줄 주석 속은 불인정"),
     ("@meta/rules/my<!-- x -->-rule.md\n", False, "스팬 공백 치환이 토큰 융합 차단"),
     (f"<!--\n{_SCANNER_IMP}\n-->\n", False, "여러 줄 주석 속은 불인정"),
-    (f"<!-- start\n{_SCANNER_IMP}\nend -->\n{_SCANNER_IMP}\n", True, "주석 종료 후 독립 줄은 활성"),
+    (
+        f"<!-- start\n{_SCANNER_IMP}\nend -->\n{_SCANNER_IMP}\n",
+        True,
+        "주석 종료 후 독립 줄은 활성",
+    ),
     (f"<!--\nc\n-->{_SCANNER_IMP}\n", False, "닫는 줄 잔여는 활성이나 독립 줄은 아님"),
     (f"```\n{_SCANNER_IMP}\n```\n", False, "``` 펜스 속은 불인정"),
     (f"```python\n{_SCANNER_IMP}\n```\n", False, "info string 펜스도 동일"),
@@ -386,7 +394,11 @@ _SCANNER_CORPUS = [
     (f"```\nx\n~~~\n{_SCANNER_IMP}\n```\n", False, "~~~는 ``` 펜스를 닫지 못함"),
     (f"```\n{_SCANNER_IMP}\n", False, "미종결 펜스는 EOF까지 비활성(fail-safe)"),
     (f"<!--\n```\n-->\n{_SCANNER_IMP}\n", True, "주석 안 펜스 마커는 펜스를 열지 않음"),
-    (f"```\n<!--\n```\n{_SCANNER_IMP}\n", True, "펜스 안 <!--는 주석으로 전이하지 않음"),
+    (
+        f"```\n<!--\n```\n{_SCANNER_IMP}\n",
+        True,
+        "펜스 안 <!--는 주석으로 전이하지 않음",
+    ),
     (f"    {_SCANNER_IMP}\n", False, "들여쓰기 줄(코드 블록)은 불인정"),
     (f"see {_SCANNER_IMP} in\n", False, "인라인 언급은 불인정"),
     (f"{_SCANNER_IMP}@meta/rules/other.md\n", False, "무공백 연접은 불일치로 수렴"),
@@ -455,7 +467,9 @@ def test_unverifiable_vessels_are_rejected(
     # 구현된 뒤에는 정상 경로로 도달할 수 없으므로, 가상 그릇을 허용 enum에
     # 주입해 방어 분기가 살아 있는지 확인한다.
     monkeypatch.setattr(
-        check_rules_module, "VALID_ENFORCE", {*check_rules_module.VALID_ENFORCE, "webhook"}
+        check_rules_module,
+        "VALID_ENFORCE",
+        {*check_rules_module.VALID_ENFORCE, "webhook"},
     )
     root = make_repo(tmp_path)
     (root / "CLAUDE.md").write_text("anything\n", encoding="utf-8")
@@ -636,14 +650,19 @@ def test_hook_pin_does_not_mask_missing_target(tmp_path: Path) -> None:
     violations = rule_violations(root)
     assert len(violations) == 2
     assert any("exactly '.claude/settings.json'" in v for v in violations)
-    assert any("deployed-to target '.claude/other.json' does not exist" in v for v in violations)
+    assert any(
+        "deployed-to target '.claude/other.json' does not exist" in v
+        for v in violations
+    )
 
 
 def test_hook_dot_slash_variant_is_rejected(tmp_path: Path) -> None:
     # raw 문자열 비교라 논리적 동치 표기도 거부한다(claude-md 핀과 대칭).
     root = make_repo(tmp_path)
     write_rule(
-        root, "my-guard.md", hook_rule("my-guard", deployed_to="./.claude/settings.json")
+        root,
+        "my-guard.md",
+        hook_rule("my-guard", deployed_to="./.claude/settings.json"),
     )
     make_hook_deployment(
         root, "my-guard", hook_settings(canonical_command("harness.my_guard"))
@@ -667,7 +686,9 @@ def test_hook_package_without_init_is_rejected(tmp_path: Path) -> None:
     # #38: __init__.py는 메타층 패키지 규약 — 근거 서술의 SSOT는 검사 지점 주석.
     root = make_repo(tmp_path)
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
-    make_hook_deployment(root, "my-guard", hook_settings(canonical_command("harness.my_guard")))
+    make_hook_deployment(
+        root, "my-guard", hook_settings(canonical_command("harness.my_guard"))
+    )
     (root / "meta" / "harness" / "my_guard" / "__init__.py").unlink()
     violations = rule_violations(root)
     assert len(violations) == 1
@@ -678,7 +699,9 @@ def test_hook_package_without_main_is_rejected(tmp_path: Path) -> None:
     # __main__.py는 python -m 진입점 — 근거 서술의 SSOT는 검사 지점 주석.
     root = make_repo(tmp_path)
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
-    make_hook_deployment(root, "my-guard", hook_settings(canonical_command("harness.my_guard")))
+    make_hook_deployment(
+        root, "my-guard", hook_settings(canonical_command("harness.my_guard"))
+    )
     (root / "meta" / "harness" / "my_guard" / "__main__.py").unlink()
     violations = rule_violations(root)
     assert len(violations) == 1
@@ -746,7 +769,9 @@ def test_blocking_on_non_hook_rule_is_rejected(tmp_path: Path) -> None:
     assert "'blocking' is only valid for hook rules" in violations[0]
 
 
-def test_hook_rule_module_mention_outside_command_is_not_deployed(tmp_path: Path) -> None:
+def test_hook_rule_module_mention_outside_command_is_not_deployed(
+    tmp_path: Path,
+) -> None:
     # hooks 구조 밖의 언급은 배포가 아니다 — v1 substring 검사와의 차이.
     root = make_repo(tmp_path)
     write_rule(root, "my-guard.md", hook_rule("my-guard"))
@@ -1225,8 +1250,7 @@ def test_raising_str_exception_does_not_kill_the_sweep(
     write_legacy_wiring(root)
     violations = rule_violations(root)
     expected = (
-        f"{Path('meta') / 'rules' / 'loud.md'}: internal checker error"
-        " — _BoomStrDies:"
+        f"{Path('meta') / 'rules' / 'loud.md'}: internal checker error — _BoomStrDies:"
     )
     assert expected in violations
     assert any("harness.legacy" in v for v in violations)
@@ -1358,8 +1382,7 @@ def test_crashing_inventory_check_does_not_kill_the_sweep(
     monkeypatch.setattr(check_rules_module, "check_inventory", check_inventory)
     violations = check_rules(root)
     assert any(
-        "internal checker error in check_inventory" in v
-        and "_Boom" in v
+        "internal checker error in check_inventory" in v and "_Boom" in v
         for v in violations
     )
     # 가드가 append가 아니라 return/치환으로 바뀌면 앞선 위반이 증발한다.
@@ -1470,8 +1493,7 @@ def test_utf16_settings_reported_as_encoding_problem(tmp_path: Path) -> None:
         for v in violations
     )
     assert any(
-        "cannot verify hook wiring — file is not valid UTF-8" in v
-        for v in violations
+        "cannot verify hook wiring — file is not valid UTF-8" in v for v in violations
     )
 
 
@@ -1561,21 +1583,48 @@ def test_checker_never_raises_on_malformed_inputs(tmp_path: Path) -> None:
     """
     cases = [
         # (규칙 본문, settings 내용 — None이면 파일 없음)
-        (("---\nid: my-guard\ntier: convention\nenforce: hook\n"
-         "deployed-to: /abs/x\nblocking: true\n---\n\nbody\n"), None),
-        (("---\nid: my-guard\ntier: convention\nenforce: hook\n"
-         "deployed-to: ../up/x\nblocking: true\n---\n\nbody\n"), None),
-        (("---\nid: my-guard\ntier: convention\nenforce: hook\n"
-         "deployed-to: .claude/settings.json\nblocking: [list]\n---\n\nbody\n"),
-         "{not json"),
-        (("---\nid: my-guard\ntier: convention\nenforce: hook\n"
-         "deployed-to: .claude/settings.json\nblocking: true\n---\n\nbody\n"),
-         '{"hooks": 42}'),
-        (("---\nid: my-guard\ntier: convention\nenforce: hook\n"
-         "deployed-to: .claude/settings.json\nblocking: true\n---\n\nbody\n"),
-         '{"hooks": {"PreToolUse": [{"hooks": [{"command": 42}]}]}}'),
-        (("---\nid: [1, 2]\ntier: {a: b}\nenforce: hook\n"
-         "deployed-to: 5\nblocking: yes\n---\n\nbody\n"), "[]"),
+        (
+            (
+                "---\nid: my-guard\ntier: convention\nenforce: hook\n"
+                "deployed-to: /abs/x\nblocking: true\n---\n\nbody\n"
+            ),
+            None,
+        ),
+        (
+            (
+                "---\nid: my-guard\ntier: convention\nenforce: hook\n"
+                "deployed-to: ../up/x\nblocking: true\n---\n\nbody\n"
+            ),
+            None,
+        ),
+        (
+            (
+                "---\nid: my-guard\ntier: convention\nenforce: hook\n"
+                "deployed-to: .claude/settings.json\nblocking: [list]\n---\n\nbody\n"
+            ),
+            "{not json",
+        ),
+        (
+            (
+                "---\nid: my-guard\ntier: convention\nenforce: hook\n"
+                "deployed-to: .claude/settings.json\nblocking: true\n---\n\nbody\n"
+            ),
+            '{"hooks": 42}',
+        ),
+        (
+            (
+                "---\nid: my-guard\ntier: convention\nenforce: hook\n"
+                "deployed-to: .claude/settings.json\nblocking: true\n---\n\nbody\n"
+            ),
+            '{"hooks": {"PreToolUse": [{"hooks": [{"command": 42}]}]}}',
+        ),
+        (
+            (
+                "---\nid: [1, 2]\ntier: {a: b}\nenforce: hook\n"
+                "deployed-to: 5\nblocking: yes\n---\n\nbody\n"
+            ),
+            "[]",
+        ),
     ]
     for i, (rule_body, settings_text) in enumerate(cases):
         root = make_repo(tmp_path / str(i))
@@ -1695,7 +1744,9 @@ def test_skill_rule_outside_skills_dir(tmp_path: Path) -> None:
         "deployed-to: docs/SKILL.md\n---\n",
     )
     (root / "docs").mkdir()
-    (root / "docs" / "SKILL.md").write_text("meta/rules/my-style.md\n", encoding="utf-8")
+    (root / "docs" / "SKILL.md").write_text(
+        "meta/rules/my-style.md\n", encoding="utf-8"
+    )
     violations = rule_violations(root)
     assert len(violations) == 1
     assert "must be a SKILL.md under .claude/skills/" in violations[0]
@@ -1805,7 +1856,9 @@ def test_template_stale_import(tmp_path: Path) -> None:
     violations = check_rules(root)
     # 지워진 규칙의 잔존 import는 드리프트(stale)이자 고아(#91)다.
     assert len(violations) == 2
-    assert any("stale" in v and "'@meta/rules/removed-rule.md'" in v for v in violations)
+    assert any(
+        "stale" in v and "'@meta/rules/removed-rule.md'" in v for v in violations
+    )
     assert any("orphan rule import" in v for v in violations)
 
 
@@ -1973,7 +2026,8 @@ def test_inventory_missing_rules_heading(tmp_path: Path) -> None:
     write_rule(root, "my-rule.md", valid_rule("my-rule"))
     deploy_claude_md(root, "@meta/rules/my-rule.md")
     write_inventory(
-        root, "# inventory\n\n## Functional artifacts\n\n| name | notes |\n| --- | --- |\n"
+        root,
+        "# inventory\n\n## Functional artifacts\n\n| name | notes |\n| --- | --- |\n",
     )
     violations = check_rules(root)
     assert len(violations) == 1
@@ -2063,7 +2117,9 @@ def test_inventory_matches_skill_owner_by_normalized_path(
         "---\nid: my-guard\ntier: convention\ndeployed-to: .claude/settings.json\n---\n",
     ],
 )
-def test_inventory_deferred_while_a_rule_is_violating(tmp_path: Path, body: str) -> None:
+def test_inventory_deferred_while_a_rule_is_violating(
+    tmp_path: Path, body: str
+) -> None:
     # 깨진 레지스트리 위에서 분류하면 규칙이 뒷받침하던 하니스를 '규칙 없는
     # 아티팩트'로 오분류해, 고치는 순간 stale이 될 행을 추가하라고 지시하게
     # 된다. 그래서 검사를 미루고, 미룬 사실을 보고한다.
@@ -2217,14 +2273,18 @@ def test_inventory_tolerates_crlf_and_trailing_space(tmp_path: Path) -> None:
     assert check_rules(root) == []
 
 
-def test_main_maps_violations_to_a_nonzero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_maps_violations_to_a_nonzero_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # 위반을 종료 코드로 옮기는 매핑. 바로 위 테스트는 check_rules()의 반환값만
     # 보고 main()을 지나간다 (PR #137 라운드 1 실측).
     monkeypatch.setattr(check_rules_module, "check_rules", lambda root: ["boom"])
     assert check_rules_module.main() == 1
 
 
-def test_main_maps_no_violations_to_a_zero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_maps_no_violations_to_a_zero_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # 반대 방향도 함께 핀한다 — 한쪽만 고정하면 게이트가 항상 빨간 회귀를 놓친다.
     monkeypatch.setattr(check_rules_module, "check_rules", lambda root: [])
     assert check_rules_module.main() == 0

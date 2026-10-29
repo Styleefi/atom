@@ -42,12 +42,18 @@ def test_rule_prompt_copied_with_quote_markers_matches() -> None:
 def test_rule_pass_opening_begins_with_the_pass_phrase() -> None:
     prompt = _prompt_block(RULE_PATH.read_text(encoding="utf-8"), PASS_ANCHOR)
     assert record.normalize(prompt).startswith(record.PASS_PHRASE)
-    assert record.match_prompt(prompt.replace("<n>", "191", 1), record.PASS_PHRASE) == (True, 191)
+    assert record.match_prompt(prompt.replace("<n>", "191", 1), record.PASS_PHRASE) == (
+        True,
+        191,
+    )
 
 
 def test_rule_pass_opening_copied_with_quote_markers_matches() -> None:
     text = RULE_PATH.read_text(encoding="utf-8").split(PASS_ANCHOR, 1)[1]
-    assert record.match_prompt(text.replace("<n>", "191", 1), record.PASS_PHRASE) == (False, 191)
+    assert record.match_prompt(text.replace("<n>", "191", 1), record.PASS_PHRASE) == (
+        False,
+        191,
+    )
 
 
 def test_the_two_phrases_are_distinct_openings() -> None:

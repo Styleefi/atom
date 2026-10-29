@@ -221,7 +221,8 @@ def _run_git(cwd: str | None, *args: str) -> str | None:
             capture_output=True,
             text=True,
             errors="replace",
-            timeout=GIT_TIMEOUT_SECONDS, check=False,
+            timeout=GIT_TIMEOUT_SECONDS,
+            check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -242,7 +243,9 @@ def _repo_dirs(cwd: str | None) -> tuple[str, str] | None:
     Returns:
         (git-common-dir, git-dir) 절대 경로. 저장소가 아니면 None.
     """
-    out = _run_git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir")
+    out = _run_git(
+        cwd, "rev-parse", "--path-format=absolute", "--git-common-dir", "--git-dir"
+    )
     if out is None:
         return None
     lines = out.splitlines()
@@ -303,9 +306,9 @@ def _worktree_heads(cwd: str | None) -> dict[str, str]:
     try:
         for item in out.split("\0"):
             if item.startswith("worktree "):
-                path = item[len("worktree "):]
+                path = item[len("worktree ") :]
             elif item.startswith("HEAD "):
-                sha = item[len("HEAD "):].strip()
+                sha = item[len("HEAD ") :].strip()
             elif item.startswith("prunable"):
                 prunable = True
             elif not item:  # 스탠자 경계 — 방출 후 리셋
@@ -513,21 +516,23 @@ def _branch_report(
     caveat = (
         ""
         if has_remote_ref
-        else (
-            f" No remote '{branch}' exists here; include that when you report."
-        )
+        else (f" No remote '{branch}' exists here; include that when you report.")
     )
     return "\n".join(
         [
-            (f"[commit-backstop] {len(offending)} commit(s) not present on any "
-            f"remote '{branch}' landed on local '{branch}': "
-            f"{' '.join(sha[:12] for sha in offending)}"),
+            (
+                f"[commit-backstop] {len(offending)} commit(s) not present on any "
+                f"remote '{branch}' landed on local '{branch}': "
+                f"{' '.join(sha[:12] for sha in offending)}"
+            ),
             f"  '{branch}' moved {old} -> {new}",
-            (f"Do NOT rewrite or move '{branch}' yourself. Give the owner the "
-            "SHAs above in your next reply, and do not push until they "
-            f"decide.{caveat} Recovery steps, if the owner asks for them, are "
-            "in meta/rules/commit-backstop.md (which also carries this hook's "
-            f"non-claims and the {OVERRIDE_TOKEN} escape)."),
+            (
+                f"Do NOT rewrite or move '{branch}' yourself. Give the owner the "
+                "SHAs above in your next reply, and do not push until they "
+                f"decide.{caveat} Recovery steps, if the owner asks for them, are "
+                "in meta/rules/commit-backstop.md (which also carries this hook's "
+                f"non-claims and the {OVERRIDE_TOKEN} escape)."
+            ),
         ]
     )
 
@@ -558,9 +563,11 @@ def _header_report(problems: list[tuple[str, str]], prescribe: bool = True) -> s
         stderr에 실을 보고문.
     """
     lines = [
-        (f"[commit-backstop] {len(problems)} commit(s) newly reachable from HEAD "
-        "violate the Conventional Commits header rule — they may predate this "
-        "command:")
+        (
+            f"[commit-backstop] {len(problems)} commit(s) newly reachable from HEAD "
+            "violate the Conventional Commits header rule — they may predate this "
+            "command:"
+        )
     ]
     for sha, problem in problems[:REPORT_SHA_LIMIT]:
         lines.append(f"  - {sha[:12]}: {problem}")
@@ -625,11 +632,15 @@ def _degraded_notice(state_path: str) -> str:
     """
     return "\n".join(
         [
-            (f"[commit-backstop] state could not be persisted at {state_path}; "
-            "the report(s) below were NOT enforced (log only)."),
-            ("  Reporting once cannot be guaranteed while the write fails, so "
-            "this verdict is held - it is reported again once the state file "
-            "becomes writable."),
+            (
+                f"[commit-backstop] state could not be persisted at {state_path}; "
+                "the report(s) below were NOT enforced (log only)."
+            ),
+            (
+                "  Reporting once cannot be guaranteed while the write fails, so "
+                "this verdict is held - it is reported again once the state file "
+                "becomes writable."
+            ),
         ]
     )
 

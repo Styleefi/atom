@@ -126,20 +126,34 @@ def _behind(tmp_path):
     """
     remote = _bare(tmp_path, "remote", branch="main")
     a = tmp_path / "A"
-    subprocess.run(["git", "clone", "-q", str(remote), str(a)],
-                   capture_output=True, env=_GIT_ENV, check=True)
+    subprocess.run(
+        ["git", "clone", "-q", str(remote), str(a)],
+        capture_output=True,
+        env=_GIT_ENV,
+        check=True,
+    )
     base = _commit(a, "chore: base")
     _git(a, "push", "-q", "origin", "main")
 
     b = tmp_path / "B"
-    subprocess.run(["git", "clone", "-q", str(remote), str(b)],
-                   capture_output=True, env=_GIT_ENV, check=True)   # B 는 base 까지만 안다
+    subprocess.run(
+        ["git", "clone", "-q", str(remote), str(b)],
+        capture_output=True,
+        env=_GIT_ENV,
+        check=True,
+    )  # B 는 base 까지만 안다
 
     tip = _commit(a, "chore: pushed by someone else")
     _git(a, "push", "-q", "origin", "main")
-    assert subprocess.run(["git", "-C", str(b), "cat-file", "-e", tip],
-                          capture_output=True, env=_GIT_ENV, check=False).returncode != 0, \
-        "the fixture must leave B without the remote tip"
+    assert (
+        subprocess.run(
+            ["git", "-C", str(b), "cat-file", "-e", tip],
+            capture_output=True,
+            env=_GIT_ENV,
+            check=False,
+        ).returncode
+        != 0
+    ), "the fixture must leave B without the remote tip"
     return b, base, tip
 
 
@@ -212,9 +226,7 @@ def test_unresolvable_sha_in_a_mixed_run_does_not_make_it_undecided(
     assert "could not be judged" in unjudged_line and "deadbeefdead" in unjudged_line
 
 
-def test_single_branch_clone_of_another_branch_still_answers(
-    monkeypatch, tmp_path
-):
+def test_single_branch_clone_of_another_branch_still_answers(monkeypatch, tmp_path):
     # 훅의 사각지대 그 자체: 로컬에 origin/main이 없다. main 클론이면 순수 로컬 구현도
     # 통과하므로 develop을 클론한다.
     remote = _bare(tmp_path, "remote", branch="develop")
@@ -227,9 +239,19 @@ def test_single_branch_clone_of_another_branch_still_answers(
 
     clone = tmp_path / "clone"
     subprocess.run(
-        ["git", "clone", "-q", "--single-branch", "--branch", "develop",
-         str(remote), str(clone)],
-        capture_output=True, env=_GIT_ENV, check=True,
+        [
+            "git",
+            "clone",
+            "-q",
+            "--single-branch",
+            "--branch",
+            "develop",
+            str(remote),
+            str(clone),
+        ],
+        capture_output=True,
+        env=_GIT_ENV,
+        check=True,
     )
     tracking = clone / ".git" / "refs" / "remotes" / "origin" / "main"
     assert not tracking.exists()
@@ -274,7 +296,9 @@ def test_shallow_clone_refuses_before_the_network(monkeypatch, capsys, tmp_path)
     clone = tmp_path / "shallow"
     subprocess.run(
         ["git", "clone", "-q", "--depth", "1", f"file://{remote}", str(clone)],
-        capture_output=True, env=_GIT_ENV, check=True,
+        capture_output=True,
+        env=_GIT_ENV,
+        check=True,
     )
     assert _git(clone, "rev-parse", "--is-shallow-repository") == "true"
     rc = _run(monkeypatch, clone, _short(pub))
@@ -393,8 +417,10 @@ def test_report_is_closed_world_over_verdicts(capsys, n: int):
 
         # 종료 코드: not-on 은 존재 명제, 전부 on 은 전칭 명제.
         expected = (
-            check.EXIT_SOME_NOT_ON if not_on
-            else check.EXIT_UNDECIDED if unjudged
+            check.EXIT_SOME_NOT_ON
+            if not_on
+            else check.EXIT_UNDECIDED
+            if unjudged
             else check.EXIT_ALL_ON
         )
         assert rc == expected, (combo, out)
@@ -409,9 +435,10 @@ def test_report_is_closed_world_over_verdicts(capsys, n: int):
             assert s not in head and lines[1].count(s) == 1, (combo, out)
         assert (len(lines) == 2) == bool(unjudged), (combo, out)
         if unjudged:
-            assert lines[1].startswith(
-                f"  {len(unjudged)} could not be judged: "
-            ), (combo, out)
+            assert lines[1].startswith(f"  {len(unjudged)} could not be judged: "), (
+                combo,
+                out,
+            )
 
         # 어느 판정이든 무엇에 대고 물었는지 말한다 — 보고를 이슈에 붙이면 remote 이름이
         # 없는 줄은 어느 원격에 대한 답인지 구분되지 않는다.
@@ -427,11 +454,14 @@ def test_report_is_closed_world_over_verdicts(capsys, n: int):
         m = re.search(r"\] (\d+) of (\d+) (listed|judged) commits", head)
         assert m, (combo, out)
         numbers = (int(m[1]), int(m[2]), m[3])
-        assert numbers == {
-            check.EXIT_SOME_NOT_ON: (len(not_on), judged, "judged"),
-            check.EXIT_UNDECIDED: (judged, n, "listed"),
-            check.EXIT_ALL_ON: (n, n, "listed"),
-        }[expected], (combo, out)
+        assert (
+            numbers
+            == {
+                check.EXIT_SOME_NOT_ON: (len(not_on), judged, "judged"),
+                check.EXIT_UNDECIDED: (judged, n, "listed"),
+                check.EXIT_ALL_ON: (n, n, "listed"),
+            }[expected]
+        ), (combo, out)
 
 
 # --------------------------------------------------------------------------
@@ -457,8 +487,10 @@ def test_exit_four_states_a_fact_and_exit_five_names_the_shas(
     src, pub, local = _published(tmp_path)
     _run(monkeypatch, src, _short(pub))
     on_out = capsys.readouterr().out
-    assert "are on main/master at origin as of this run" in on_out or \
-           "is on main/master at origin as of this run" in on_out
+    assert (
+        "are on main/master at origin as of this run" in on_out
+        or "is on main/master at origin as of this run" in on_out
+    )
     _run(monkeypatch, src, _short(local))
     assert "as of this run" in capsys.readouterr().out
 
@@ -504,8 +536,9 @@ def test_a_registered_remote_name_is_used_as_given(monkeypatch, capsys, tmp_path
     # `--remote <등록된 이름>` 의 성공 경로 — 규칙이 인용하는 옵션의 정상 사용이다.
     # 등록명을 항상 거부하는 변이는 이 테스트만 잡는다.
     src, pub, _ = _published(tmp_path)
-    assert _run(monkeypatch, src, "--remote", "origin", _short(pub)) == \
-        check.EXIT_ALL_ON
+    assert (
+        _run(monkeypatch, src, "--remote", "origin", _short(pub)) == check.EXIT_ALL_ON
+    )
     assert "on main/master at origin as of this run." in capsys.readouterr().out
 
 
@@ -534,9 +567,7 @@ def test_default_remote_selection(monkeypatch, capsys, tmp_path):
     assert "name one with --remote" not in err
 
 
-def test_unregistered_remote_name_is_caller_error_not_undecided(
-    monkeypatch, tmp_path
-):
+def test_unregistered_remote_name_is_caller_error_not_undecided(monkeypatch, tmp_path):
     # ls-remote 는 오타와 접속 불가에 똑같이 128을 낸다. git 목록과 먼저 대조하지 않으면
     # 에이전트의 오타가 "환경 문제"로 오너에게 보고된다.
     src, pub, _ = _published(tmp_path)
@@ -622,7 +653,8 @@ def test_an_ownership_refusal_reports_both_exit_codes(monkeypatch, capsys, tmp_p
         ["git", "rev-parse", "--is-shallow-repository"],
         cwd=src,
         capture_output=True,
-        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")}, check=False,
+        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+        check=False,
     )
     assert raw.returncode == 128, f"raw git through the wrapper exited {raw.returncode}"
 
@@ -689,13 +721,16 @@ def test_the_runner_isolates_every_git_call(monkeypatch, tmp_path):
 
 def test_the_runner_separates_a_timeout_from_a_failure_to_run(monkeypatch):
     """`run_git` 은 타임아웃에 124, 실행 실패에 127 을 **돌려준다** — 던지지 않는다."""
+
     def _always_raise(exc):
         def _run(_argv, **_kwargs):
             raise exc
+
         return _run
 
     monkeypatch.setattr(
-        check.subprocess, "run",
+        check.subprocess,
+        "run",
         _always_raise(subprocess.TimeoutExpired(cmd=["git"], timeout=1)),
     )
     assert check.run_git(["remote"], timeout=1) == (124, "")
@@ -760,16 +795,22 @@ def _run_git_call_sites() -> list[tuple[str, list[str]]]:
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
-            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            name = (
+                func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            )
             if name != "run_git":
                 continue
-            argv = node.args[0] if node.args else next(
-                (kw.value for kw in node.keywords if kw.arg == "args"), None
+            argv = (
+                node.args[0]
+                if node.args
+                else next((kw.value for kw in node.keywords if kw.arg == "args"), None)
             )
             prefix: list[str] = []
             if isinstance(argv, ast.List):
                 for element in argv.elts:
-                    if isinstance(element, ast.Constant) and isinstance(element.value, str):
+                    if isinstance(element, ast.Constant) and isinstance(
+                        element.value, str
+                    ):
                         prefix.append(element.value)
                     else:
                         break
@@ -801,8 +842,9 @@ def test_every_run_git_call_site_has_exactly_one_cell_in_the_table() -> None:
     )
 
 
-@pytest.mark.parametrize("site,rc,present,absent", _SPAWN_CELLS,
-                         ids=lambda v: str(v).replace(" ", "")[:28])
+@pytest.mark.parametrize(
+    "site,rc,present,absent", _SPAWN_CELLS, ids=lambda v: str(v).replace(" ", "")[:28]
+)
 def test_a_local_git_failure_is_never_reported_as_a_remote_one(
     monkeypatch, capsys, tmp_path, site: str, rc: int, present, absent
 ):
@@ -834,7 +876,9 @@ def test_a_local_git_failure_is_never_reported_as_a_remote_one(
         # 사유 경로에만 건다. (remote 이름이 사유의 낱말과 겹치면 오탐한다 — 픽스처는 `origin`.)
         remotes = _git(src, "remote").splitlines()
         if site in _SPAWN_REASONS:
-            expected = f"{check.TAG} undecided: {_SPAWN_REASONS[site]}; nothing was compared\n"
+            expected = (
+                f"{check.TAG} undecided: {_SPAWN_REASONS[site]}; nothing was compared\n"
+            )
             for name in remotes:
                 assert not re.search(rf"\b{re.escape(name)}\b", out), (
                     f"a spawn-failure reason named the remote {name!r}: {out!r}"
@@ -847,7 +891,9 @@ def test_a_local_git_failure_is_never_reported_as_a_remote_one(
             )
         for phrase in _REMOTE_PHRASES:
             assert phrase not in out, f"a spawn failure blamed the remote: {out!r}"
-        assert out == expected, f"spawn-failure output drifted:\n{out!r}\n!=\n{expected!r}"
+        assert out == expected, (
+            f"spawn-failure output drifted:\n{out!r}\n!=\n{expected!r}"
+        )
         assert err == "", f"a spawn failure wrote to stderr: {err!r}"
     for text in present:
         assert text in out, f"{text!r} missing from: {out!r}"
@@ -954,8 +1000,7 @@ def _local_env_var_names() -> list[str]:
 
 
 def test_no_inherited_git_var_reaches_the_child(monkeypatch, tmp_path):
-    """호출자 환경의 `GIT_*`는 하나도 전달되지 않는다 — 도구가 세우는 것만 남는다.
-    """
+    """호출자 환경의 `GIT_*`는 하나도 전달되지 않는다 — 도구가 세우는 것만 남는다."""
     src, pub, _local = _published(tmp_path)
 
     # 이름 하나를
@@ -989,9 +1034,7 @@ def test_no_inherited_git_var_reaches_the_child(monkeypatch, tmp_path):
         }
 
 
-def test_git_dir_in_the_environment_does_not_move_the_repository(
-    monkeypatch, tmp_path
-):
+def test_git_dir_in_the_environment_does_not_move_the_repository(monkeypatch, tmp_path):
     """다른 저장소를 가리키는 `GIT_DIR`이 있어도 판정 대상은 cwd 저장소다.
 
     판별자: 저 저장소에만 있는 발행된 SHA. 새면 그 저장소 기준으로 on(4)이 나온다.
@@ -1106,7 +1149,9 @@ def _run_git_env_dict() -> ast.Dict:
         if kw.arg == "env"
     ]
     assert len(envs) == 1, f"run_git must pass exactly one env=, found {len(envs)}"
-    assert isinstance(envs[0], ast.Dict), "env= must stay a dict literal this test can read"
+    assert isinstance(envs[0], ast.Dict), (
+        "env= must stay a dict literal this test can read"
+    )
     return envs[0]
 
 

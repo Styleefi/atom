@@ -36,7 +36,11 @@ LOOP = "Review-loop: PR #162 round 1"
 
 def _git(repo: Path, *args: str) -> str:
     result = subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, env=_GIT_ENV, check=True
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        env=_GIT_ENV,
+        check=True,
     )
     return result.stdout.strip()
 
@@ -49,13 +53,17 @@ def _make_repo(tmp_path: Path, with_remote: bool = True) -> Path:
         remote = tmp_path / "remote.git"
         subprocess.run(
             ["git", "init", "-q", "--bare", "-b", "main", str(remote)],
-            capture_output=True, env=_GIT_ENV, check=True,
+            capture_output=True,
+            env=_GIT_ENV,
+            check=True,
         )
         _git(repo, "remote", "add", "origin", str(remote))
     return repo
 
 
-def _commit(repo: Path, subject: str, *trailers: str, files: dict[str, str] | None = None) -> str:
+def _commit(
+    repo: Path, subject: str, *trailers: str, files: dict[str, str] | None = None
+) -> str:
     for name, content in (files or {}).items():
         (repo / name).write_text(content, encoding="utf-8")
         _git(repo, "add", name)
@@ -64,8 +72,15 @@ def _commit(repo: Path, subject: str, *trailers: str, files: dict[str, str] | No
     return _git(repo, "rev-parse", "HEAD")
 
 
-def _run(monkeypatch, repo: Path, command: str = "true", capsys=None) -> tuple[int, str]:
-    payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(repo), "session_id": "s1"}
+def _run(
+    monkeypatch, repo: Path, command: str = "true", capsys=None
+) -> tuple[int, str]:
+    payload = {
+        "tool_name": "Bash",
+        "tool_input": {"command": command},
+        "cwd": str(repo),
+        "session_id": "s1",
+    }
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
     rc = check.main()
     out = capsys.readouterr().out if capsys is not None else ""
@@ -73,7 +88,11 @@ def _run(monkeypatch, repo: Path, command: str = "true", capsys=None) -> tuple[i
 
 
 def _context(out: str) -> str:
-    return json.loads(out)["hookSpecificOutput"]["additionalContext"] if out.strip() else ""
+    return (
+        json.loads(out)["hookSpecificOutput"]["additionalContext"]
+        if out.strip()
+        else ""
+    )
 
 
 def _ledger(tmp_path: Path) -> list[dict]:
@@ -96,7 +115,11 @@ def _baseline(monkeypatch, tmp_path: Path, **kwargs) -> Path:
 
 def _sign_commits(repo: Path) -> None:
     key = repo.parent / "signing-key"
-    subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True, capture_output=True)
+    subprocess.run(
+        ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)],
+        check=True,
+        capture_output=True,
+    )
     allowed = repo.parent / "allowed-signers"
     allowed.write_text("t@t " + key.with_suffix(".pub").read_text(), encoding="utf-8")
     for name, value in [
@@ -109,17 +132,32 @@ def _sign_commits(repo: Path) -> None:
         _git(repo, "config", name, value)
 
 
-@pytest.mark.skipif(shutil.which("ssh-keygen") is None, reason="ssh-keygen not installed")
-def test_signed_commits_with_signature_display_are_read_cleanly(monkeypatch, tmp_path, capsys) -> None:
+@pytest.mark.skipif(
+    shutil.which("ssh-keygen") is None, reason="ssh-keygen not installed"
+)
+def test_signed_commits_with_signature_display_are_read_cleanly(
+    monkeypatch, tmp_path, capsys
+) -> None:
     repo = _baseline(monkeypatch, tmp_path)
     _sign_commits(repo)
     _commit(repo, "feat: plain signed commit")
     assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
-    _commit(repo, "feat: signed loop commit", LOOP, "Prose: none", files={"m.py": "x = 1\n"})
+    _commit(
+        repo, "feat: signed loop commit", LOOP, "Prose: none", files={"m.py": "x = 1\n"}
+    )
     assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
-    sha = _commit(repo, "docs: signed and new prose", LOOP, "Prose: none", files={"a.md": "A brand new sentence lands here.\n"})
+    sha = _commit(
+        repo,
+        "docs: signed and new prose",
+        LOOP,
+        "Prose: none",
+        files={"a.md": "A brand new sentence lands here.\n"},
+    )
     _, out = _run(monkeypatch, repo, "git commit -m x", capsys)
-    assert _context(out) == f"{check.TAG} {sha[:7]}: {check.REASON_NONE_WITH_NEW_PROSE} — see {check.RULE_PATH}"
+    assert (
+        _context(out)
+        == f"{check.TAG} {sha[:7]}: {check.REASON_NONE_WITH_NEW_PROSE} — see {check.RULE_PATH}"
+    )
 
 
 def test_first_observation_records_only(monkeypatch, tmp_path, capsys) -> None:
@@ -137,7 +175,9 @@ def test_compliant_loop_commit_is_silent(monkeypatch, tmp_path, capsys) -> None:
     assert _ledger(tmp_path) == []
 
 
-def test_missing_prose_trailer_is_reported_by_sha_only(monkeypatch, tmp_path, capsys) -> None:
+def test_missing_prose_trailer_is_reported_by_sha_only(
+    monkeypatch, tmp_path, capsys
+) -> None:
     repo = _baseline(monkeypatch, tmp_path)
     sha = _commit(repo, "feat: secret subject", LOOP)
     rc, out = _run(monkeypatch, repo, "git commit -m x", capsys)
@@ -147,35 +187,64 @@ def test_missing_prose_trailer_is_reported_by_sha_only(monkeypatch, tmp_path, ca
     assert "secret subject" not in context and "PR #162" not in context
     [entry] = _ledger(tmp_path)
     assert (entry["event"], entry["harness"], entry["reason"], entry["command"]) == (
-        "report", check.HARNESS_ID, check.REASON_MISSING_PROSE, None
+        "report",
+        check.HARNESS_ID,
+        check.REASON_MISSING_PROSE,
+        None,
     )
 
 
 def test_malformed_values_are_reported(monkeypatch, tmp_path, capsys) -> None:
     repo = _baseline(monkeypatch, tmp_path)
-    sha = _commit(repo, "feat: x", "Review-loop: PR #? round 0", "Prose: 1 new; attacked twice")
+    sha = _commit(
+        repo, "feat: x", "Review-loop: PR #? round 0", "Prose: 1 new; attacked twice"
+    )
     _, out = _run(monkeypatch, repo, "git commit -m x", capsys)
-    assert f"{sha[:7]}: {check.REASON_MALFORMED_REVIEW_LOOP}+{check.REASON_MALFORMED_PROSE}" in _context(out)
+    assert (
+        f"{sha[:7]}: {check.REASON_MALFORMED_REVIEW_LOOP}+{check.REASON_MALFORMED_PROSE}"
+        in _context(out)
+    )
 
 
 def test_none_with_new_prose_is_reported(monkeypatch, tmp_path, capsys) -> None:
     repo = _baseline(monkeypatch, tmp_path)
-    sha = _commit(repo, "docs: x", LOOP, "Prose: none", files={"a.md": "A brand new sentence lands here.\n"})
+    sha = _commit(
+        repo,
+        "docs: x",
+        LOOP,
+        "Prose: none",
+        files={"a.md": "A brand new sentence lands here.\n"},
+    )
     _, out = _run(monkeypatch, repo, "git commit -m x", capsys)
-    assert _context(out).startswith(f"{check.TAG} {sha[:7]}: {check.REASON_NONE_WITH_NEW_PROSE}")
+    assert _context(out).startswith(
+        f"{check.TAG} {sha[:7]}: {check.REASON_NONE_WITH_NEW_PROSE}"
+    )
 
 
 def test_attacked_with_new_prose_is_silent(monkeypatch, tmp_path, capsys) -> None:
     repo = _baseline(monkeypatch, tmp_path)
-    _commit(repo, "docs: x", LOOP, "Prose: attacked", files={"a.md": "A brand new sentence lands here.\n"})
+    _commit(
+        repo,
+        "docs: x",
+        LOOP,
+        "Prose: attacked",
+        files={"a.md": "A brand new sentence lands here.\n"},
+    )
     assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
 
 
-def test_missing_prose_still_runs_the_prose_check(monkeypatch, tmp_path, capsys) -> None:
+def test_missing_prose_still_runs_the_prose_check(
+    monkeypatch, tmp_path, capsys
+) -> None:
     repo = _baseline(monkeypatch, tmp_path)
-    sha = _commit(repo, "docs: x", LOOP, files={"a.md": "A brand new sentence lands here.\n"})
+    sha = _commit(
+        repo, "docs: x", LOOP, files={"a.md": "A brand new sentence lands here.\n"}
+    )
     _, out = _run(monkeypatch, repo, "git commit -m x", capsys)
-    assert f"{sha[:7]}: {check.REASON_MISSING_PROSE}+{check.REASON_NONE_WITH_NEW_PROSE}" in _context(out)
+    assert (
+        f"{sha[:7]}: {check.REASON_MISSING_PROSE}+{check.REASON_NONE_WITH_NEW_PROSE}"
+        in _context(out)
+    )
     assert [entry["reason"] for entry in _ledger(tmp_path)] == [
         check.REASON_MISSING_PROSE,
         check.REASON_NONE_WITH_NEW_PROSE,
@@ -184,35 +253,69 @@ def test_missing_prose_still_runs_the_prose_check(monkeypatch, tmp_path, capsys)
 
 def test_body_beyond_trailers_is_reported(monkeypatch, tmp_path, capsys) -> None:
     repo = _baseline(monkeypatch, tmp_path)
-    _git(repo, "commit", "-q", "--allow-empty", "-m", "feat: x\n\nWhy this change.\n\n" + LOOP + "\nProse: none\n")
+    _git(
+        repo,
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "feat: x\n\nWhy this change.\n\n" + LOOP + "\nProse: none\n",
+    )
     sha = _git(repo, "rev-parse", "HEAD")
     _, out = _run(monkeypatch, repo, "git commit -m x", capsys)
     assert f"{sha[:7]}: {check.REASON_BODY_BEYOND_TRAILERS}" in _context(out)
 
 
-def test_trailers_outside_the_last_paragraph_are_outside_reach(monkeypatch, tmp_path, capsys) -> None:
+def test_trailers_outside_the_last_paragraph_are_outside_reach(
+    monkeypatch, tmp_path, capsys
+) -> None:
     repo = _baseline(monkeypatch, tmp_path)
-    _git(repo, "commit", "-q", "--allow-empty", "-m", "feat: x\n\n" + LOOP + "\nProse: none\n\nCo-Authored-By: A <a@b>\nClaude-Session: https://x\n")
+    _git(
+        repo,
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "feat: x\n\n"
+        + LOOP
+        + "\nProse: none\n\nCo-Authored-By: A <a@b>\nClaude-Session: https://x\n",
+    )
     assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
 
 
-def test_body_that_quotes_the_trailer_format_is_not_a_loop_commit(monkeypatch, tmp_path, capsys) -> None:
+def test_body_that_quotes_the_trailer_format_is_not_a_loop_commit(
+    monkeypatch, tmp_path, capsys
+) -> None:
     repo = _baseline(monkeypatch, tmp_path)
-    _git(repo, "commit", "-q", "--allow-empty", "-m", "docs: explain the trailers\n\nEvery loop commit ends with a block like this one.\n\nReview-loop: PR #<n> round <k>\nProse: none\n\nCo-Authored-By: A <a@b>\n")
+    _git(
+        repo,
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "docs: explain the trailers\n\nEvery loop commit ends with a block like this one.\n\nReview-loop: PR #<n> round <k>\nProse: none\n\nCo-Authored-By: A <a@b>\n",
+    )
     assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
 
 
-def test_first_observation_of_a_worktree_checks_its_branch(monkeypatch, tmp_path, capsys) -> None:
+def test_first_observation_of_a_worktree_checks_its_branch(
+    monkeypatch, tmp_path, capsys
+) -> None:
     repo = _baseline(monkeypatch, tmp_path)
     worktree = tmp_path / "wt"
     _git(repo, "worktree", "add", "-q", "-b", "feat/wt", str(worktree))
     sha = _commit(worktree, "feat: first call in the worktree", LOOP)
     _, out = _run(monkeypatch, worktree, "git commit -m x", capsys)
-    assert _context(out) == f"{check.TAG} {sha[:7]}: {check.REASON_MISSING_PROSE} — see {check.RULE_PATH}"
+    assert (
+        _context(out)
+        == f"{check.TAG} {sha[:7]}: {check.REASON_MISSING_PROSE} — see {check.RULE_PATH}"
+    )
     assert _run(monkeypatch, worktree, "git commit -m x", capsys) == (0, "")
 
 
-def test_lost_state_file_rechecks_only_unmerged_commits_once(monkeypatch, tmp_path, capsys) -> None:
+def test_lost_state_file_rechecks_only_unmerged_commits_once(
+    monkeypatch, tmp_path, capsys
+) -> None:
     repo = _baseline(monkeypatch, tmp_path)
     sha = _commit(repo, "feat: x", LOOP)
     _, out = _run(monkeypatch, repo, "git commit -m x", capsys)
@@ -223,7 +326,9 @@ def test_lost_state_file_rechecks_only_unmerged_commits_once(monkeypatch, tmp_pa
     assert _run(monkeypatch, repo, "ls", capsys) == (0, "")
 
 
-def test_first_observation_on_main_checks_nothing(monkeypatch, tmp_path, capsys) -> None:
+def test_first_observation_on_main_checks_nothing(
+    monkeypatch, tmp_path, capsys
+) -> None:
     repo = _make_repo(tmp_path)
     _commit(repo, "chore: init")
     _commit(repo, "feat: on main", LOOP)
@@ -241,25 +346,40 @@ def test_upstream_commits_merged_in_are_ignored(monkeypatch, tmp_path, capsys) -
     _commit(repo, "feat: first", LOOP, "Prose: none")
     assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
     _git(repo, "checkout", "-q", "main")
-    _commit(repo, "feat: upstream work", files={"u.md": "Upstream prose without trailers.\n"})
+    _commit(
+        repo,
+        "feat: upstream work",
+        files={"u.md": "Upstream prose without trailers.\n"},
+    )
     _git(repo, "push", "-q", "origin", "main")
     _git(repo, "checkout", "-q", "feat/x")
     _git(repo, "merge", "-q", "--no-edit", "main")
     assert _run(monkeypatch, repo, "git merge main", capsys) == (0, "")
 
 
-def test_trailer_less_commit_is_ignored_even_on_a_loop_branch(monkeypatch, tmp_path, capsys) -> None:
+def test_trailer_less_commit_is_ignored_even_on_a_loop_branch(
+    monkeypatch, tmp_path, capsys
+) -> None:
     repo = _baseline(monkeypatch, tmp_path)
     _commit(repo, "feat: first", LOOP, "Prose: none")
     assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
-    _commit(repo, "feat: forgot the trailers", files={"a.md": "Prose without any trailer at all.\n"})
+    _commit(
+        repo,
+        "feat: forgot the trailers",
+        files={"a.md": "Prose without any trailer at all.\n"},
+    )
     assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
 
 
-def test_blank_review_loop_value_is_reported_as_malformed(monkeypatch, tmp_path, capsys) -> None:
+def test_blank_review_loop_value_is_reported_as_malformed(
+    monkeypatch, tmp_path, capsys
+) -> None:
     repo = _baseline(monkeypatch, tmp_path)
     sha = _commit(repo, "feat: blank", "Review-loop:", "Prose: none")
-    assert _git(repo, "log", "-1", "--format=%(trailers:key=Review-loop)") == "Review-loop:"
+    assert (
+        _git(repo, "log", "-1", "--format=%(trailers:key=Review-loop)")
+        == "Review-loop:"
+    )
     _, out = _run(monkeypatch, repo, "git commit -m x", capsys)
     assert f"{sha[:7]}: {check.REASON_MALFORMED_REVIEW_LOOP}" in _context(out)
 
@@ -275,7 +395,9 @@ def test_each_sha_is_reported_once(monkeypatch, tmp_path, capsys) -> None:
     assert _run(monkeypatch, repo, capsys=capsys) == (0, "")
 
 
-def test_commit_and_push_in_one_call_is_still_checked(monkeypatch, tmp_path, capsys) -> None:
+def test_commit_and_push_in_one_call_is_still_checked(
+    monkeypatch, tmp_path, capsys
+) -> None:
     repo = _baseline(monkeypatch, tmp_path)
     sha = _commit(repo, "feat: x", LOOP)
     _git(repo, "push", "-q", "-u", "origin", "feat/x")
@@ -304,13 +426,17 @@ def test_malformed_stdin_fails_open(monkeypatch, capsys) -> None:
     assert check.TAG in capsys.readouterr().err
 
 
-def test_corrupt_state_file_starts_over_without_blocking(monkeypatch, tmp_path, capsys) -> None:
+def test_corrupt_state_file_starts_over_without_blocking(
+    monkeypatch, tmp_path, capsys
+) -> None:
     repo = _baseline(monkeypatch, tmp_path)
     (repo / ".git" / check.STATE_FILENAME).write_text("{not json", encoding="utf-8")
     sha = _commit(repo, "feat: x", LOOP)
     rc, out = _run(monkeypatch, repo, "git commit -m x", capsys)
     assert rc == 0 and sha[:7] in _context(out)
-    assert json.loads((repo / ".git" / check.STATE_FILENAME).read_text())["checked"] == [sha]
+    assert json.loads((repo / ".git" / check.STATE_FILENAME).read_text())[
+        "checked"
+    ] == [sha]
 
 
 def test_lost_old_object_rebaselines(monkeypatch, tmp_path, capsys) -> None:
@@ -321,10 +447,14 @@ def test_lost_old_object_rebaselines(monkeypatch, tmp_path, capsys) -> None:
     path.write_text(json.dumps(state), encoding="utf-8")
     _commit(repo, "feat: x", LOOP)
     assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
-    assert list(json.loads(path.read_text())["heads"].values()) == [_git(repo, "rev-parse", "HEAD")]
+    assert list(json.loads(path.read_text())["heads"].values()) == [
+        _git(repo, "rev-parse", "HEAD")
+    ]
 
 
 def test_run_never_exits_two(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(check, "main", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(
+        check, "main", lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
     assert check.run() == 1
     assert check.TAG in capsys.readouterr().err

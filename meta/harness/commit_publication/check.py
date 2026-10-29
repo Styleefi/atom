@@ -171,7 +171,8 @@ def run_git(args: list[str], *, timeout: int) -> tuple[int, str]:
                 "SSH_ASKPASS": "/bin/false",
                 "SSH_ASKPASS_REQUIRE": "force",
             },
-            timeout=timeout, check=False,
+            timeout=timeout,
+            check=False,
         )
     except subprocess.TimeoutExpired:
         return 124, ""

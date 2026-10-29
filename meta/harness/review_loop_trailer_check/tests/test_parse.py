@@ -78,7 +78,13 @@ def test_prose_accepts_the_two_values(value: str) -> None:
 @pytest.mark.parametrize(
     "value",
     REAL_PROSE_OLD_FORMAT
-    + ["None", "attacked twice", "attacked by fresh Opus subagent", "", "none; attacked"],
+    + [
+        "None",
+        "attacked twice",
+        "attacked by fresh Opus subagent",
+        "",
+        "none; attacked",
+    ],
 )
 def test_prose_rejects_the_old_format_and_variants(value: str) -> None:
     assert parse_prose(value) is None
