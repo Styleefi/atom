@@ -1,4 +1,4 @@
-# GitLab mirror of .github/workflows/harness.yml — same two checks, GitLab CI idiom.
+# GitLab mirror of .github/workflows/harness.yml — same checks, GitLab CI idiom.
 # Each forge reads only its own file, so children get CI on clone regardless of host.
 workflow:
   rules:
@@ -20,3 +20,5 @@ harness:
     - uv sync --locked --directory meta
     - uv run --directory meta pytest
     - uv run --directory meta python -m harness.rules_checker
+    - uv run --directory meta ruff check
+    - uv run --directory meta ruff format --check

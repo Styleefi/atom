@@ -21,6 +21,8 @@ harness:
     - uv sync --locked --directory meta
     - uv run --directory meta pytest
     - uv run --directory meta python -m harness.rules_checker
+    - uv run --directory meta ruff check
+    - uv run --directory meta ruff format --check
 """
 
 GITHUB_OK = """\
@@ -36,6 +38,8 @@ jobs:
       - run: uv sync --locked --directory meta
       - run: uv run --directory meta pytest
       - run: uv run --directory meta python -m harness.rules_checker
+      - run: uv run --directory meta ruff check
+      - run: uv run --directory meta ruff format --check
 """
 
 PY_VERSION = "3.14\n"
@@ -77,7 +81,7 @@ def test_mapping_image_forms_pass():
 
 
 def test_multiline_run_block_normalizes():
-    """GitHub의 run: | 블록 1개(주석·빈 줄 포함)와 GitLab 항목 3개는 동등하다."""
+    """GitHub의 run: | 블록 1개(주석·빈 줄 포함)와 GitLab 항목 5개는 동등하다."""
     github = """\
 jobs:
   harness:
@@ -90,6 +94,8 @@ jobs:
 
           uv run --directory meta pytest
           uv run --directory meta python -m harness.rules_checker
+          uv run --directory meta ruff check
+          uv run --directory meta ruff format --check
 """
     assert check(github=github) == []
 

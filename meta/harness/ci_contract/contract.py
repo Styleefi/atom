@@ -49,6 +49,8 @@ CANONICAL_COMMANDS = [
     "uv sync --locked --directory meta",
     "uv run --directory meta pytest",
     "uv run --directory meta python -m harness.rules_checker",
+    "uv run --directory meta ruff check",
+    "uv run --directory meta ruff format --check",
 ]
 
 
@@ -279,7 +281,7 @@ def normalize_commands(blocks: list[str]) -> list[str]:
     """run/script 블록들을 비교 가능한 명령 시퀀스로 정규화한다.
 
     멀티라인 블록은 개행으로 분할하고 각 행을 strip하며, 빈 행과 셸 주석
-    행(``#`` 시작)은 버린다 — GitLab의 항목 3개와 GitHub의 ``run: |`` 블록
+    행(``#`` 시작)은 버린다 — GitLab의 항목들과 GitHub의 ``run: |`` 블록
     1개가 같은 파이프라인으로 인정된다. 행 내부 공백은 건드리지 않는다.
     인용부호 안 공백 차이는 실제 의미 차이이기 때문이다.
 
