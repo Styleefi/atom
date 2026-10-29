@@ -44,6 +44,7 @@ def _record(**overrides) -> None:
 
 # ---------- 기본 기록 ----------
 
+
 def test_writes_one_line_with_expected_fields(tmp_path: Path) -> None:
     _record()
 
@@ -96,6 +97,7 @@ def test_override_event_carries_null_reason(tmp_path: Path) -> None:
 
 # ---------- 경로 해석 ----------
 
+
 @pytest.mark.parametrize(
     ("raw", "label"),
     [(None, "unset"), ("", "empty"), ("relative/state", "relative")],
@@ -130,6 +132,7 @@ def test_absolute_xdg_state_home_is_honored(
 
 # ---------- 권한 ----------
 
+
 def test_created_file_and_directory_are_owner_only(tmp_path: Path) -> None:
     # 원장은 명령 원문을 담는다 — 복합 명령이면 비밀이 섞일 수 있다.
     _record()
@@ -141,8 +144,9 @@ def test_created_file_and_directory_are_owner_only(tmp_path: Path) -> None:
 
 # ---------- 직렬화 ----------
 
+
 def test_multiline_and_unicode_command_stays_one_line(tmp_path: Path) -> None:
-    command = 'git commit -m "제목\n\n본문 \'따옴표\' 그리고 \\백슬래시"'
+    command = "git commit -m \"제목\n\n본문 '따옴표' 그리고 \\백슬래시\""
     _record(command=command)
 
     raw = _ledger(tmp_path).read_text(encoding="utf-8")
@@ -173,6 +177,7 @@ def test_short_writes_still_produce_a_complete_line(
 
 # ---------- 출처 판별 ----------
 
+
 @pytest.mark.parametrize("hooked", [True, False])
 def test_hooked_reflects_claude_project_dir(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, hooked: bool
@@ -190,6 +195,7 @@ def test_hooked_reflects_claude_project_dir(
 
 
 # ---------- 후보 번호 ----------
+
 
 def test_candidates_record_numbers_only(tmp_path: Path) -> None:
     # 제목 원문은 제3자가 쓴 텍스트라 원장의 인젝션 표면을 넓힌다 — 번호만 남긴다.
@@ -227,6 +233,7 @@ def test_candidate_extraction_failure_keeps_the_line(tmp_path: Path) -> None:
 
 
 # ---------- fail-open ----------
+
 
 def test_open_failure_is_swallowed(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path

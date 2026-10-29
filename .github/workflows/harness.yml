@@ -19,3 +19,5 @@ jobs:
       - run: uv sync --locked --directory meta
       - run: uv run --directory meta pytest
       - run: uv run --directory meta python -m harness.rules_checker
+      - run: uv run --directory meta ruff check
+      - run: uv run --directory meta ruff format --check

@@ -12,6 +12,7 @@ Scope: Python code under `meta/` (harnesses etc.) in atom and its child projects
 - Python >= 3.12 (pinned via `requires-python` in `meta/pyproject.toml`)
 - Environment: **uv**, with `meta/` as a self-contained uv project (own `pyproject.toml`, committed `uv.lock`, own `.venv`). The meta environment is fully isolated from the product environment, so meta and product dependency versions (e.g. pytest) can never conflict.
 - Run: `uv run --directory meta pytest` / `uv run --directory meta python -m harness.rules_checker`
+- Lint/format: ruff, pinned `0.17.*` in `meta/pyproject.toml`, default rule set; run `uv run --directory meta ruff check` / `uv run --directory meta ruff format --check` (CI runs both)
 - Tests: pytest; every harness ships its own `tests/` package (with `__init__.py` to avoid cross-harness module-name collisions)
 - Docstrings: Google style, written in Korean (code identifiers stay English)
-- Dependencies: stdlib first, keep minimal; floors at the current major (e.g. `pytest>=9.0`)
+- Dependencies: stdlib first, keep minimal; floors at the current major (e.g. `pytest>=9.0`); ruff is the exception, pinned `0.17.*` (above), because a floor would let a minor release change the default rule set

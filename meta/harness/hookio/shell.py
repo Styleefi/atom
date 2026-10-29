@@ -25,10 +25,29 @@ OPERATORS = {"&&", "||", "|", ";", ";;", "&", "(", ")"}
 # 선두에서만 건너뛰고, 인자 위치의 같은 단어는 평범한 토큰이다 — `echo then gh
 # issue create`가 걸리면 안 된다). `[[`는 넣지 않는다. 뒤에 오는 것은 명령이
 # 아니라 조건식이다.
-KEYWORDS = frozenset({
-    "if", "then", "elif", "else", "fi", "while", "until", "for", "select",
-    "do", "done", "case", "esac", "function", "time", "coproc", "{", "}", "!",
-})
+KEYWORDS = frozenset(
+    {
+        "if",
+        "then",
+        "elif",
+        "else",
+        "fi",
+        "while",
+        "until",
+        "for",
+        "select",
+        "do",
+        "done",
+        "case",
+        "esac",
+        "function",
+        "time",
+        "coproc",
+        "{",
+        "}",
+        "!",
+    }
+)
 
 # 결합 연산자 토큰 판정용 문자군. shlex는 인접 문장부호를 한 토큰으로 묶으므로
 # `((x));`가 `));`라는 토큰을 낳고, OPERATORS 정확 일치로는 경계가 되지 않는다.
@@ -48,7 +67,6 @@ _SEPARATOR_CHARS = frozenset(";&|")
 # 인용 표식 복원용 센티널. bash 명령 문자열은 NUL을 담을 수 없으므로(execve 인자가
 # NUL 종료) 실제 입력과 충돌하지 않는다. 그래도 입력에 있으면 판별을 포기한다.
 _ESCAPE_SENTINEL = "\x00"
-
 
 
 def tokenize(text: str) -> list[str]:
@@ -143,8 +161,10 @@ def protected_flags(text: str, count: int) -> list[bool] | None:
         return None
     if len(raw_tokens) != count:
         return None
-    return [bool(token) and (token[0] in "\"'" or _ESCAPE_SENTINEL in token)
-            for token in raw_tokens]
+    return [
+        bool(token) and (token[0] in "\"'" or _ESCAPE_SENTINEL in token)
+        for token in raw_tokens
+    ]
 
 
 def is_operator(token: str) -> bool:
@@ -161,13 +181,10 @@ def is_operator(token: str) -> bool:
         return True
     if not token or not all(c in _OPERATOR_CHARS for c in token):
         return False
-    return (any(c in _SEPARATOR_CHARS for c in token)
-            and any(c in "()" for c in token))
+    return any(c in _SEPARATOR_CHARS for c in token) and any(c in "()" for c in token)
 
 
-def split_segments(
-    tokens: list[str], protected: list[bool] | None
-) -> list[list[str]]:
+def split_segments(tokens: list[str], protected: list[bool] | None) -> list[list[str]]:
     """토큰을 명령 세그먼트로 나눈다.
 
     보호된 토큰은 연산자도 예약어도 아니다 — bash에서 따옴표 안이나 백슬래시

@@ -37,9 +37,12 @@ def _bash_payload(command: str, cwd: str | None = None) -> dict:
 
 # ---------- 감지: 오탐 방지 ----------
 
+
 def test_quoted_mention_with_operator_is_not_detected() -> None:
     # 따옴표 안 연산자 포함 — 이번 작업 커밋 메시지 같은 형태가 절대 걸리면 안 됨
-    assert guard.detect_invocations('git commit -m "fix && gh issue create guard"') == []
+    assert (
+        guard.detect_invocations('git commit -m "fix && gh issue create guard"') == []
+    )
 
 
 def test_argument_position_literal_is_not_detected() -> None:
@@ -118,20 +121,21 @@ def test_real_heredoc_inside_command_substitution_in_arith() -> None:
 def test_strip_heredocs_reports_completion() -> None:
     # 완결 플래그는 줄 연속 결합을 켜는 스위치다 — 코퍼스는 최종 감지 결과만
     # 보므로 플래그 의미가 뒤집혀도 우연히 같은 결과가 나오면 안 잡힌다
-    text, complete = guard._strip_heredocs('cat <<EOF\nbody\nEOF')
+    text, complete = guard._strip_heredocs("cat <<EOF\nbody\nEOF")
     assert complete is True
     assert "body" not in text
 
 
 def test_strip_heredocs_reports_rollback_on_unterminated() -> None:
     # 미종결 heredoc은 all-or-nothing 롤백 — 원문 그대로, 완결 아님
-    cmd = 'cat <<EOF\nbody'
+    cmd = "cat <<EOF\nbody"
     text, complete = guard._strip_heredocs(cmd)
     assert complete is False
     assert text == cmd
 
 
 # ---------- 감지: 잡아야 하는 형태 ----------
+
 
 def test_heredoc_fed_create_is_still_detected() -> None:
     # 마커 라인 자체는 보존된다 — heredoc으로 body를 먹이는 실제 생성은 감지
@@ -280,31 +284,43 @@ def test_cd_behind_brace_is_not_latched_when_marks_misalign() -> None:
     # 알려진 한계(#104 측정 S1457, #209): 같은 줄의 낱말 중간 큰따옴표가 인용 표식
     # 정렬을 깨면 `{`·`then`이 세그먼트에 남아 _changes_directory가 `cd`를 놓친다.
     # 검색은 페이로드 cwd에서 돈다. 정렬이 멀쩡하면 래치가 선다.
-    for cmd in ('{ cd /x; }; echo a"b c"d; gh issue create -t T',
-                'if true; then cd /x; fi; echo a"b c"d; gh issue create -t T'):
+    for cmd in (
+        '{ cd /x; }; echo a"b c"d; gh issue create -t T',
+        'if true; then cd /x; fi; echo a"b c"d; gh issue create -t T',
+    ):
         invs = guard.detect_invocations(cmd)
         assert len(invs) == 1 and invs[0].cwd_unsafe is False, cmd
-    for cmd in ('{ cd /x; }; gh issue create -t T',
-                'if true; then cd /x; fi; gh issue create -t T'):
+    for cmd in (
+        "{ cd /x; }; gh issue create -t T",
+        "if true; then cd /x; fi; gh issue create -t T",
+    ):
         control = guard.detect_invocations(cmd)
         assert len(control) == 1 and control[0].cwd_unsafe is True, cmd
 
 
 def test_override_prefix_alone_and_in_compound() -> None:
-    assert guard.detect_invocations(f"{guard.OVERRIDE_TOKEN} gh issue create -t x")[0].override
-    invs = guard.detect_invocations(f"cd y && {guard.OVERRIDE_TOKEN} gh issue create -t x")
+    assert guard.detect_invocations(f"{guard.OVERRIDE_TOKEN} gh issue create -t x")[
+        0
+    ].override
+    invs = guard.detect_invocations(
+        f"cd y && {guard.OVERRIDE_TOKEN} gh issue create -t x"
+    )
     assert invs[0].override
 
 
 def test_unparseable_command_fails_open() -> None:
     # shlex 이중 실패(따옴표 불균형)는 전면 fail-open — 규칙 파일의 계약
     # "unparseable command fails open"을 코드가 그대로 이행한다 (#32 괴리 2)
-    assert guard.detect_invocations('gh issue create --title "T" --body "unclosed') == []
+    assert (
+        guard.detect_invocations('gh issue create --title "T" --body "unclosed') == []
+    )
 
 
 def test_quoted_mention_in_unparseable_command_is_not_detected() -> None:
     # 구 폴백의 오차단 재현 케이스: 따옴표 속 언급이 절대 걸리면 안 됨
-    assert guard.detect_invocations('echo "todo; gh issue create for tracker later') == []
+    assert (
+        guard.detect_invocations('echo "todo; gh issue create for tracker later') == []
+    )
 
 
 def test_comment_with_unbalanced_quote_fails_open(monkeypatch) -> None:
@@ -325,87 +341,145 @@ def test_comment_with_unbalanced_quote_fails_open(monkeypatch) -> None:
 # 만든다. 형식: (설명, 명령, 기대 감지 제목 튜플).
 
 _ORACLE_CORPUS = [
-    ("톱레벨 cmdsub 안 bare 산술 명령 — bash: create 실행됨",
-     'echo $( echo foo ; (( x = 1 << 2 )) )\ngh issue create --title "T"\n2',
-     ("T",)),
-    ("cmdsub 안 인용된 닫는 괄호는 프레임을 닫지 않음 — bash: create 실행됨",
-     'echo $(( $(echo ")") + 1 << 2 ))\ngh issue create --title "T"\n2',
-     ("T",)),
-    ("이스케이프된 닫는 중괄호는 확장을 닫지 않음 — bash: create 실행됨",
-     'echo ${var:-\\}} ; (( 1<<2 ))\ngh issue create --title "T"\n2',
-     ("T",)),
-    ("brace 확장 안 unquoted 닫는 괄호는 리터럴 — bash: 출력 ')', create 실행됨",
-     'echo ${x:- ) } $(( 1 << 2 ))\ngh issue create --title "T"\n2',
-     ("T",)),
+    (
+        "톱레벨 cmdsub 안 bare 산술 명령 — bash: create 실행됨",
+        'echo $( echo foo ; (( x = 1 << 2 )) )\ngh issue create --title "T"\n2',
+        ("T",),
+    ),
+    (
+        "cmdsub 안 인용된 닫는 괄호는 프레임을 닫지 않음 — bash: create 실행됨",
+        'echo $(( $(echo ")") + 1 << 2 ))\ngh issue create --title "T"\n2',
+        ("T",),
+    ),
+    (
+        "이스케이프된 닫는 중괄호는 확장을 닫지 않음 — bash: create 실행됨",
+        'echo ${var:-\\}} ; (( 1<<2 ))\ngh issue create --title "T"\n2',
+        ("T",),
+    ),
+    (
+        "brace 확장 안 unquoted 닫는 괄호는 리터럴 — bash: 출력 ')', create 실행됨",
+        'echo ${x:- ) } $(( 1 << 2 ))\ngh issue create --title "T"\n2',
+        ("T",),
+    ),
     # --- 이하 수정 라운드 4 red 승격분 (bash 오라클 실측 병기) ---
-    ("K2: 큰따옴표 안 산술 확장은 활성 — bash: create 실행됨 (관용 입력)",
-     'echo "count: $((1<<2))"\ngh issue create --title "T"\n2',
-     ("T",)),
-    ("K1b: brace 안 cmdsub의 진짜 heredoc — bash: create 미실행 (본문)",
-     'echo $(( ${x:-$(cat <<EOF)} + 1 ))\ngh issue create --title "T"\nEOF',
-     ()),
-    ("K1a: 4중 중첩형 동형 — bash: create 미실행 (본문)",
-     'echo $(( $(echo $(( ${x:-$(cat <<EOF)} + 1 ))) + 1 ))\ngh issue create --title "T"\nEOF',
-     ()),
-    ("K3: cmdsub 직속 bare 산술 명령 — bash: create 실행됨",
-     'echo $(( $( ((y=1<<2)); echo $y ) ))\ngh issue create --title "T"\n2',
-     ("T",)),
-    ("F3in: plain 개재 cmdsub 안 bare 산술 — bash: create 실행됨",
-     'echo $(( $( ( ((y=1<<2)) ) ) ))\ngh issue create --title "T"\n2',
-     ("T",)),
-    ("F4q: 큰따옴표 안 cmdsub의 명령 문맥 리셋 — bash: create 실행됨",
-     'echo "$( (( x = 1 << 2 )); echo $x )"\ngh issue create --title "T"\n2',
-     ("T",)),
-    ("F4b: brace 안 cmdsub의 명령 문맥 리셋 — bash: create 실행됨",
-     'echo ${var:-$( ((1<<2)) )}\ngh issue create --title "T"\n2',
-     ("T",)),
-    ("brace 안 산술 확장은 활성 — bash: create 실행됨",
-     'echo ${x:-$((1<<2))}\ngh issue create --title "T"\n2',
-     ("T",)),
-    ("P1: 백틱 안 중첩 산술 마스킹 (uniform cmdsub) — bash: 출력 5, create 실행됨",
-     'echo $(( `echo $((1<<2))` + 1 ))\ngh issue create --title "T"\n2',
-     ("T",)),
-    ("SL1: cmdsub pop 후 바깥 큰따옴표 복원 — bash: 출력 'A B ...', create 실행됨",
-     'echo "A $(echo "B") C $(( 1 << 2 ))"\ngh issue create --title "T"\n2',
-     ("T",)),
-    ("SL2: brace 안 중첩 큰따옴표의 독립 인용+복원 — bash: create 실행됨",
-     'echo "${x:-" ) "} $(( 1 << 2 ))"\ngh issue create --title "T"\n2',
-     ("T",)),
+    (
+        "K2: 큰따옴표 안 산술 확장은 활성 — bash: create 실행됨 (관용 입력)",
+        'echo "count: $((1<<2))"\ngh issue create --title "T"\n2',
+        ("T",),
+    ),
+    (
+        "K1b: brace 안 cmdsub의 진짜 heredoc — bash: create 미실행 (본문)",
+        'echo $(( ${x:-$(cat <<EOF)} + 1 ))\ngh issue create --title "T"\nEOF',
+        (),
+    ),
+    (
+        "K1a: 4중 중첩형 동형 — bash: create 미실행 (본문)",
+        'echo $(( $(echo $(( ${x:-$(cat <<EOF)} + 1 ))) + 1 ))\ngh issue create --title "T"\nEOF',
+        (),
+    ),
+    (
+        "K3: cmdsub 직속 bare 산술 명령 — bash: create 실행됨",
+        'echo $(( $( ((y=1<<2)); echo $y ) ))\ngh issue create --title "T"\n2',
+        ("T",),
+    ),
+    (
+        "F3in: plain 개재 cmdsub 안 bare 산술 — bash: create 실행됨",
+        'echo $(( $( ( ((y=1<<2)) ) ) ))\ngh issue create --title "T"\n2',
+        ("T",),
+    ),
+    (
+        "F4q: 큰따옴표 안 cmdsub의 명령 문맥 리셋 — bash: create 실행됨",
+        'echo "$( (( x = 1 << 2 )); echo $x )"\ngh issue create --title "T"\n2',
+        ("T",),
+    ),
+    (
+        "F4b: brace 안 cmdsub의 명령 문맥 리셋 — bash: create 실행됨",
+        'echo ${var:-$( ((1<<2)) )}\ngh issue create --title "T"\n2',
+        ("T",),
+    ),
+    (
+        "brace 안 산술 확장은 활성 — bash: create 실행됨",
+        'echo ${x:-$((1<<2))}\ngh issue create --title "T"\n2',
+        ("T",),
+    ),
+    (
+        "P1: 백틱 안 중첩 산술 마스킹 (uniform cmdsub) — bash: 출력 5, create 실행됨",
+        'echo $(( `echo $((1<<2))` + 1 ))\ngh issue create --title "T"\n2',
+        ("T",),
+    ),
+    (
+        "SL1: cmdsub pop 후 바깥 큰따옴표 복원 — bash: 출력 'A B ...', create 실행됨",
+        'echo "A $(echo "B") C $(( 1 << 2 ))"\ngh issue create --title "T"\n2',
+        ("T",),
+    ),
+    (
+        "SL2: brace 안 중첩 큰따옴표의 독립 인용+복원 — bash: create 실행됨",
+        'echo "${x:-" ) "} $(( 1 << 2 ))"\ngh issue create --title "T"\n2',
+        ("T",),
+    ),
     # --- 이하 수정 라운드 5 (마지막) red 승격분 ---
-    ("R5-1: arith 안 brace 내부도 마스킹 관통 — bash: 출력 4, create 실행됨",
-     'echo $(( ${SHIFT:-1<<2 } ))\ngh issue create --title "T"\n2',
-     ("T",)),
-    ("R5-2: dq 안 brace 안 작은따옴표는 리터럴, 산술은 활성 — bash: 출력 '4', "
-     "다음 heredoc 본문은 미실행",
-     'echo "${u:-\'$((1<<2))\'}"\ncat > /dev/null <<EOF\ntrue && gh issue create --title "T"\nEOF',
-     ()),
+    (
+        "R5-1: arith 안 brace 내부도 마스킹 관통 — bash: 출력 4, create 실행됨",
+        'echo $(( ${SHIFT:-1<<2 } ))\ngh issue create --title "T"\n2',
+        ("T",),
+    ),
+    (
+        (
+            "R5-2: dq 안 brace 안 작은따옴표는 리터럴, 산술은 활성 — bash: 출력 '4', "
+            "다음 heredoc 본문은 미실행"
+        ),
+        'echo "${u:-\'$((1<<2))\'}"\ncat > /dev/null <<EOF\ntrue && gh issue create --title "T"\nEOF',
+        (),
+    ),
     # --- 이하 라운드 6 Critical 수정분 ---
-    ("C1: dq 안 brace가 정상 닫혀 이후 마스킹 유지 — bash: create 실행됨",
-     'echo "${u:-x}" ; (( 1 << 2 ))\ngh issue create --title "T"\n2',
-     ("T",)),
-    ("C1 오차단 방향: brace 누수로 뒤 heredoc 본문이 파싱되면 안 됨 — "
-     "bash: create 미실행 (본문)",
-     'echo "${x:-y}"; (( 1<<2 )); cat > /dev/null <<EOF\ngh issue create --title "T"\nEOF',
-     ()),
-    ("C2: 백틱 안 작은따옴표 안 이스케이프 백틱은 닫지 않음 — bash: 출력 a`b, "
-     "create 실행됨",
-     'echo `echo \'a\\`b\'` ; (( 1 << 2 ))\ngh issue create --title "T"\n2',
-     ("T",)),
+    (
+        "C1: dq 안 brace가 정상 닫혀 이후 마스킹 유지 — bash: create 실행됨",
+        'echo "${u:-x}" ; (( 1 << 2 ))\ngh issue create --title "T"\n2',
+        ("T",),
+    ),
+    (
+        (
+            "C1 오차단 방향: brace 누수로 뒤 heredoc 본문이 파싱되면 안 됨 — "
+            "bash: create 미실행 (본문)"
+        ),
+        'echo "${x:-y}"; (( 1<<2 )); cat > /dev/null <<EOF\ngh issue create --title "T"\nEOF',
+        (),
+    ),
+    (
+        (
+            "C2: 백틱 안 작은따옴표 안 이스케이프 백틱은 닫지 않음 — bash: 출력 a`b, "
+            "create 실행됨"
+        ),
+        "echo `echo 'a\\`b'` ; (( 1 << 2 ))\ngh issue create --title \"T\"\n2",
+        ("T",),
+    ),
     # --- 이하 라운드 7 Critical 수정분 ---
-    ("R7-A: 큰따옴표 문맥은 중첩 brace로 상속 — bash: 출력 '4', create 실행됨",
-     'echo "${u:-${v:-\'$((1<<2))\'}}"\ngh issue create --title "T"\n2',
-     ("T",)),
-    ("R7-A 오차단 방향: 중첩 brace의 산술이 마스킹돼야 뒤 heredoc 본문이 "
-     "보존됨 — bash: create 미실행 (본문)",
-     'echo "${u:-${v:-\'$((1<<2))\'}}"\ncat > /dev/null <<EOF\ngh issue create --title "T"\nEOF',
-     ()),
-    ("R7-B: 백틱 렉서 이스케이프 집합 밖의 백슬래시-작은따옴표는 인용을 "
-     "닫음 — bash: 출력 a\\ 4, create 실행됨",
-     "echo `echo 'a\\' ; echo $((1<<2))`\ngh issue create --title \"T\"\n2",
-     ("T",)),
-    ("R7-B 오차단 방향 — bash: create 미실행 (본문)",
-     "echo `echo 'a\\' ; echo $((1<<2))`\ncat > /dev/null <<EOF\ngh issue create --title \"T\"\nEOF",
-     ()),
+    (
+        "R7-A: 큰따옴표 문맥은 중첩 brace로 상속 — bash: 출력 '4', create 실행됨",
+        'echo "${u:-${v:-\'$((1<<2))\'}}"\ngh issue create --title "T"\n2',
+        ("T",),
+    ),
+    (
+        (
+            "R7-A 오차단 방향: 중첩 brace의 산술이 마스킹돼야 뒤 heredoc 본문이 "
+            "보존됨 — bash: create 미실행 (본문)"
+        ),
+        'echo "${u:-${v:-\'$((1<<2))\'}}"\ncat > /dev/null <<EOF\ngh issue create --title "T"\nEOF',
+        (),
+    ),
+    (
+        (
+            "R7-B: 백틱 렉서 이스케이프 집합 밖의 백슬래시-작은따옴표는 인용을 "
+            "닫음 — bash: 출력 a\\ 4, create 실행됨"
+        ),
+        "echo `echo 'a\\' ; echo $((1<<2))`\ngh issue create --title \"T\"\n2",
+        ("T",),
+    ),
+    (
+        "R7-B 오차단 방향 — bash: create 미실행 (본문)",
+        "echo `echo 'a\\' ; echo $((1<<2))`\ncat > /dev/null <<EOF\ngh issue create --title \"T\"\nEOF",
+        (),
+    ),
 ]
 
 
@@ -440,101 +514,221 @@ def test_oracle_corpus() -> None:
 # 형식: (설명, 명령, 기대 감지 제목 튜플).
 
 _SEGMENT_CORPUS = [
-    ("then 뒤 create — bash: gh는 명령 위치, 실행은 파일 x가 있을 때",
-     'if [ -f x ]; then gh issue create -t "T"; fi', ("T",)),
-    ("do 뒤 create (for) — bash: 실행됨",
-     'for i in 1; do gh issue create -t "T"; done', ("T",)),
-    ("do 뒤 create (while) — bash: 실행됨",
-     'while true; do gh issue create -t "T"; done', ("T",)),
-    ("그룹 명령 중괄호 뒤 create — bash: 실행됨",
-     '{ gh issue create -t "T"; }', ("T",)),
-    ("time 뒤 create — bash: 실행됨",
-     'time gh issue create -t "T"', ("T",)),
-    ("부정 ! 뒤 create — bash: 실행됨",
-     '! gh issue create -t "T"', ("T",)),
-    ("case 분기 뒤 create — bash: 실행됨",
-     'case x in x) gh issue create -t "T" ;; esac', ("T",)),
-    ("오차단 방향: 인자 위치의 then은 예약어가 아니다 — bash: 미실행(echo 인자)",
-     'echo then gh issue create --title "T"', ()),
+    (
+        "then 뒤 create — bash: gh는 명령 위치, 실행은 파일 x가 있을 때",
+        'if [ -f x ]; then gh issue create -t "T"; fi',
+        ("T",),
+    ),
+    (
+        "do 뒤 create (for) — bash: 실행됨",
+        'for i in 1; do gh issue create -t "T"; done',
+        ("T",),
+    ),
+    (
+        "do 뒤 create (while) — bash: 실행됨",
+        'while true; do gh issue create -t "T"; done',
+        ("T",),
+    ),
+    (
+        "그룹 명령 중괄호 뒤 create — bash: 실행됨",
+        '{ gh issue create -t "T"; }',
+        ("T",),
+    ),
+    ("time 뒤 create — bash: 실행됨", 'time gh issue create -t "T"', ("T",)),
+    ("부정 ! 뒤 create — bash: 실행됨", '! gh issue create -t "T"', ("T",)),
+    (
+        "case 분기 뒤 create — bash: 실행됨",
+        'case x in x) gh issue create -t "T" ;; esac',
+        ("T",),
+    ),
+    (
+        "오차단 방향: 인자 위치의 then은 예약어가 아니다 — bash: 미실행(echo 인자)",
+        'echo then gh issue create --title "T"',
+        (),
+    ),
     # --- 결합 연산자 토큰 (shlex가 인접 문장부호를 한 토큰으로 묶는다) ---
-    ("산술 확장 뒤 ; 로 이어진 create — `));` 한 토큰 — bash: 실행됨",
-     'echo $((1<<2)); gh issue create -t "T"', ("T",)),
-    ("#68 재현 케이스 — `));` 경계와 then 스킵이 둘 다 있어야 감지 — bash: gh는 명령 위치, 실행은 x가 참일 때",
-     'if ((x)); then gh issue create -t "T"; fi', ("T",)),
-    ("오차단 방향: `))` 단독은 경계가 아니다 — bash: 미실행(echo 인자, 출력 `4 gh ...`)",
-     'echo $((1<<2)) gh issue create -t "T"', ()),
-    ("오차단 방향: &> 는 리다이렉션이다 — bash: 미실행(gh라는 파일로 리다이렉션)",
-     'echo a &> gh issue create -t "T"', ()),
-    ("오차단 방향: >& 도 리다이렉션 — bash: 미실행",
-     'echo a >& gh issue create -t "T"', ()),
-    ("오차단 방향: >| 도 리다이렉션 — bash: 미실행",
-     'echo a >| gh issue create -t "T"', ()),
-    ("오차단 방향: &>> 도 리다이렉션 — bash: 미실행",
-     'echo a &>> gh issue create -t "T"', ()),
-    ("서브셸 닫기 뒤 create — `);` 한 토큰 — bash: 실행됨",
-     '(cd x; ls); gh issue create -t "T"', ("T",)),
+    (
+        "산술 확장 뒤 ; 로 이어진 create — `));` 한 토큰 — bash: 실행됨",
+        'echo $((1<<2)); gh issue create -t "T"',
+        ("T",),
+    ),
+    (
+        "#68 재현 케이스 — `));` 경계와 then 스킵이 둘 다 있어야 감지 — bash: gh는 명령 위치, 실행은 x가 참일 때",
+        'if ((x)); then gh issue create -t "T"; fi',
+        ("T",),
+    ),
+    (
+        "오차단 방향: `))` 단독은 경계가 아니다 — bash: 미실행(echo 인자, 출력 `4 gh ...`)",
+        'echo $((1<<2)) gh issue create -t "T"',
+        (),
+    ),
+    (
+        "오차단 방향: &> 는 리다이렉션이다 — bash: 미실행(gh라는 파일로 리다이렉션)",
+        'echo a &> gh issue create -t "T"',
+        (),
+    ),
+    (
+        "오차단 방향: >& 도 리다이렉션 — bash: 미실행",
+        'echo a >& gh issue create -t "T"',
+        (),
+    ),
+    (
+        "오차단 방향: >| 도 리다이렉션 — bash: 미실행",
+        'echo a >| gh issue create -t "T"',
+        (),
+    ),
+    (
+        "오차단 방향: &>> 도 리다이렉션 — bash: 미실행",
+        'echo a &>> gh issue create -t "T"',
+        (),
+    ),
+    (
+        "서브셸 닫기 뒤 create — `);` 한 토큰 — bash: 실행됨",
+        '(cd x; ls); gh issue create -t "T"',
+        ("T",),
+    ),
     # 인용된 연산자 리터럴 — posix 토큰화가 따옴표를 벗기므로 non-posix 재토큰화로
     # 표식을 만들어 걸러낸다. 아래 `;`·`&&`는 이 판정 도입 이전에도 오차단이었다.
-    ("오차단 방향: 인용된 연산자 리터럴은 명령 구분자가 아니다 — bash: 미실행",
-     'echo "|&" gh issue create -t "T"', ()),
-    ("오차단 방향: 괄호+구분자 인용 리터럴 — bash: 미실행(echo 인자)",
-     'echo "(;" gh issue create -t "T"', ()),
-    ("오차단 방향: `));` 인용 리터럴 — bash: 미실행",
-     'echo "));" gh issue create -t "T"', ()),
-    ("오차단 방향: 작은따옴표 리터럴도 동일 — bash: 미실행",
-     "echo '));' gh issue create -t \"T\"", ()),
-    ("오차단 방향: 단독 구분자 인용 리터럴(도입 이전부터의 오차단) — bash: 미실행",
-     'echo ";" gh issue create -t "T"', ()),
-    ("오차단 방향: `&&` 인용 리터럴(도입 이전부터의 오차단) — bash: 미실행",
-     'echo "&&" gh issue create -t "T"', ()),
-    ("오차단 방향: 인용된 예약어는 예약어가 아니다 — bash: 미실행"
-     "(`then: command not found`)",
-     '"then" gh issue create -t "T"', ()),
-    ("오차단 방향: 작은따옴표 예약어도 동일 — bash: 미실행",
-     "'time' gh issue create -t \"T\"", ()),
-    ("오차단 방향: 따옴표가 낱말에 붙어 정렬이 깨져도 오차단이 되면 안 됨 — "
-     "bash: 미실행(`();;)` 를 명령으로 취급)",
-     'echo x && "();;"\')\' gh issue create -t "T"', ()),
-    ("이스케이프가 섞여도 정확 일치 연산자는 경계로 남는다 — bash: 실행됨",
-     'echo a\\ b && gh issue create -t "T"', ("T",)),
-    ("이스케이프 정규화로 정렬이 복원돼 새 판정이 살아난다 — bash: gh는 명령 위치, 실행은 x가 참일 때",
-     'echo a\\ b; if ((x)); then gh issue create -t "T"; fi', ("T",)),
+    (
+        "오차단 방향: 인용된 연산자 리터럴은 명령 구분자가 아니다 — bash: 미실행",
+        'echo "|&" gh issue create -t "T"',
+        (),
+    ),
+    (
+        "오차단 방향: 괄호+구분자 인용 리터럴 — bash: 미실행(echo 인자)",
+        'echo "(;" gh issue create -t "T"',
+        (),
+    ),
+    (
+        "오차단 방향: `));` 인용 리터럴 — bash: 미실행",
+        'echo "));" gh issue create -t "T"',
+        (),
+    ),
+    (
+        "오차단 방향: 작은따옴표 리터럴도 동일 — bash: 미실행",
+        "echo '));' gh issue create -t \"T\"",
+        (),
+    ),
+    (
+        "오차단 방향: 단독 구분자 인용 리터럴(도입 이전부터의 오차단) — bash: 미실행",
+        'echo ";" gh issue create -t "T"',
+        (),
+    ),
+    (
+        "오차단 방향: `&&` 인용 리터럴(도입 이전부터의 오차단) — bash: 미실행",
+        'echo "&&" gh issue create -t "T"',
+        (),
+    ),
+    (
+        (
+            "오차단 방향: 인용된 예약어는 예약어가 아니다 — bash: 미실행"
+            "(`then: command not found`)"
+        ),
+        '"then" gh issue create -t "T"',
+        (),
+    ),
+    (
+        "오차단 방향: 작은따옴표 예약어도 동일 — bash: 미실행",
+        "'time' gh issue create -t \"T\"",
+        (),
+    ),
+    (
+        (
+            "오차단 방향: 따옴표가 낱말에 붙어 정렬이 깨져도 오차단이 되면 안 됨 — "
+            "bash: 미실행(`();;)` 를 명령으로 취급)"
+        ),
+        'echo x && "();;"\')\' gh issue create -t "T"',
+        (),
+    ),
+    (
+        "이스케이프가 섞여도 정확 일치 연산자는 경계로 남는다 — bash: 실행됨",
+        'echo a\\ b && gh issue create -t "T"',
+        ("T",),
+    ),
+    (
+        "이스케이프 정규화로 정렬이 복원돼 새 판정이 살아난다 — bash: gh는 명령 위치, 실행은 x가 참일 때",
+        'echo a\\ b; if ((x)); then gh issue create -t "T"; fi',
+        ("T",),
+    ),
     # --- 이스케이프된 연산자 리터럴 (#72) ---
-    ("오차단 방향: 이스케이프된 구분자는 명령 구분자가 아니다 — bash: 미실행",
-     'echo \\; gh issue create -t "T"', ()),
-    ("오차단 방향: 같은 줄의 이스케이프가 있어도 인용된 구분자를 지킨다 — bash: 미실행",
-     'echo a\\ b ";" gh issue create -t "T"', ()),
-    ("오차단 방향: 작은따옴표 안 백슬래시는 리터럴이라 인용을 닫는다 — bash: 미실행",
-     "echo 'a\\' ';' gh issue create -t \"T\"", ()),
-    ("오차단 방향: 큰따옴표 안 작은따옴표는 인용을 열지 않는다 — bash: 미실행",
-     'echo "\'" \\; gh issue create -t "T"', ()),
-    ("오차단 방향: 위 둘의 결합(작은따옴표만 추적하던 중간안의 회귀) — bash: 미실행",
-     'echo "\'" \'a\\\' \';\' gh issue create -t "T"', ()),
-    ("감지 유지: 큰따옴표 안 아포스트로피가 진짜 && 경계를 삼키면 안 된다 — bash: 실행됨",
-     'echo "it\'s fine" && gh issue create -t "T"', ("T",)),
-    ("감지 유지: 작은따옴표 안 큰따옴표도 마찬가지 — bash: 실행됨",
-     "echo 'say \"hi\"' ; gh issue create -t \"T\"", ("T",)),
+    (
+        "오차단 방향: 이스케이프된 구분자는 명령 구분자가 아니다 — bash: 미실행",
+        'echo \\; gh issue create -t "T"',
+        (),
+    ),
+    (
+        "오차단 방향: 같은 줄의 이스케이프가 있어도 인용된 구분자를 지킨다 — bash: 미실행",
+        'echo a\\ b ";" gh issue create -t "T"',
+        (),
+    ),
+    (
+        "오차단 방향: 작은따옴표 안 백슬래시는 리터럴이라 인용을 닫는다 — bash: 미실행",
+        "echo 'a\\' ';' gh issue create -t \"T\"",
+        (),
+    ),
+    (
+        "오차단 방향: 큰따옴표 안 작은따옴표는 인용을 열지 않는다 — bash: 미실행",
+        'echo "\'" \\; gh issue create -t "T"',
+        (),
+    ),
+    (
+        "오차단 방향: 위 둘의 결합(작은따옴표만 추적하던 중간안의 회귀) — bash: 미실행",
+        "echo \"'\" 'a\\' ';' gh issue create -t \"T\"",
+        (),
+    ),
+    (
+        "감지 유지: 큰따옴표 안 아포스트로피가 진짜 && 경계를 삼키면 안 된다 — bash: 실행됨",
+        'echo "it\'s fine" && gh issue create -t "T"',
+        ("T",),
+    ),
+    (
+        "감지 유지: 작은따옴표 안 큰따옴표도 마찬가지 — bash: 실행됨",
+        'echo \'say "hi"\' ; gh issue create -t "T"',
+        ("T",),
+    ),
     # --- 백슬래시 줄 연속 ---
-    ("줄 연속 뒤 create — bash: 실행됨",
-     'echo a && \\\ngh issue create --title "T"', ("T",)),
-    ("오차단 방향: 작은따옴표 안 줄 연속은 문자열 내용일 뿐 — bash: 미실행",
-     "echo 'text \\\ngh issue create -t T'", ()),
-    ("오차단 방향: 결합돼야 마커가 되는 heredoc(`E\\`+`OF`) — bash: 본문, 미실행",
-     'cat << E\\\nOF\ngh issue create -t "T"\nEOF', ()),
-    ("오차단 방향: 미종결 heredoc 본문의 쪼개진 토큰(`g\\`+`h`)을 결합해 "
-     "gh를 조립하면 안 됨 — bash: 경고 후 본문 출력, 미실행",
-     'cat << "EOF"\ng\\\nh issue create -t "T"', ()),
+    (
+        "줄 연속 뒤 create — bash: 실행됨",
+        'echo a && \\\ngh issue create --title "T"',
+        ("T",),
+    ),
+    (
+        "오차단 방향: 작은따옴표 안 줄 연속은 문자열 내용일 뿐 — bash: 미실행",
+        "echo 'text \\\ngh issue create -t T'",
+        (),
+    ),
+    (
+        "오차단 방향: 결합돼야 마커가 되는 heredoc(`E\\`+`OF`) — bash: 본문, 미실행",
+        'cat << E\\\nOF\ngh issue create -t "T"\nEOF',
+        (),
+    ),
+    (
+        (
+            "오차단 방향: 미종결 heredoc 본문의 쪼개진 토큰(`g\\`+`h`)을 결합해 "
+            "gh를 조립하면 안 됨 — bash: 경고 후 본문 출력, 미실행"
+        ),
+        'cat << "EOF"\ng\\\nh issue create -t "T"',
+        (),
+    ),
     # 교환 관계 잠금: bash는 본문 안 `E\`+`OF`도 결합해 heredoc을 조기 종결하므로
     # 이 create를 **실제로 실행한다**(실측: 뒤 명령 실행됨, 마지막 EOF는 command
     # not found). 그럼에도 기대값은 미감지다 — 롤백 구역에서 결합을 포기하는 대가로
     # 정탐 하나를 잃고 위 오차단을 막는 교환이다.
-    ("교환 관계: 롤백 구역이라 결합하지 않아 미감지 — bash: 실행됨",
-     'cat << E\\\nOF\necho "body"\nE\\\nOF\ngh issue create -t "T"\nEOF', ()),
-    ("같은 줄의 낱말 중간 큰따옴표가 인용 표식 정렬을 깨면 `{ cd /x; }`의 `{`가 "
-     "세그먼트에 남아 `cd` 래치가 서지 않는다(래치는 "
-     "test_cd_behind_brace_is_not_latched_when_marks_misalign이 고정) — bash: "
-     "gh는 명령 위치, 실행됨(cd가 성공하면 /x에서, 실패하면 페이로드 cwd에서)",
-     '{ cd /x; }; echo a"b c"d; gh issue create -t T', ("T",)),
+    (
+        "교환 관계: 롤백 구역이라 결합하지 않아 미감지 — bash: 실행됨",
+        'cat << E\\\nOF\necho "body"\nE\\\nOF\ngh issue create -t "T"\nEOF',
+        (),
+    ),
+    (
+        (
+            "같은 줄의 낱말 중간 큰따옴표가 인용 표식 정렬을 깨면 `{ cd /x; }`의 `{`가 "
+            "세그먼트에 남아 `cd` 래치가 서지 않는다(래치는 "
+            "test_cd_behind_brace_is_not_latched_when_marks_misalign이 고정) — bash: "
+            "gh는 명령 위치, 실행됨(cd가 성공하면 /x에서, 실패하면 페이로드 cwd에서)"
+        ),
+        '{ cd /x; }; echo a"b c"d; gh issue create -t T',
+        ("T",),
+    ),
 ]
 
 
@@ -569,30 +763,65 @@ def test_segment_corpus() -> None:
 # 형식: (설명, 명령, 현재 감지되는 제목 튜플, 출처).
 
 _KNOWN_FALSE_BLOCKS = [
-    ("이스케이프된 큰따옴표가 낱말 경계를 가로질러 인용 표식 정렬이 깨지고, "
-     "폴백의 정확 일치 경로가 인용된 구분자를 경계로 읽는다 — bash: 미실행",
-     'echo "a\\" "a\\" ";" gh issue create -t "T"', ("T",), "PR #72 수용 한계"),
-    ("`;;`는 case 밖에서 문법 오류라 bash가 명령 전체를 거부하는데, 가드는 "
-     "정확 일치로 경계를 만든다 — bash: 미실행(syntax error). 인용과 무관한 "
-     "사전 존재 계열이며 main도 동일",
-     'echo ;; gh issue create -t "T"', ("T",), "PR #75 라운드 1 발견"),
-    ("인용된 연산자가 명령 이름 자리에 오면 bash는 그 이름을 찾다 실패한다 — "
-     "bash: 미실행(`&: command not found`). 사전 존재 계열이며 main도 동일",
-     'echo ;"&"\'\' gh issue create -t "T"', ("T",), "PR #75 라운드 1 발견"),
-    ("주석 해석이 꺼져 있어(리터럴 `#` 보존) 주석 뒤 텍스트가 명령으로 읽힌다 "
-     "— bash: 미실행(`#` 뒤는 주석). 수리하면 낱말 중간 `#`(`feat:#12`, "
-     "`${#arr[@]}`)이 잘려 새 오분류가 생긴다(실측) — #74 결정으로 기록만",
-     'echo x # ; gh issue create -t "T"', ("T",), "#74 시금석(구성 발견)"),
-    ("gh는 --help에서 도움말만 출력하고 생성하지 않는데, _parse_segment가 "
-     "--help를 몰라 제목 없는 create로 차단된다 — bash: 실행됨(gh 도움말, "
-     "create 없음). 실사용 관측 3회(2026-07-29 2회, 2026-08-02 이 표 작성 중 "
-     "1회), 전부 override 1회로 복구 — #74 결정으로 기록만",
-     "gh issue create --help", (None,), "#74 결정(실사용 관측)"),
-    ("낱말 중간의 큰따옴표(`a\"b c\"d`)가 인용 표식 정렬을 깨고, 폴백의 정확 일치 "
-     "경로가 인용된 `\";\"`를 경계로 읽는다 — bash: 미실행(`;` 뒤는 전부 echo의 "
-     "인자)",
-     'echo a"b c"d ";" gh issue create -t T', ("T",),
-     "#104 측정 S1438(구성 발견) — #209"),
+    (
+        (
+            "이스케이프된 큰따옴표가 낱말 경계를 가로질러 인용 표식 정렬이 깨지고, "
+            "폴백의 정확 일치 경로가 인용된 구분자를 경계로 읽는다 — bash: 미실행"
+        ),
+        'echo "a\\" "a\\" ";" gh issue create -t "T"',
+        ("T",),
+        "PR #72 수용 한계",
+    ),
+    (
+        (
+            "`;;`는 case 밖에서 문법 오류라 bash가 명령 전체를 거부하는데, 가드는 "
+            "정확 일치로 경계를 만든다 — bash: 미실행(syntax error). 인용과 무관한 "
+            "사전 존재 계열이며 main도 동일"
+        ),
+        'echo ;; gh issue create -t "T"',
+        ("T",),
+        "PR #75 라운드 1 발견",
+    ),
+    (
+        (
+            "인용된 연산자가 명령 이름 자리에 오면 bash는 그 이름을 찾다 실패한다 — "
+            "bash: 미실행(`&: command not found`). 사전 존재 계열이며 main도 동일"
+        ),
+        'echo ;"&"\'\' gh issue create -t "T"',
+        ("T",),
+        "PR #75 라운드 1 발견",
+    ),
+    (
+        (
+            "주석 해석이 꺼져 있어(리터럴 `#` 보존) 주석 뒤 텍스트가 명령으로 읽힌다 "
+            "— bash: 미실행(`#` 뒤는 주석). 수리하면 낱말 중간 `#`(`feat:#12`, "
+            "`${#arr[@]}`)이 잘려 새 오분류가 생긴다(실측) — #74 결정으로 기록만"
+        ),
+        'echo x # ; gh issue create -t "T"',
+        ("T",),
+        "#74 시금석(구성 발견)",
+    ),
+    (
+        (
+            "gh는 --help에서 도움말만 출력하고 생성하지 않는데, _parse_segment가 "
+            "--help를 몰라 제목 없는 create로 차단된다 — bash: 실행됨(gh 도움말, "
+            "create 없음). 실사용 관측 3회(2026-07-29 2회, 2026-08-02 이 표 작성 중 "
+            "1회), 전부 override 1회로 복구 — #74 결정으로 기록만"
+        ),
+        "gh issue create --help",
+        (None,),
+        "#74 결정(실사용 관측)",
+    ),
+    (
+        (
+            '낱말 중간의 큰따옴표(`a"b c"d`)가 인용 표식 정렬을 깨고, 폴백의 정확 일치 '
+            '경로가 인용된 `";"`를 경계로 읽는다 — bash: 미실행(`;` 뒤는 전부 echo의 '
+            "인자)"
+        ),
+        'echo a"b c"d ";" gh issue create -t T',
+        ("T",),
+        "#104 측정 S1438(구성 발견) — #209",
+    ),
 ]
 
 
@@ -607,15 +836,16 @@ def test_every_corpus_entry_states_execution() -> None:
     # 설명이 사실인지는 검사하지 못한다 — 그건 bash로만 판정할 수 있고 위 헤더의
     # 대조 절차가 담당한다(무한 루프·파일 의존 항목이 있어 스위트에 넣지 않는다).
     # 표식 단어를 create와 무관한 문맥에 써도 이 검사는 통과한다.
-    tables = (("_ORACLE_CORPUS", _ORACLE_CORPUS),
-              ("_SEGMENT_CORPUS", _SEGMENT_CORPUS),
-              ("_KNOWN_FALSE_BLOCKS", _KNOWN_FALSE_BLOCKS))
+    tables = (
+        ("_ORACLE_CORPUS", _ORACLE_CORPUS),
+        ("_SEGMENT_CORPUS", _SEGMENT_CORPUS),
+        ("_KNOWN_FALSE_BLOCKS", _KNOWN_FALSE_BLOCKS),
+    )
     for table_name, table in tables:
         for entry in table:
             description = entry[0]
             assert any(form in description for form in _EXECUTION_CLAIM_FORMS), (
-                f"{table_name}: 설명이 bash 실행 상태를 밝히지 않는다 — "
-                f"{description!r}"
+                f"{table_name}: 설명이 bash 실행 상태를 밝히지 않는다 — {description!r}"
             )
             if "실행은" in description:
                 assert "때" in description, (
@@ -634,6 +864,7 @@ def test_known_false_blocks() -> None:
 
 # ---------- 판정 흐름 (main) ----------
 
+
 def test_non_bash_tool_passes(monkeypatch) -> None:
     assert _run_main(monkeypatch, {"tool_name": "Write", "tool_input": {}}) == 0
 
@@ -649,7 +880,9 @@ def test_no_duplicates_passes_silently(monkeypatch) -> None:
     assert _run_main(monkeypatch, _bash_payload("gh issue create -t brand-new")) == 0
 
 
-def test_duplicates_block_with_candidates_and_override_hint(monkeypatch, capsys) -> None:
+def test_duplicates_block_with_candidates_and_override_hint(
+    monkeypatch, capsys
+) -> None:
     issues = json.dumps([{"number": 12, "state": "OPEN", "title": "같은 작업"}])
     monkeypatch.setattr(guard, "_run_search", lambda argv, cwd=None: issues)
     assert _run_main(monkeypatch, _bash_payload('gh issue create -t "같은 작업"')) == 42
@@ -749,6 +982,7 @@ def test_cd_with_explicit_repo_still_searches(monkeypatch) -> None:
 # 픽스처 문자열은 실측 출력 그대로 (glab 1.108.0 / GitLab CE 19.2.0, 2026-07-22).
 # 실인스턴스 드리프트 카나리아는 test_guard_gitlab.py (-m gitlab).
 
+
 def test_glab_confident_lines_block(monkeypatch, capsys) -> None:
     out = (
         "Showing 1 issue in root/scratch that match your search. (Page 1)\n"
@@ -769,6 +1003,7 @@ def test_glab_ambiguous_output_fails_open(monkeypatch) -> None:
 
 
 # ---------- 하위 실행기 ----------
+
 
 def test_run_search_timeout_returns_none(monkeypatch) -> None:
     def _timeout(*args, **kwargs):
@@ -859,6 +1094,7 @@ def test_entry_point_never_blocks_on_malformed_input() -> None:
         capture_output=True,
         text=True,
         timeout=30,
+        check=False,
     )
     # 태그가 없으면 하네스가 자기 코드에 도달조차 못 한 것이다. 그 경우
     # 종료 코드는 42가 아니어서 아래 단언만으로는 초록으로 지나간다.
@@ -888,7 +1124,9 @@ def test_ledger_records_no_title_block(monkeypatch, tmp_path) -> None:
     assert entries[0]["harness"] == "issue-duplicate-guard"
 
 
-def test_ledger_records_similar_titles_block_with_numbers(monkeypatch, tmp_path) -> None:
+def test_ledger_records_similar_titles_block_with_numbers(
+    monkeypatch, tmp_path
+) -> None:
     issues = json.dumps(
         [
             {"number": 12, "state": "OPEN", "title": "같은 작업"},
@@ -952,7 +1190,10 @@ def test_ledger_stays_empty_on_fail_open_paths(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(guard, "_run_search", lambda argv, cwd=None: None)
     assert _run_main(monkeypatch, _bash_payload("gh issue create -t x")) == 0
     # 작업 디렉터리 불명
-    assert _run_main(monkeypatch, _bash_payload('cd /elsewhere && gh issue create -t "T"')) == 0
+    assert (
+        _run_main(monkeypatch, _bash_payload('cd /elsewhere && gh issue create -t "T"'))
+        == 0
+    )
     # 비대상 명령
     assert _run_main(monkeypatch, _bash_payload("echo hi")) == 0
 

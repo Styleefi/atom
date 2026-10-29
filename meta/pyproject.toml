@@ -6,7 +6,11 @@ requires-python = ">=3.12"
 dependencies = ["PyYAML>=6.0"]
 
 [dependency-groups]
-dev = ["pytest>=9.0"]
+dev = ["pytest>=9.0", "ruff==0.17.*"]
+
+[tool.ruff]
+# 비어 있어도 둔다. 이 표가 있어야 ruff가 이 파일을 설정으로 삼아 상위 디렉터리의
+# ruff.toml·[tool.ruff](자식 프로젝트의 product 층)가 meta/를 지배하지 못한다.
 
 [tool.pytest.ini_options]
 testpaths = ["harness"]

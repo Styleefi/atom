@@ -49,6 +49,8 @@ CANONICAL_COMMANDS = [
     "uv sync --locked --directory meta",
     "uv run --directory meta pytest",
     "uv run --directory meta python -m harness.rules_checker",
+    "uv run --directory meta ruff check",
+    "uv run --directory meta ruff format --check",
 ]
 
 
@@ -116,8 +118,10 @@ def decide_mode(root: Path) -> tuple[str, str]:
     if missing:
         return (
             "fail",
-            f"{MARKER} declares the dual-forge contract but CI file(s) are "
-            f"missing: {', '.join(missing)}. {OPT_OUT_HINT}",
+            (
+                f"{MARKER} declares the dual-forge contract but CI file(s) are "
+                f"missing: {', '.join(missing)}. {OPT_OUT_HINT}"
+            ),
         )
     return ("strict", "")
 
@@ -131,8 +135,10 @@ def _string_items(value: object, label: str) -> tuple[list[str] | None, list[str
     if value is None:
         return None, [f"{label} is missing — cannot read the contract"]
     return None, [
-        f"{label} has an unreadable entry (tags like !reference and nested "
-        "structures are unsupported) — write literal strings"
+        (
+            f"{label} has an unreadable entry (tags like !reference and nested "
+            "structures are unsupported) — write literal strings"
+        )
     ]
 
 
@@ -147,7 +153,11 @@ def extract_gitlab(doc: object) -> tuple[str | None, list[str] | None, list[str]
         violations에 사유가 담긴다.
     """
     if not isinstance(doc, dict):
-        return None, None, [f"{GITLAB_CI}: top level is not a mapping — cannot read the contract"]
+        return (
+            None,
+            None,
+            [f"{GITLAB_CI}: top level is not a mapping — cannot read the contract"],
+        )
 
     violations: list[str] = []
     # 우회로 가드 — 명령은 harness.script 밖에도 실릴 수 있다 (레거시 전역 문법 포함).
@@ -219,16 +229,22 @@ def extract_github(doc: object) -> tuple[str | None, list[str] | None, list[str]
         violations에 사유가 담긴다.
     """
     if not isinstance(doc, dict):
-        return None, None, [
-            f"{GITHUB_WORKFLOW}: top level is not a mapping — cannot read the contract"
-        ]
+        return (
+            None,
+            None,
+            [
+                f"{GITHUB_WORKFLOW}: top level is not a mapping — cannot read the contract"
+            ],
+        )
 
     jobs = doc.get("jobs")
     harness = jobs.get("harness") if isinstance(jobs, dict) else None
     if not isinstance(harness, dict):
-        return None, None, [
-            f"{GITHUB_WORKFLOW}: no jobs.harness job — cannot read the contract"
-        ]
+        return (
+            None,
+            None,
+            [f"{GITHUB_WORKFLOW}: no jobs.harness job — cannot read the contract"],
+        )
 
     violations: list[str] = []
     image = harness.get("container")
@@ -279,7 +295,7 @@ def normalize_commands(blocks: list[str]) -> list[str]:
     """run/script 블록들을 비교 가능한 명령 시퀀스로 정규화한다.
 
     멀티라인 블록은 개행으로 분할하고 각 행을 strip하며, 빈 행과 셸 주석
-    행(``#`` 시작)은 버린다 — GitLab의 항목 3개와 GitHub의 ``run: |`` 블록
+    행(``#`` 시작)은 버린다 — GitLab의 항목들과 GitHub의 ``run: |`` 블록
     1개가 같은 파이프라인으로 인정된다. 행 내부 공백은 건드리지 않는다.
     인용부호 안 공백 차이는 실제 의미 차이이기 때문이다.
 
@@ -380,7 +396,10 @@ def check_contract(
                 "support > folded blocks — write commands explicitly per script "
                 "entry / run step, using | or list form)"
             )
-        for label, commands in ((GITLAB_CI, gl_commands), (GITHUB_WORKFLOW, gh_commands)):
+        for label, commands in (
+            (GITLAB_CI, gl_commands),
+            (GITHUB_WORKFLOW, gh_commands),
+        ):
             if commands != CANONICAL_COMMANDS:
                 violations.append(
                     f"{label}: command list deviates from the canonical harness "

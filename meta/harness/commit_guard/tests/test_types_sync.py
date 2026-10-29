@@ -15,7 +15,9 @@ from pathlib import Path
 
 from harness.commit_guard import guard
 
-RULE_PATH = Path(guard.__file__).resolve().parents[3] / "meta/rules/commit-discipline.md"
+RULE_PATH = (
+    Path(guard.__file__).resolve().parents[3] / "meta/rules/commit-discipline.md"
+)
 
 
 def test_rule_types_line_matches_commit_types() -> None:

@@ -85,7 +85,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # 스키마 세대. 필드 구성이 바뀌면 올린다.
 SCHEMA_VERSION = 1
@@ -112,8 +112,10 @@ def ledger_path() -> str:
         `<base>/atom/guard-blocklog.jsonl`의 절대 경로.
     """
     raw = os.environ.get("XDG_STATE_HOME")
-    base = raw if raw and os.path.isabs(raw) else os.path.join(
-        os.path.expanduser("~"), ".local", "state"
+    base = (
+        raw
+        if raw and os.path.isabs(raw)
+        else os.path.join(os.path.expanduser("~"), ".local", "state")
     )
     return os.path.join(base, "atom", "guard-blocklog.jsonl")
 
@@ -173,7 +175,7 @@ def record_block(
     try:
         entry: dict[str, object] = {
             "v": SCHEMA_VERSION,
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "event": event,
             "harness": harness,
             "reason": reason,
@@ -211,5 +213,5 @@ def record_block(
                 view = view[written:]
         finally:
             os.close(fd)
-    except Exception:  # noqa: BLE001 — fail-open이 설계 요구사항
+    except Exception:  # noqa: BLE001, S110 — fail-open이 설계 요구사항
         pass

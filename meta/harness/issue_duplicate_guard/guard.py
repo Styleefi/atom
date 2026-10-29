@@ -115,6 +115,7 @@ _HEREDOC_MARKER_RE = re.compile(
     r"(?<!<)<<(-?)\s*\\?(?:'([^'\n]+)'|\"([^\"\n]+)\"|([^\s'\"\\<>|&;()]+))"
 )
 
+
 class _Frame:
     """전역 문맥 스택의 프레임 하나 (종류 + 진입 시점 인용 상태).
 
@@ -123,16 +124,27 @@ class _Frame:
     (bash 관용구 `"A $(echo "B") C"` 실측 근거).
     """
 
-    __slots__ = ("kind", "saved_single", "saved_double", "marks", "brace_depth",
-                 "opened_in_double")
+    __slots__ = (
+        "brace_depth",
+        "kind",
+        "marks",
+        "opened_in_double",
+        "saved_double",
+        "saved_single",
+    )
 
-    def __init__(self, kind: str, saved_single: bool, saved_double: bool,
-                 marks: list[int] | None = None) -> None:
+    def __init__(
+        self,
+        kind: str,
+        saved_single: bool,
+        saved_double: bool,
+        marks: list[int] | None = None,
+    ) -> None:
         self.kind = kind
         self.saved_single = saved_single
         self.saved_double = saved_double
-        self.marks = marks          # arith 그룹 하단 프레임만 버퍼 보유
-        self.brace_depth = 1        # brace 프레임 전용 (중첩 리터럴 중괄호)
+        self.marks = marks  # arith 그룹 하단 프레임만 버퍼 보유
+        self.brace_depth = 1  # brace 프레임 전용 (중첩 리터럴 중괄호)
         # brace 프레임 전용: 큰따옴표 안에서 열렸는지. bash는 `"${...}"`
         # 내부에서 작은따옴표를 리터럴로 두지만(`"${u:-'$((1<<2))'}"` →
         # `'4'`), 인용 밖 `${...}` 내부의 작은따옴표는 진짜 인용이다
@@ -316,8 +328,12 @@ def _mask_arithmetic(line: str) -> str:
             # 유지되고 뒤 문자는 정상 처리된다(작은따옴표면 인용이
             # 닫힌다: `'a\' ; ...` → bash 출력 a\ — 실측. 집합 문자는
             # 소비: `'a\`b'` → 출력 a`b — 실측).
-            if (c == "\\" and i + 1 < n and line[i + 1] in "`$\\"
-                    and any(f.kind == "backtick" for f in stack)):
+            if (
+                c == "\\"
+                and i + 1 < n
+                and line[i + 1] in "`$\\"
+                and any(f.kind == "backtick" for f in stack)
+            ):
                 escaped = True
                 keep(i)
                 i += 1
@@ -350,8 +366,11 @@ def _mask_arithmetic(line: str) -> str:
             # 큰따옴표 안에서 열린 brace 프레임의 로컬 문맥에서 bash는
             # 작은따옴표를 리터럴로 둔다(`"${u:-'$((1<<2))'}"` → `'4'`).
             top_frame = stack[-1] if stack else None
-            if not (top_frame is not None and top_frame.kind == "brace"
-                    and top_frame.opened_in_double):
+            if not (
+                top_frame is not None
+                and top_frame.kind == "brace"
+                and top_frame.opened_in_double
+            ):
                 in_single = True
             keep(i)
             i += 1
@@ -623,7 +642,7 @@ def _parse_segment(segment: list[str]) -> CreateInvocation | None:
                 title = rest[j + 1]
                 j += 1
         elif token.startswith("--title="):
-            title = token[len("--title="):]
+            title = token[len("--title=") :]
         elif token.startswith("-t") and not token.startswith("--") and len(token) > 2:
             # pflag는 -t=값에서 =를 벗기고 값을 취한다 (아래 -R 분기와 같은 규약).
             # -t= 만 오면 제목이 비어 실제로 검색할 것이 없으므로 None으로 눕혀
@@ -634,12 +653,14 @@ def _parse_segment(segment: list[str]) -> CreateInvocation | None:
                 repo = rest[j + 1]
                 j += 1
         elif token.startswith("--repo="):
-            repo = token[len("--repo="):]
+            repo = token[len("--repo=") :]
         elif token.startswith("-R") and not token.startswith("--") and len(token) > 2:
             # pflag는 -R=값 형태에서 =를 벗기고 값을 취한다.
             repo = token[2:].removeprefix("=") or None
         j += 1
-    return CreateInvocation(cli=_basename(rest[0]), title=title, repo=repo, override=override)
+    return CreateInvocation(
+        cli=_basename(rest[0]), title=title, repo=repo, override=override
+    )
 
 
 def _changes_directory(segment: list[str]) -> bool:
@@ -724,6 +745,7 @@ def _run_search(argv: list[str], cwd: str | None = None) -> str | None:
             text=True,
             timeout=SEARCH_TIMEOUT_SECONDS,
             cwd=cwd,
+            check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -747,11 +769,17 @@ def search_duplicates(
     assert invocation.title
     if invocation.cli == "gh":
         argv = [
-            "gh", "issue", "list",
-            "--state", "all",
-            "--search", invocation.title,
-            "--json", "number,title,state",
-            "--limit", str(MAX_CANDIDATES),
+            "gh",
+            "issue",
+            "list",
+            "--state",
+            "all",
+            "--search",
+            invocation.title,
+            "--json",
+            "number,title,state",
+            "--limit",
+            str(MAX_CANDIDATES),
         ]
         if invocation.repo:
             argv += ["--repo", invocation.repo]
@@ -760,7 +788,10 @@ def search_duplicates(
             return None
         try:
             issues = json.loads(output)
-            return [f"#{issue['number']} [{issue['state']}] {issue['title']}" for issue in issues]
+            return [
+                f"#{issue['number']} [{issue['state']}] {issue['title']}"
+                for issue in issues
+            ]
         except (ValueError, KeyError, TypeError):
             return None
 
@@ -769,10 +800,14 @@ def search_duplicates(
     # glab 1.108.0 / GitLab CE 19.2.0 실인스턴스로 검증됨 (2026-07-22, issue #9).
     # 드리프트 카나리아: tests/test_guard_gitlab.py (-m gitlab, meta/infra/gitlab).
     argv = [
-        "glab", "issue", "list",
+        "glab",
+        "issue",
+        "list",
         "--all",
-        "--search", invocation.title,
-        "--per-page", str(MAX_CANDIDATES),
+        "--search",
+        invocation.title,
+        "--per-page",
+        str(MAX_CANDIDATES),
     ]
     if invocation.repo:
         argv += ["--repo", invocation.repo]
@@ -814,7 +849,7 @@ def _log(**kwargs) -> None:
         from harness.blocklog.blocklog import record_block
 
         record_block(**kwargs)
-    except Exception:  # noqa: BLE001 — fail-open이 설계 요구사항
+    except Exception:  # noqa: BLE001, S110 — fail-open이 설계 요구사항
         pass
 
 
@@ -827,7 +862,9 @@ def main() -> int:
     try:
         payload = read_payload()
     except ValueError:
-        print("[issue-duplicate-guard] malformed hook input (fail-open)", file=sys.stderr)
+        print(
+            "[issue-duplicate-guard] malformed hook input (fail-open)", file=sys.stderr
+        )
         return 1
     call = bash_call(payload)
     if call is None:
@@ -909,5 +946,8 @@ def run() -> int:
     try:
         return main()
     except Exception as exc:  # noqa: BLE001 — fail-open이 설계 요구사항
-        print(f"[issue-duplicate-guard] internal error (fail-open): {exc}", file=sys.stderr)
+        print(
+            f"[issue-duplicate-guard] internal error (fail-open): {exc}",
+            file=sys.stderr,
+        )
         return 1

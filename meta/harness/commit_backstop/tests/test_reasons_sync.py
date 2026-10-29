@@ -29,7 +29,9 @@ def test_rule_degraded_reasons_match_the_constant() -> None:
     text = RULE_PATH.read_text(encoding="utf-8")
     matches = re.findall(r"`degraded` reasons:\s*([^.]+)\.", text)
     # 문구 개편으로 행이 사라지거나 늘면 공허 통과 대신 여기서 실패한다.
-    assert len(matches) == 1, f"'`degraded` reasons:' 행이 정확히 1개여야 함: {len(matches)}개"
+    assert len(matches) == 1, (
+        f"'`degraded` reasons:' 행이 정확히 1개여야 함: {len(matches)}개"
+    )
     # 순서까지 비교한다 — 규칙 파일의 설명이 열거를 위치로 지칭하므로,
     # 집합만 맞추면 재정렬이 그 설명을 조용히 뒤집는다.
     parsed = [token.strip().strip("`") for token in matches[0].split(",")]

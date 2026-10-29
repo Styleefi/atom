@@ -58,6 +58,7 @@ pytestmark = [
 
 # ---------- 헬퍼 ----------
 
+
 def _api(state: dict, method: str, path: str, form: dict | None = None) -> dict:
     """GitLab REST API를 호출한다 (PRIVATE-TOKEN 인증).
 
@@ -76,7 +77,9 @@ def _api(state: dict, method: str, path: str, form: dict | None = None) -> dict:
     url = f"{state['url']}/api/v4{path}"
     data = urllib.parse.urlencode(form).encode() if form else None
     request = urllib.request.Request(
-        url, data=data, method=method,
+        url,
+        data=data,
+        method=method,
         headers={"PRIVATE-TOKEN": state["token"]},
     )
     try:
@@ -95,15 +98,26 @@ def _api(state: dict, method: str, path: str, form: dict | None = None) -> dict:
 def _adapter_search(state: dict, title: str) -> subprocess.CompletedProcess[str]:
     """guard.search_duplicates의 glab 분기와 동일한 argv로 검색을 실행한다."""
     argv = [
-        "glab", "issue", "list",
+        "glab",
+        "issue",
+        "list",
         "--all",
-        "--search", title,
-        "--per-page", str(guard.MAX_CANDIDATES),
-        "--repo", state["project"],
+        "--search",
+        title,
+        "--per-page",
+        str(guard.MAX_CANDIDATES),
+        "--repo",
+        state["project"],
     ]
     return subprocess.run(
-        argv, cwd=_STATE_DIR, env=state["env"], stdin=subprocess.DEVNULL,
-        capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT,
+        argv,
+        cwd=_STATE_DIR,
+        env=state["env"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=_SUBPROCESS_TIMEOUT,
+        check=False,
     )
 
 
@@ -134,6 +148,7 @@ def _create_payload(state: dict, title: str, override: bool = False) -> dict:
 
 # ---------- 픽스처 ----------
 
+
 @pytest.fixture(scope="session")
 def gitlab_state() -> dict:
     """state.env를 읽고 격리된 GLAB_CONFIG_DIR로 glab 로그인을 마친 세션 상태.
@@ -149,9 +164,7 @@ def gitlab_state() -> dict:
     if shutil.which("glab") is None:
         pytest.fail("glab CLI is not installed — cannot run the integration tests")
     raw = _STATE_FILE.read_text(encoding="utf-8")
-    parsed = dict(
-        line.split("=", 1) for line in raw.splitlines() if "=" in line
-    )
+    parsed = dict(line.split("=", 1) for line in raw.splitlines() if "=" in line)
     required = ("GITLAB_TESTENV_URL", "GITLAB_TESTENV_TOKEN", "GITLAB_TESTENV_PROJECT")
     missing = [key for key in required if not parsed.get(key)]
     if missing:
@@ -166,14 +179,25 @@ def gitlab_state() -> dict:
     }
     login = subprocess.run(
         [
-            "glab", "auth", "login",
-            "--hostname", host,
-            "--token", parsed["GITLAB_TESTENV_TOKEN"],
-            "--api-protocol", "http",
-            "--git-protocol", "http",
+            "glab",
+            "auth",
+            "login",
+            "--hostname",
+            host,
+            "--token",
+            parsed["GITLAB_TESTENV_TOKEN"],
+            "--api-protocol",
+            "http",
+            "--git-protocol",
+            "http",
         ],
-        cwd=_STATE_DIR, env=env, stdin=subprocess.DEVNULL,
-        capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT,
+        cwd=_STATE_DIR,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=_SUBPROCESS_TIMEOUT,
+        check=False,
     )
     if login.returncode != 0:
         pytest.fail(
@@ -210,8 +234,10 @@ def seeded_issues(gitlab_state: dict) -> dict[str, str]:
         gitlab_state, "POST", f"/projects/{project}/issues", {"title": titles["closed"]}
     )
     _api(
-        gitlab_state, "PUT",
-        f"/projects/{project}/issues/{closed['iid']}", {"state_event": "close"},
+        gitlab_state,
+        "PUT",
+        f"/projects/{project}/issues/{closed['iid']}",
+        {"state_event": "close"},
     )
     for title in titles.values():
         _wait_until_searchable(gitlab_state, title)
@@ -234,6 +260,7 @@ def guard_glab_env(gitlab_state: dict, monkeypatch: pytest.MonkeyPatch) -> dict:
 
 
 # ---------- 어댑터 검색 표면 (드리프트 카나리아) ----------
+
 
 def test_real_search_output_matches_conservative_regex(
     gitlab_state: dict, seeded_issues: dict[str, str]
@@ -266,21 +293,32 @@ def test_search_duplicates_finds_seeded_issue(
     guard_glab_env: dict, seeded_issues: dict[str, str]
 ) -> None:
     invocation = guard.CreateInvocation(
-        cli="glab", title=seeded_issues["open"],
-        repo=guard_glab_env["project"], override=False,
+        cli="glab",
+        title=seeded_issues["open"],
+        repo=guard_glab_env["project"],
+        override=False,
     )
     candidates = guard.search_duplicates(invocation)
-    assert candidates is not None, "search collapsed to fail-open — check glab auth/environment"
-    assert any(seeded_issues["open"] in candidate for candidate in candidates), candidates
+    assert candidates is not None, (
+        "search collapsed to fail-open — check glab auth/environment"
+    )
+    assert any(seeded_issues["open"] in candidate for candidate in candidates), (
+        candidates
+    )
 
 
 # ---------- 판정 흐름 e2e ----------
 
+
 def test_duplicate_create_blocked_end_to_end(
-    guard_glab_env: dict, seeded_issues: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    guard_glab_env: dict,
+    seeded_issues: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    code = _run_main(monkeypatch, _create_payload(guard_glab_env, seeded_issues["open"]))
+    code = _run_main(
+        monkeypatch, _create_payload(guard_glab_env, seeded_issues["open"])
+    )
     err = capsys.readouterr().err
     assert code == 42, f"expected block (exit 42), got {code} — stderr:\n{err}"
     assert any(line.strip().startswith("#") for line in err.splitlines()), err
@@ -295,9 +333,13 @@ def test_module_entrypoint_blocks_duplicate(
     payload = json.dumps(_create_payload(guard_glab_env, seeded_issues["open"]))
     result = subprocess.run(
         [sys.executable, "-m", "harness.issue_duplicate_guard"],
-        input=payload, cwd=_STATE_DIR,
+        input=payload,
+        cwd=_STATE_DIR,
         env={**os.environ, "PYTHONPATH": str(_META_DIR)},
-        capture_output=True, text=True, timeout=_SUBPROCESS_TIMEOUT,
+        capture_output=True,
+        text=True,
+        timeout=_SUBPROCESS_TIMEOUT,
+        check=False,
     )
     assert result.returncode == 42, (
         f"expected exit 42, got {result.returncode} — stderr:\n{result.stderr}"
@@ -307,7 +349,8 @@ def test_module_entrypoint_blocks_duplicate(
 
 def test_unique_title_passes_end_to_end(
     guard_glab_env: dict,
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     # 단일 토큰 제목 — 검색이 단어를 OR 매칭하는 버전이어도 타 이슈와 안 겹친다.
     title = f"nodup{uuid.uuid4().hex}"
@@ -315,12 +358,16 @@ def test_unique_title_passes_end_to_end(
     err = capsys.readouterr().err
     assert code == 0, f"expected pass (exit 0), got {code} — stderr:\n{err}"
     # fail-open 경유 가짜 통과 차단: 검색이 실제 실행되어 빈 결과였음을 구분한다.
-    assert "duplicate check skipped" not in err, f"search did not run and failed open:\n{err}"
+    assert "duplicate check skipped" not in err, (
+        f"search did not run and failed open:\n{err}"
+    )
 
 
 def test_override_prefix_passes_end_to_end(
-    guard_glab_env: dict, seeded_issues: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    guard_glab_env: dict,
+    seeded_issues: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     code = _run_main(
         monkeypatch,

@@ -88,9 +88,7 @@ def _ledger_entries(tmp_path) -> list[dict]:
     path = tmp_path / "state" / "atom" / "guard-blocklog.jsonl"
     if not path.exists():
         return []
-    return [
-        json.loads(line) for line in path.read_text().splitlines() if line.strip()
-    ]
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
 def _baseline(monkeypatch, tmp_path, **kwargs):
@@ -230,7 +228,13 @@ def test_fast_forward_pull_on_main_passes(monkeypatch, capsys, tmp_path):
     assert capsys.readouterr().err == ""
 
 
-@pytest.mark.parametrize("merge_args", [["merge", "-q", "feat/x"], ["merge", "-q", "--no-ff", "-m", "merge feat", "feat/x"]])
+@pytest.mark.parametrize(
+    "merge_args",
+    [
+        ["merge", "-q", "feat/x"],
+        ["merge", "-q", "--no-ff", "-m", "merge feat", "feat/x"],
+    ],
+)
 def test_merging_unpushed_branch_into_main_blocks(
     monkeypatch, capsys, tmp_path, merge_args
 ):
@@ -536,7 +540,9 @@ def test_violations_past_the_reason_limit_still_list_every_sha(
     # 보고가 영구히 불완전해진다 (PR #114 round 2).
     repo = _baseline(monkeypatch, tmp_path)
     _git(repo, "checkout", "-q", "-b", "feat/x")
-    shas = [_commit(repo, f"Bad number {i}.") for i in range(backstop.REPORT_SHA_LIMIT + 2)]
+    shas = [
+        _commit(repo, f"Bad number {i}.") for i in range(backstop.REPORT_SHA_LIMIT + 2)
+    ]
     assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
     err = capsys.readouterr().err
     for sha in shas:
@@ -554,7 +560,9 @@ def test_custom_subject_merge_commit_is_exempt(monkeypatch, capsys, tmp_path):
     _git(repo, "checkout", "-q", "-b", "feat/x", "main")
     _commit(repo, "feat: local work")
     assert _run(monkeypatch, repo) == 0
-    _git(repo, "merge", "-q", "--no-ff", "-m", "THIS Merge subject breaks.", "feat/side")
+    _git(
+        repo, "merge", "-q", "--no-ff", "-m", "THIS Merge subject breaks.", "feat/side"
+    )
     assert _run(monkeypatch, repo) == 0
     assert capsys.readouterr().err == ""
 
@@ -720,7 +728,9 @@ def test_state_file_lands_in_target_repo_git_dir(monkeypatch, capsys, tmp_path):
     assert os.getcwd() != str(tmp_path / "repo")
     repo = _baseline(monkeypatch, tmp_path)
     assert os.path.exists(_state_path(repo))
-    assert not os.path.exists(os.path.join(os.getcwd(), ".git", backstop.STATE_FILENAME))
+    assert not os.path.exists(
+        os.path.join(os.getcwd(), ".git", backstop.STATE_FILENAME)
+    )
 
 
 def test_state_write_is_atomic_and_capped(monkeypatch, capsys, tmp_path):
@@ -870,7 +880,10 @@ def test_lost_baseline_rewrite_reseeds_every_worktree_head(
         # 부재를 주변 환경에 맡기지 않는다.
         monkeypatch.delenv("GIT_DIR", raising=False)
     else:
-        monkeypatch.setenv("GIT_DIR", _git(where[inherited], "rev-parse", "--path-format=absolute", "--git-dir"))
+        monkeypatch.setenv(
+            "GIT_DIR",
+            _git(where[inherited], "rev-parse", "--path-format=absolute", "--git-dir"),
+        )
     assert _run(monkeypatch, where[restart_at]) == 1
     assert "restarts at this call's tips" in capsys.readouterr().err
     main_tip = _git(repo, "rev-parse", "refs/heads/main")
@@ -920,7 +933,9 @@ def test_reseed_enumerates_the_environment_resolved_repository(
     _git(other, "worktree", "add", "-q", str(other_wt), "-b", "feat/other-wt", "main")
     repo, wt, _ = _observed_worktree(monkeypatch, tmp_path)
     os.remove(_state_path(other))
-    monkeypatch.setenv("GIT_DIR", _git(other, "rev-parse", "--path-format=absolute", "--git-dir"))
+    monkeypatch.setenv(
+        "GIT_DIR", _git(other, "rev-parse", "--path-format=absolute", "--git-dir")
+    )
     assert _run(monkeypatch, repo) == 0  # 환경 저장소의 최초 관찰: 기록만
     capsys.readouterr()
     seen = _read_state(other)["seen"]
@@ -944,6 +959,7 @@ def test_only_one_function_touches_the_environment() -> None:
     세션에게는 일반화가 자연스러워 보인다. 형태는 commit_publication 테스트의
     `_run_git_env_dict` 선례를 따른다.
     """
+
     def touches(node) -> bool:
         if isinstance(node, ast.Attribute):
             return node.attr in {"environ", "putenv", "unsetenv"}
@@ -963,7 +979,11 @@ def test_only_one_function_touches_the_environment() -> None:
             collect(child, name, found)
 
     touching: set[str] = set()
-    collect(ast.parse(Path(backstop.__file__).read_text(encoding="utf-8")), "<module>", touching)
+    collect(
+        ast.parse(Path(backstop.__file__).read_text(encoding="utf-8")),
+        "<module>",
+        touching,
+    )
     assert touching == {"_worktree_heads"}
 
 
@@ -982,7 +1002,10 @@ def test_sibling_violation_after_a_restart_under_an_inherited_git_dir(
     with open(_state_path(repo), "w", encoding="utf-8") as fp:
         fp.write("{ not json")
     where = {"repo": repo, "wt": wt}
-    monkeypatch.setenv("GIT_DIR", _git(where[inherited], "rev-parse", "--path-format=absolute", "--git-dir"))
+    monkeypatch.setenv(
+        "GIT_DIR",
+        _git(where[inherited], "rev-parse", "--path-format=absolute", "--git-dir"),
+    )
     assert _run(monkeypatch, where[restart_at]) == 1
     capsys.readouterr()
     monkeypatch.delenv("GIT_DIR")
@@ -1332,9 +1355,7 @@ def test_ledger_keeps_the_warning_that_stderr_drops(monkeypatch, capsys, tmp_pat
     assert ("degraded", "branch-eval-failed") in events  # 흔적은 원장에 남는다
 
 
-def test_ledger_stays_empty_on_pass_and_fail_open_paths(
-    monkeypatch, capsys, tmp_path
-):
+def test_ledger_stays_empty_on_pass_and_fail_open_paths(monkeypatch, capsys, tmp_path):
     repo = _baseline(monkeypatch, tmp_path)
     _git(repo, "checkout", "-q", "-b", "feat/x")
     _commit(repo, "feat: nothing wrong here")
@@ -1474,6 +1495,7 @@ def test_entry_point_never_blocks_on_malformed_input() -> None:
         capture_output=True,
         text=True,
         timeout=30,
+        check=False,
     )
     # 태그가 없으면 하네스가 자기 코드에 도달조차 못 한 것이다. 그 경우
     # 종료 코드는 42가 아니어서 아래 단언만으로는 초록으로 지나간다.
