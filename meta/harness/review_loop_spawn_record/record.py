@@ -15,7 +15,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from harness.blocklog.blocklog import ledger_path
 from harness.hookio.payload import read_payload
@@ -34,7 +34,7 @@ PASS_PHRASE = "You run a review pass for a review loop on pull or merge request"
 
 _WS_RE = re.compile(r"\s+")
 # 줄 머리의 마크다운 인용 표시 — 규칙 파일 원문을 그대로 복사하면 구절 중간에 끼어든다.
-_QUOTE_RE = re.compile(r"^[ \t]*(?:>[ \t]?)+", re.M)
+_QUOTE_RE = re.compile(r"^[ \t]*(?:>[ \t]?)+", re.MULTILINE)
 _REQUEST_RE = re.compile(r" ?`?[#!]?([0-9]{1,9})(?![0-9])")
 # 알림에 싣는 식별자 값의 허용 모양. 벗어나면 `?`로 바꾼다.
 _TOKEN_RE = re.compile(r"[A-Za-z0-9._:-]{1,64}")
@@ -178,7 +178,7 @@ def _transcript_models(path: object) -> tuple[list[str] | None, str | None]:
 def _base(kind: str, payload: dict) -> dict[str, object]:
     return {
         "v": SCHEMA_VERSION,
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "kind": kind,
         "session_id": _str_or_none(payload.get("session_id")),
         "cwd": _str_or_none(payload.get("cwd")),

@@ -19,7 +19,6 @@ from pathlib import Path
 
 import pytest
 
-
 from harness.review_loop_trailer_check import check
 
 _GIT_ENV = {

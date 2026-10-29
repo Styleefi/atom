@@ -31,7 +31,6 @@ from harness.rules_checker.check_rules import (
     find_repo_root,
 )
 
-
 # 인벤토리 골격. 표 헤더 셀에는 백틱을 쓰지 않는다(항목으로 오인되므로).
 # 마커 주석은 헬퍼가 행을 끼워 넣는 위치이며 추출 대상이 아니다.
 RULES_MARKER = "<!-- rules-end -->"

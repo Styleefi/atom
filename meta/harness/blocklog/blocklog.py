@@ -85,7 +85,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # 스키마 세대. 필드 구성이 바뀌면 올린다.
 SCHEMA_VERSION = 1
@@ -173,7 +173,7 @@ def record_block(
     try:
         entry: dict[str, object] = {
             "v": SCHEMA_VERSION,
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "event": event,
             "harness": harness,
             "reason": reason,

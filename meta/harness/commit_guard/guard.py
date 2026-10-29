@@ -263,8 +263,7 @@ def _remote_stripped(ref: str | None) -> str | None:
     if ref is None:
         return None
     for prefix in ("refs/", "remotes/"):
-        if ref.startswith(prefix):
-            ref = ref[len(prefix):]
+        ref = ref.removeprefix(prefix)
     _, slash, name = ref.partition("/")
     return name if slash and name else None
 

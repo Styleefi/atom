@@ -24,7 +24,7 @@ from pathlib import Path
 from harness.rules_checker.check_rules import find_repo_root
 
 _TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_.])test_[a-z0-9_]*[a-z0-9](?![A-Za-z0-9_])")
-_DEF_RE = re.compile(r"^(?:async )?def (test_[a-z0-9_]+)", re.M)
+_DEF_RE = re.compile(r"^(?:async )?def (test_[a-z0-9_]+)", re.MULTILINE)
 _PRUNED_DIRS = {".venv", ".pytest_cache", "__pycache__", ".git"}
 
 # 픽스처의 가짜 이름이 이 파일 자체에서 미해석 포인터가 되지 않도록 접두사를 조립한다.

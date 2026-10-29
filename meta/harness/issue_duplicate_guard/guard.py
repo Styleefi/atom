@@ -123,8 +123,14 @@ class _Frame:
     (bash 관용구 `"A $(echo "B") C"` 실측 근거).
     """
 
-    __slots__ = ("kind", "saved_single", "saved_double", "marks", "brace_depth",
-                 "opened_in_double")
+    __slots__ = (
+        "brace_depth",
+        "kind",
+        "marks",
+        "opened_in_double",
+        "saved_double",
+        "saved_single",
+    )
 
     def __init__(self, kind: str, saved_single: bool, saved_double: bool,
                  marks: list[int] | None = None) -> None:
