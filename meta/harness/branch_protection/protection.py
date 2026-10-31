@@ -53,15 +53,16 @@
       restrictions는 꺼진다 — 그리고 본문에 없는 설정(linear history 등)이 남는다고
       보장하지 않는다. 쓰기는 보호가 없거나 필요한 속성 중 하나라도 미충족일 때만
       나간다.
-    - GitLab의 DELETE와 POST 사이에는 보호가 없는 짧은 구간이 있다. POST가 거부되거나
-      답이 없으면 보호 없는 상태로 남을 수 있고, 도구는 재읽기 없이 그 사유 뒤에 "the
-      existing protection was already deleted"를 붙여 exit 3을 낸다. 그때 `apply`를
-      다시 돌리면 "보호 없음" 경로(POST)로 간다. 참조 집합 밖의
+    - GitLab의 DELETE와 POST 사이에는 보호가 없는 짧은 구간이 있다(CE 19.2.0 로컬
+      스택 실측 0.12초, 대부분 glab 기동). POST가 거부되거나 답이 없으면 보호 없는
+      상태로 남을 수 있고, 도구는 재읽기 없이 "(landed: DELETE)"를 단 exit 3을 낸다.
+      그때 `apply`를 다시 돌리면 "보호 없음" 경로(POST)로 간다. 참조 집합 밖의
       항목(유료판의 사용자·그룹 허용 등)은 DELETE로 사라진다 — GitHub의 PUT 전체 교체와
       같은 성질이다.
     - 쓰기 단계에 들어간 뒤의 판정 불가(거부·타임아웃·CLI 미기동·재읽기 실패)는
-      "undecided after a write was attempted"로 보고한다. 요청이 나갔을 수 있고, 나갔다면
-      타임아웃에서는 그 결과를 모른다. 쓰기 전의 판정 불가에는 이 표식이 없다.
+      "undecided after a write was attempted"로 보고하고, 성공 status가 돌아온 쓰기
+      단계가 있으면 "(landed: DELETE)"처럼 그 이름을 순서대로 덧붙인다. 쓰기 전의 판정
+      불가에는 이 표식이 없다.
     - IPv6 리터럴 호스트는 지원하지 않는다. 호스트는 `[A-Za-z0-9.-]`(+`:포트`), 경로
       세그먼트는 `[A-Za-z0-9._-]`로만 된 것만 포지 URL로 읽는다. 그 밖은 exit 2다.
     - 읽기와 쓰기 사이의 동시 변경은 감지하지 않는다. 재읽기가 보여 주는 것이 판정이다.
@@ -420,10 +421,22 @@ def _unmet(forge: str, state: dict) -> list[str]:
     return unmet
 
 
-def _write(forge: str, host: str, path: str, branch: str, state: dict | None) -> None:
+def _write(
+    forge: str,
+    host: str,
+    path: str,
+    branch: str,
+    state: dict | None,
+    landed: list[str],
+) -> None:
     """보호를 참조 집합으로 쓴다. 성공 status가 아니면 판정 불가로 올린다.
 
     GitLab에 보호가 이미 있으면 먼저 DELETE한다(모듈 docstring의 DELETE+POST 항목).
+    성공 status가 돌아온 쓰기 단계의 이름을 `landed`에 차례로 넣는다 — 중간에 판정
+    불가로 끝나도 호출자가 어디까지 반영됐는지 보고할 수 있게.
+
+    Args:
+        landed: 성공한 쓰기 단계 이름(`PUT`·`DELETE`·`POST`)이 쌓이는 리스트.
     """
     if forge == GITHUB:
         status, _ = _http(
@@ -431,30 +444,28 @@ def _write(forge: str, host: str, path: str, branch: str, state: dict | None) ->
         )
         if status != 200:
             raise _Undecided(f"the forge refused the write (HTTP {status})")
+        landed.append("PUT")
         return
-    gone = ""
     if state is not None:
         status, _ = _http(forge, host, "DELETE", _protection_path(forge, path, branch))
         if status != 204:
             raise _Undecided(f"the forge refused the delete (HTTP {status})")
-        gone = "; the existing protection was already deleted"
-    try:
-        status, _ = _http(
-            forge,
-            host,
-            "POST",
-            f"projects/{quote(path, safe='')}/protected_branches",
-            {
-                "name": branch,
-                "push_access_level": GITLAB_NO_ONE,
-                "merge_access_level": GITLAB_MAINTAINER,
-                "allow_force_push": False,
-            },
-        )
-    except _Undecided as exc:
-        raise _Undecided(exc.reason + gone) from None
+        landed.append("DELETE")
+    status, _ = _http(
+        forge,
+        host,
+        "POST",
+        f"projects/{quote(path, safe='')}/protected_branches",
+        {
+            "name": branch,
+            "push_access_level": GITLAB_NO_ONE,
+            "merge_access_level": GITLAB_MAINTAINER,
+            "allow_force_push": False,
+        },
+    )
     if status != 201:
-        raise _Undecided(f"the forge refused the write (HTTP {status}){gone}")
+        raise _Undecided(f"the forge refused the write (HTTP {status})")
+    landed.append("POST")
 
 
 def _label(forge: str, host: str, path: str) -> str:
@@ -476,6 +487,7 @@ def _run(argv: list[str]) -> int:
     """
     label = None
     wrote = False
+    landed: list[str] = []
     try:
         command = _parse_args(argv)
         forge, host, path = _origin()
@@ -501,7 +513,7 @@ def _run(argv: list[str]) -> int:
             return EXIT_IN_FORCE
         wrote = True
         verb = "written" if state is None else "replaced"
-        _write(forge, host, path, branch, state)
+        _write(forge, host, path, branch, state, landed)
         state = _read(forge, host, path, branch)
         unmet = _unmet(forge, state) if state is not None else ["absent"]
         if unmet:
@@ -519,6 +531,8 @@ def _run(argv: list[str]) -> int:
     except _Undecided as exc:
         where = f" {label}:" if label else ""
         when = " after a write was attempted" if wrote else ""
+        if landed:
+            when += f" (landed: {' '.join(landed)})"
         print(f"{TAG}{where} undecided{when}: {exc.reason}")
         return EXIT_UNDECIDED
 

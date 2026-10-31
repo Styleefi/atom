@@ -301,6 +301,7 @@ def test_github_apply_refusal_reports_the_status_only(monkeypatch, capsys) -> No
     assert _run(monkeypatch, forge, "apply") == protection.EXIT_UNDECIDED
     out = capsys.readouterr()
     assert "refused the write (HTTP 403)" in out.out
+    assert "landed" not in out.out  # 거부된 PUT은 반영된 단계가 아니다
     assert MARKER not in out.out + out.err
     # 거부 뒤에는 재읽기가 없다.
     assert len(_protection_gets(forge)) == 1
@@ -369,7 +370,7 @@ def test_reread_404_after_a_write_goes_through_the_branch_too(
     )
     assert _run(monkeypatch, forge, "apply") == protection.EXIT_UNDECIDED
     assert (
-        "undecided after a write was attempted: the branch is protected but"
+        "undecided after a write was attempted (landed: PUT): the branch is protected"
         in capsys.readouterr().out
     )
     assert [
@@ -606,46 +607,81 @@ def test_gitlab_apply_on_merge_no_one_rewrites_with_maintainer(monkeypatch) -> N
 def test_gitlab_post_refusal_after_delete_is_reported_without_reread(
     monkeypatch, capsys
 ) -> None:
-    # DELETE 뒤 POST가 거부되면 보호 없는 상태로 남고 exit 3 — 조용히 지나가지 않는다.
+    # DELETE 뒤 POST가 거부되면 보호 없는 상태로 남고 exit 3 — 줄이 DELETE가 반영됐다고 말한다.
     forge = _gitlab(
         [(200, {"allow_force_push": True})], post=(403, {"message": MARKER})
     )
     assert _run(monkeypatch, forge, "apply") == protection.EXIT_UNDECIDED
     out = capsys.readouterr()
     assert (
-        "undecided after a write was attempted: the forge refused the write (HTTP 403)"
-        "; the existing protection was already deleted" in out.out
+        "undecided after a write was attempted (landed: DELETE): "
+        "the forge refused the write (HTTP 403)" in out.out
     )
     assert MARKER not in out.out + out.err
     assert [m for m, _, _ in forge.writes()] == ["DELETE", "POST"]
     assert len(_protection_gets(forge)) == 1
 
 
-def test_gitlab_post_timeout_after_delete_names_the_deleted_protection(
-    monkeypatch, capsys
-) -> None:
-    forge = _gitlab([(200, {"allow_force_push": True})])
+def _timing_out(forge: _Forge, method: str):
+    """`method` 호출만 타임아웃(rc 124)으로 바꾼 seam."""
 
     def _fake(argv, *, stdin_text=None, extra_env=None):
-        if "POST" in argv:
+        if method in argv:
             forge.calls.append((list(argv), stdin_text))
             return 124, ""
         return forge(argv, stdin_text=stdin_text, extra_env=extra_env)
 
-    monkeypatch.setattr(protection, "run_cli", _fake)
+    return _fake
+
+
+def test_gitlab_post_timeout_after_delete_names_the_landed_delete(
+    monkeypatch, capsys
+) -> None:
+    forge = _gitlab([(200, {"allow_force_push": True})])
+    monkeypatch.setattr(protection, "run_cli", _timing_out(forge, "POST"))
     assert protection._run(["apply"]) == protection.EXIT_UNDECIDED
     assert (
-        "undecided after a write was attempted: glab did not answer within 30s"
-        "; the existing protection was already deleted" in capsys.readouterr().out
+        "undecided after a write was attempted (landed: DELETE): "
+        "glab did not answer within 30s" in capsys.readouterr().out
     )
 
 
-def test_gitlab_post_refusal_on_absent_names_no_deletion(monkeypatch, capsys) -> None:
+def test_gitlab_delete_timeout_names_no_landed_step_and_posts_nothing(
+    monkeypatch, capsys
+) -> None:
+    # DELETE의 답이 없으면 반영 여부를 모른다 — landed 없이 표식만, POST는 나가지 않는다.
+    forge = _gitlab([(200, {"allow_force_push": True})])
+    monkeypatch.setattr(protection, "run_cli", _timing_out(forge, "DELETE"))
+    assert protection._run(["apply"]) == protection.EXIT_UNDECIDED
+    out = capsys.readouterr().out
+    assert (
+        "undecided after a write was attempted: glab did not answer within 30s" in out
+    )
+    assert "landed" not in out
+    assert [m for m, _, _ in forge.writes()] == ["DELETE"]
+
+
+def test_gitlab_post_refusal_on_absent_names_no_landed_step(
+    monkeypatch, capsys
+) -> None:
     forge = _gitlab([(404, None)], post=(403, None))
     assert _run(monkeypatch, forge, "apply") == protection.EXIT_UNDECIDED
     out = capsys.readouterr().out
-    assert "the forge refused the write (HTTP 403)" in out
-    assert "already deleted" not in out
+    assert "undecided after a write was attempted: the forge refused the write" in out
+    assert "landed" not in out
+
+
+def test_gitlab_reread_failure_after_delete_and_post_names_both_in_order(
+    monkeypatch, capsys
+) -> None:
+    forge = _gitlab([(200, {"allow_force_push": True}), (500, {"message": MARKER})])
+    assert _run(monkeypatch, forge, "apply") == protection.EXIT_UNDECIDED
+    out = capsys.readouterr().out
+    assert (
+        "undecided after a write was attempted (landed: DELETE POST): "
+        "the forge refused to read the protection (HTTP 500)" in out
+    )
+    assert MARKER not in out
 
 
 def test_gitlab_check_user_push_entry_is_not_no_one(monkeypatch, capsys) -> None:
@@ -684,6 +720,7 @@ def test_gitlab_delete_refusal_reports_the_status_and_posts_nothing(
     assert _run(monkeypatch, forge, "apply") == protection.EXIT_UNDECIDED
     out = capsys.readouterr()
     assert "refused the delete (HTTP 403)" in out.out
+    assert "landed" not in out.out
     assert MARKER not in out.out + out.err
     assert [m for m, _, _ in forge.writes()] == ["DELETE"]
 
@@ -806,7 +843,7 @@ def test_reread_failure_after_a_write_says_so(monkeypatch, capsys) -> None:
     assert _run(monkeypatch, forge, "apply") == protection.EXIT_UNDECIDED
     out = capsys.readouterr().out
     assert (
-        "undecided after a write was attempted: "
+        "undecided after a write was attempted (landed: PUT): "
         "the forge refused to read the protection (HTTP 500)" in out
     )
     assert MARKER not in out
