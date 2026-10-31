@@ -52,9 +52,10 @@
       restrictions는 꺼진다 — 그리고 본문에 없는 설정(linear history 등)이 남는다고
       보장하지 않는다. 쓰기는 보호가 없거나 필요한 속성 중 하나라도 미충족일 때만
       나간다.
-    - GitLab의 DELETE와 POST 사이에는 보호가 없는 짧은 구간이 있다. POST가 거부되면
-      보호 없는 상태로 남고, 도구는 재읽기 없이 "refused the write"로 exit 3을 낸다.
-      그때 `apply`를 다시 돌리면 "보호 없음" 경로(POST)로 간다. 참조 집합 밖의
+    - GitLab의 DELETE와 POST 사이에는 보호가 없는 짧은 구간이 있다. POST가 거부되거나
+      답이 없으면 보호 없는 상태로 남을 수 있고, 도구는 재읽기 없이 그 사유 뒤에 "the
+      existing protection was already deleted"를 붙여 exit 3을 낸다. 그때 `apply`를
+      다시 돌리면 "보호 없음" 경로(POST)로 간다. 참조 집합 밖의
       항목(유료판의 사용자·그룹 허용 등)은 DELETE로 사라진다 — GitHub의 PUT 전체 교체와
       같은 성질이다.
     - 쓰기 단계에 들어간 뒤의 판정 불가(거부·타임아웃·CLI 미기동·재읽기 실패)는
@@ -425,24 +426,29 @@ def _write(forge: str, host: str, path: str, branch: str, state: dict | None) ->
         if status != 200:
             raise _Undecided(f"the forge refused the write (HTTP {status})")
         return
+    gone = ""
     if state is not None:
         status, _ = _http(forge, host, "DELETE", _protection_path(forge, path, branch))
         if status != 204:
             raise _Undecided(f"the forge refused the delete (HTTP {status})")
-    status, _ = _http(
-        forge,
-        host,
-        "POST",
-        f"projects/{quote(path, safe='')}/protected_branches",
-        {
-            "name": branch,
-            "push_access_level": GITLAB_NO_ONE,
-            "merge_access_level": GITLAB_MAINTAINER,
-            "allow_force_push": False,
-        },
-    )
+        gone = "; the existing protection was already deleted"
+    try:
+        status, _ = _http(
+            forge,
+            host,
+            "POST",
+            f"projects/{quote(path, safe='')}/protected_branches",
+            {
+                "name": branch,
+                "push_access_level": GITLAB_NO_ONE,
+                "merge_access_level": GITLAB_MAINTAINER,
+                "allow_force_push": False,
+            },
+        )
+    except _Undecided as exc:
+        raise _Undecided(exc.reason + gone) from None
     if status != 201:
-        raise _Undecided(f"the forge refused the write (HTTP {status})")
+        raise _Undecided(f"the forge refused the write (HTTP {status}){gone}")
 
 
 def _label(forge: str, host: str, path: str) -> str:

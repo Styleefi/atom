@@ -565,14 +565,38 @@ def test_gitlab_post_refusal_after_delete_is_reported_without_reread(
     out = capsys.readouterr()
     assert (
         "undecided after a write was attempted: the forge refused the write (HTTP 403)"
-        in (out.out)
+        "; the existing protection was already deleted" in out.out
     )
     assert MARKER not in out.out + out.err
     assert [m for m, _, _ in forge.writes()] == ["DELETE", "POST"]
-    protection_gets = [
-        argv for argv, _ in forge.calls if "GET" in argv and argv[-1].endswith("/main")
-    ]
-    assert len(protection_gets) == 1
+    assert len(_protection_gets(forge)) == 1
+
+
+def test_gitlab_post_timeout_after_delete_names_the_deleted_protection(
+    monkeypatch, capsys
+) -> None:
+    forge = _gitlab([(200, {"allow_force_push": True})])
+
+    def _fake(argv, *, stdin_text=None, extra_env=None):
+        if "POST" in argv:
+            forge.calls.append((list(argv), stdin_text))
+            return 124, ""
+        return forge(argv, stdin_text=stdin_text, extra_env=extra_env)
+
+    monkeypatch.setattr(protection, "run_cli", _fake)
+    assert protection._run(["apply"]) == protection.EXIT_UNDECIDED
+    assert (
+        "undecided after a write was attempted: glab did not answer within 30s"
+        "; the existing protection was already deleted" in capsys.readouterr().out
+    )
+
+
+def test_gitlab_post_refusal_on_absent_names_no_deletion(monkeypatch, capsys) -> None:
+    forge = _gitlab([(404, None)], post=(403, None))
+    assert _run(monkeypatch, forge, "apply") == protection.EXIT_UNDECIDED
+    out = capsys.readouterr().out
+    assert "the forge refused the write (HTTP 403)" in out
+    assert "already deleted" not in out
 
 
 def test_gitlab_check_user_push_entry_is_not_no_one(monkeypatch, capsys) -> None:
