@@ -111,27 +111,48 @@ def _run(monkeypatch, forge: _Forge, *argv: str) -> int:
     return protection._run(list(argv))
 
 
-def _github(protection_queue, repo=None):
+UNPROTECTED_BRANCH = (200, {"protected": False, "name": "main"})
+PROTECTED_BRANCH = (200, {"protected": True, "name": "main"})
+
+
+def _queue(branch):
+    return [branch] if isinstance(branch, tuple) else list(branch)
+
+
+def _github(protection_queue, repo=None, branch=UNPROTECTED_BRANCH):
     return _Forge(
         GH_ORIGIN,
         {
             ("gh", "GET", "repos/o/r"): [(200, repo or {"default_branch": "main"})],
+            ("gh", "GET", "repos/o/r/branches/main"): _queue(branch),
             ("gh", "GET", "repos/o/r/branches/main/protection"): protection_queue,
             ("gh", "PUT", "repos/o/r/branches/main/protection"): [(200, {})],
         },
     )
 
 
-def _gitlab(protection_queue, post=(201, {}), delete=(204, None)):
+def _gitlab(
+    protection_queue, post=(201, {}), delete=(204, None), branch=UNPROTECTED_BRANCH
+):
     return _Forge(
         GL_ORIGIN,
         {
             ("glab", "GET", GL_PROJECT): [(200, {"default_branch": "main"})],
+            ("glab", "GET", f"{GL_PROJECT}/repository/branches/main"): _queue(branch),
             ("glab", "GET", f"{GL_PROJECT}/protected_branches/main"): protection_queue,
             ("glab", "POST", f"{GL_PROJECT}/protected_branches"): [post],
             ("glab", "DELETE", f"{GL_PROJECT}/protected_branches/main"): [delete],
         },
     )
+
+
+def _protection_gets(forge: _Forge) -> list[list[str]]:
+    return [
+        argv
+        for argv, _ in forge.calls
+        if "GET" in argv
+        and (argv[-1].endswith("/protection") or "/protected_branches/" in argv[-1])
+    ]
 
 
 GL_POST_BODY = {
@@ -281,9 +302,7 @@ def test_github_apply_refusal_reports_the_status_only(monkeypatch, capsys) -> No
     assert "refused the write (HTTP 403)" in out.out
     assert MARKER not in out.out + out.err
     # 거부 뒤에는 재읽기가 없다.
-    assert [c for c in forge.calls if "GET" in c[0] and "protection" in c[0][-1]] == [
-        forge.calls[2]
-    ]
+    assert len(_protection_gets(forge)) == 1
 
 
 def test_github_apply_written_but_reread_fails_is_exit_5(monkeypatch, capsys) -> None:
@@ -299,6 +318,81 @@ def test_github_check_absent_is_exit_5_and_writes_nothing(monkeypatch, capsys) -
     out = capsys.readouterr().out
     assert "protection of main is absent" in out
     assert MARKER not in out
+
+
+def test_github_404_on_a_protected_branch_is_undecided_not_absent(
+    monkeypatch, capsys
+) -> None:
+    # 관리자가 아닌 토큰: 보호 GET은 404인데 브랜치는 protected: true (2026-10-31 실측 모양).
+    forge = _github(
+        [(404, {"message": "Not Found"})],
+        branch=(200, {"protected": True, "protection": {"note": MARKER}}),
+    )
+    assert _run(monkeypatch, forge, "apply") == protection.EXIT_UNDECIDED
+    out = capsys.readouterr().out
+    assert (
+        "undecided: the branch is protected but no protection is readable under its"
+        " name (HTTP 404)" in out
+    )
+    assert "absent" not in out
+    assert MARKER not in out
+    assert forge.writes() == []
+
+
+def test_missing_branch_is_undecided_not_absent(monkeypatch, capsys) -> None:
+    forge = _github([(404, None)], branch=(404, {"message": f"Branch {MARKER}"}))
+    assert _run(monkeypatch, forge, "check") == protection.EXIT_UNDECIDED
+    out = capsys.readouterr().out
+    assert "undecided: the forge refused to describe the branch (HTTP 404)" in out
+    assert MARKER not in out
+
+
+def test_branch_without_a_protected_flag_is_undecided(monkeypatch, capsys) -> None:
+    forge = _github([(404, None)], branch=(200, {"name": "main"}))
+    assert _run(monkeypatch, forge, "check") == protection.EXIT_UNDECIDED
+    assert "does not say whether the branch is protected" in capsys.readouterr().out
+
+
+def test_branch_is_read_only_on_a_404(monkeypatch) -> None:
+    forge = _github([(200, ATOM_PROTECTION)])
+    assert _run(monkeypatch, forge, "apply") == protection.EXIT_IN_FORCE
+    assert not any(argv[-1] == "repos/o/r/branches/main" for argv, _ in forge.calls)
+
+
+def test_reread_404_after_a_write_goes_through_the_branch_too(
+    monkeypatch, capsys
+) -> None:
+    # PUT 뒤 재읽기가 404면 다시 브랜치를 읽는다 — protected: true면 쓰기 뒤의 판정 불가다.
+    forge = _github(
+        [(404, None), (404, None)], branch=[UNPROTECTED_BRANCH, PROTECTED_BRANCH]
+    )
+    assert _run(monkeypatch, forge, "apply") == protection.EXIT_UNDECIDED
+    assert (
+        "undecided after a write was attempted: the branch is protected but"
+        in capsys.readouterr().out
+    )
+    assert [
+        argv[argv.index("--method") + 1 :][:2]
+        for argv, _ in forge.calls
+        if argv[0] == "gh"
+    ] == [
+        ["GET", "repos/o/r"],
+        ["GET", "repos/o/r/branches/main/protection"],
+        ["GET", "repos/o/r/branches/main"],
+        ["PUT", "repos/o/r/branches/main/protection"],
+        ["GET", "repos/o/r/branches/main/protection"],
+        ["GET", "repos/o/r/branches/main"],
+    ]
+
+
+def test_gitlab_404_on_a_protected_branch_is_undecided(monkeypatch, capsys) -> None:
+    forge = _gitlab([(404, None)], branch=PROTECTED_BRANCH)
+    assert _run(monkeypatch, forge, "check") == protection.EXIT_UNDECIDED
+    argv = [a for a, _ in forge.calls if a[0] == "glab"][-1]
+    assert argv[-1] == f"{GL_PROJECT}/repository/branches/main"
+    assert "no protection is readable under its name (HTTP 404)" in (
+        capsys.readouterr().out
+    )
 
 
 def test_github_check_in_force_is_exit_0(monkeypatch, capsys) -> None:

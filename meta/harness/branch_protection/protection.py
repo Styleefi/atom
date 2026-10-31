@@ -29,7 +29,11 @@
       통과), 관리자에게도 적용, force-push 금지, 삭제 금지. GitLab: push 권한 No one만,
       merge 권한 Maintainer만, force-push 금지. merge를 No one으로 두면 MR이 전부
       막히므로 Maintainer를 요구한다.
-    - 포지가 읽기·쓰기를 거부하면(404 읽기 제외) HTTP status 정수만 싣고 exit 3이다.
+    - 보호 읽기의 404는 브랜치를 한 번 더 읽어 가른다 — GitHub는 관리자가 아닌 토큰에도
+      404를 내기 때문이다(2026-10-31 실측). 브랜치가 `protected: false`면 보호 없음,
+      `true`면 그 이름으로 읽히는 보호가 없는 것이므로 exit 3, 브랜치 읽기가 200이
+      아니면(없는 브랜치 포함) exit 3이다.
+    - 그 밖에 포지가 읽기·쓰기를 거부하면 HTTP status 정수만 싣고 exit 3이다.
       원인은 진단하지 않는다 — #221이 든 사례(GitHub Free 요금제의 비공개 저장소)도
       여기서는 status 하나로만 보인다. 그 사례를 push 없이 알아내는 것이 `check`의
       존재 이유다.
@@ -325,6 +329,13 @@ def _protection_path(forge: str, path: str, branch: str) -> str:
     return f"projects/{quote(path, safe='')}/protected_branches/{branch_q}"
 
 
+def _branch_path(forge: str, path: str, branch: str) -> str:
+    branch_q = quote(branch, safe="")
+    if forge == GITHUB:
+        return f"repos/{path}/branches/{branch_q}"
+    return f"projects/{quote(path, safe='')}/repository/branches/{branch_q}"
+
+
 def _default_branch(forge: str, host: str, path: str) -> str:
     status, data = _http(forge, host, "GET", _repo_path(forge, path))
     if status != 200:
@@ -338,10 +349,27 @@ def _default_branch(forge: str, host: str, path: str) -> str:
 
 
 def _read(forge: str, host: str, path: str, branch: str) -> dict | None:
-    """보호 설정을 읽는다. 없으면(404) None."""
+    """보호 설정을 읽는다. 없으면 None.
+
+    404는 브랜치의 `protected` 플래그로 가른다 — GitHub는 관리자가 아닌 토큰에도 보호를
+    404로 숨기므로, 404만으로는 "없음"을 단정할 수 없다(모듈 docstring).
+    """
     status, data = _http(forge, host, "GET", _protection_path(forge, path, branch))
     if status == 404:
-        return None
+        status, data = _http(forge, host, "GET", _branch_path(forge, path, branch))
+        if status != 200:
+            raise _Undecided(
+                f"the forge refused to describe the branch (HTTP {status})"
+            )
+        flag = data.get("protected") if isinstance(data, dict) else None
+        if flag is False:
+            return None
+        if flag is True:
+            raise _Undecided(
+                "the branch is protected but no protection is readable under its name"
+                " (HTTP 404)"
+            )
+        raise _Undecided("the forge does not say whether the branch is protected")
     if status != 200:
         raise _Undecided(f"the forge refused to read the protection (HTTP {status})")
     if not isinstance(data, dict):
