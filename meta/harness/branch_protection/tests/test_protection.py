@@ -988,7 +988,7 @@ def test_reread_failure_after_a_write_says_so(monkeypatch, capsys) -> None:
     assert [m for m, _, _ in forge.writes()] == ["PUT"]
 
 
-def test_http_parses_status_and_body_from_include_output() -> None:
+def test_status_line_regex_matches_the_first_include_line() -> None:
     assert protection._STATUS_LINE_RE.match("HTTP/1.1 404 Not Found\r\n")
     assert protection._STATUS_LINE_RE.match("HTTP/2.0 200 OK")
     assert not protection._STATUS_LINE_RE.match("   ERROR  ")
