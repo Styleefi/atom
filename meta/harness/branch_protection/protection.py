@@ -44,8 +44,9 @@
 주장하지 않는 것:
     - `github.com` 밖의 GitHub 호스트(Enterprise, SSH over 443의 `ssh.github.com`)는
       GitLab으로 오감지된다. 지원하지 않는다.
-    - origin URL의 scheme·포트를 glab에 넘기지 않는다. glab은 `glab auth login`이 그
-      host에 기록한 api_protocol을 쓴다. host에 포트가 있으면 포트까지 host로 본다.
+    - origin URL의 scheme을 glab에 넘기지 않는다. glab은 `glab auth login`이 그 host에
+      기록한 api_protocol을 쓴다. http·https URL의 포트만 host에 붙이고(API 포트 —
+      테스트 스택의 `localhost:8929`가 그 경우다) 그 밖의 scheme의 포트는 버린다.
     - `git remote get-url`은 `url.<base>.insteadOf`를 적용한 결과를 돌려준다. 파싱 대상은
       그 결과다.
     - 인증은 gh·glab 자신의 것이다. 미로그인·권한 부족은 거부(exit 3)로만 보인다. glab은
@@ -217,8 +218,9 @@ def parse_origin(url: str) -> tuple[str, str, str]:
     (`[user@]host:path`)으로 읽는다. userinfo는
     버린다(출력에도 나가지 않는다). 호스트 이름은 소문자로 비교한다. 이름이
     `github.com`이면 포트와 무관하게 GitHub이고 경로는 정확히 `owner/repo`여야 한다.
-    그 외는 전부 GitLab이고, 포트가 있으면 `host:port`를 host로 보며, 경로의 세그먼트
-    수는 제한하지 않는다(서브그룹). 호스트는 `[A-Za-z0-9.-]`, 경로 세그먼트는
+    그 외는 전부 GitLab이고, http·https URL에 포트가 있으면 `host:port`를 host로
+    보며(API 포트; 그 밖의 scheme의 포트는 버린다), 경로의 세그먼트 수는 제한하지 않는다
+    (서브그룹). 호스트는 `[A-Za-z0-9.-]`, 경로 세그먼트는
     `[A-Za-z0-9._-]`로만 된 것을 받는다 — GitHub 경로는 인용 없이 API 경로에 들어가므로
     `?`·`:`·`..` 같은 문자가 요청을 바꾸지 못하게 한다. 포트 자리가 숫자가 아니거나
     범위 밖이면, 그리고 IPv6 호스트는 포지 URL로 읽지 않는다.
@@ -227,7 +229,7 @@ def parse_origin(url: str) -> tuple[str, str, str]:
         url: `git remote get-url origin`의 한 줄.
 
     Returns:
-        `(forge, host, path)`. host는 포트가 있으면 `host:port`.
+        `(forge, host, path)`. host는 http·https 포트가 있으면 `host:port`.
 
     Raises:
         _CallerError: 포지 URL로 읽을 수 없을 때.
@@ -242,6 +244,8 @@ def parse_origin(url: str) -> tuple[str, str, str]:
             raise _CallerError("origin is not a forge URL") from None
         if parts.scheme not in _FORGE_SCHEMES:
             raise _CallerError("origin is not a forge URL")
+        if parts.scheme not in ("http", "https"):
+            port = None  # http·https 밖의 포트는 API 포트가 아니다
         path = parts.path
     else:
         head, sep, path = url.partition(":")

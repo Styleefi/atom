@@ -177,9 +177,18 @@ GL_POST_BODY = {
         ("https://user:tok@github.com/o/r.git", ("github", "github.com", "o/r")),
         ("https://gitlab.com/g/sub/r.git", ("gitlab", "gitlab.com", "g/sub/r")),
         ("git@gitlab.example.com:g/r.git", ("gitlab", "gitlab.example.com", "g/r")),
+        # ssh 포트는 API 포트가 아니다 — 버린다. http·https 포트는 API 포트다.
         (
             "ssh://git@gitlab.example.com:2222/g/r.git",
-            ("gitlab", "gitlab.example.com:2222", "g/r"),
+            ("gitlab", "gitlab.example.com", "g/r"),
+        ),
+        (
+            "https://gitlab.example.com:8443/g/r.git",
+            ("gitlab", "gitlab.example.com:8443", "g/r"),
+        ),
+        (
+            "git+ssh://git@gitlab.example.com:2222/g/r",
+            ("gitlab", "gitlab.example.com", "g/r"),
         ),
         (
             "http://localhost:8929/root/scratch.git",
