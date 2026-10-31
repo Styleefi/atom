@@ -94,7 +94,7 @@ class _Forge:
         return (0 if status < 300 else 1, _render(status, body))
 
     def writes(self) -> list[tuple[str, str, object]]:
-        """(method, path, body) of every non-GET forge call."""
+        """GET이 아닌 포지 호출 전부의 (method, path, body)."""
         out = []
         for argv, stdin_text in self.calls:
             if argv[0] in ("gh", "glab") and "--method" in argv:
