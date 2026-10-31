@@ -56,7 +56,7 @@ uv run --directory meta python -m harness.branch_protection check   # exit 0 = i
 #    - clear atom's session records under docs/ and start your own
 #    - rewrite this README for your project
 
-# 3. later, pull rule/harness revisions from atom
+# 3. later, pull rule/harness revisions from atom — on a branch, merged by PR (main is protected)
 git pull upstream main
 ```
 
