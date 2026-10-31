@@ -51,12 +51,12 @@ git push -u origin main
 uv run --directory meta python -m harness.branch_protection apply
 uv run --directory meta python -m harness.branch_protection check   # exit 0 = in force
 
-# 2. adapt the skeleton — main is protected now, so do this on a branch and merge it by PR
+# 2. adapt the skeleton — once step 1's check exits 0, main is protected: do this on a branch and merge it by PR
 #    - copy meta/templates/CLAUDE.template.md over the root CLAUDE.md and fill it in
 #    - clear atom's session records under docs/ and start your own
 #    - rewrite this README for your project
 
-# 3. later, pull rule/harness revisions from atom — on a branch, merged by PR (main is protected)
+# 3. later, pull rule/harness revisions from atom — on a branch, merged by PR (main is protected once step 1's check exits 0)
 git pull upstream main
 ```
 
