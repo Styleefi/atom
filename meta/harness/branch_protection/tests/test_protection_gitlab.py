@@ -248,7 +248,10 @@ def test_apply_converges_an_existing_maintainer_protection(
     assert "not in force: push_no_one force_push_disallowed" in capsys.readouterr().out
 
     assert protection._run(["apply"]) == protection.EXIT_IN_FORCE
-    assert "replaced; in force" in capsys.readouterr().out
+    assert (
+        "replaced (was not in force: push_no_one force_push_disallowed); in force"
+        in capsys.readouterr().out
+    )
 
     entry = _api(gitlab_state, "GET", _protection_path(gitlab_state))
     assert _levels(entry, "push_access_levels") == [0]

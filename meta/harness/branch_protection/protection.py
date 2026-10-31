@@ -55,7 +55,9 @@
       값이 된다 — 더 엄격했던 승인 수 2도 0이 되고, 본문이 null로 두는 status check·
       restrictions는 꺼진다 — 그리고 본문에 없는 설정(linear history 등)이 남는다고
       보장하지 않는다. 쓰기는 보호가 없거나 필요한 속성 중 하나라도 미충족일 때만
-      나간다.
+      나가고, "replaced" 줄은 쓰기 전에 미충족이던 속성 이름을 싣는다. 통째 교체는
+      선언된 경계다(오너 결정 2026-10-31, PR #224 원장의 결정 댓글): 이 도구가 쓰는
+      것은 참조 집합 하나이고, 참조 집합 밖의 설정은 지워지는 쪽으로 틀린다.
     - GitLab의 DELETE와 POST 사이에는 보호가 없는 짧은 구간이 있다(CE 19.2.0 로컬
       스택 실측 0.12초, 대부분 glab 기동). POST가 거부되거나 답이 없으면 보호 없는
       상태로 남을 수 있고, 도구는 재읽기 없이 "(landed: DELETE)"를 단 exit 3을 낸다.
@@ -523,7 +525,11 @@ def _run(argv: list[str]) -> int:
             print(f"{TAG} {label}: protection of {shown} is already in force")
             return EXIT_IN_FORCE
         wrote = True
-        verb = "written" if state is None else "replaced"
+        verb = (
+            "written"
+            if state is None
+            else "replaced (was not in force: " + " ".join(unmet) + ")"
+        )
         _write(forge, host, path, branch, state, landed)
         state = _read(forge, host, path, branch)
         unmet = _unmet(forge, state) if state is not None else ["absent"]

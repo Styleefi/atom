@@ -298,8 +298,11 @@ def test_github_apply_on_mismatch_puts_once_then_rereads(monkeypatch, capsys) ->
     assert _run(monkeypatch, forge, "apply") == protection.EXIT_IN_FORCE
     assert [m for m, _, _ in forge.writes()] == ["PUT"]
     assert len(_protection_gets(forge)) == 2
-    # 있던 보호를 통째로 바꾼 쓰기는 "written"이 아니라 "replaced"로 보고한다.
-    assert "protection of main replaced; in force" in capsys.readouterr().out
+    # 있던 보호를 통째로 바꾼 쓰기는 "replaced"로, 무엇이 어긋나 있었는지와 함께 보고한다.
+    assert (
+        "protection of main replaced (was not in force: enforce_admins); in force"
+        in capsys.readouterr().out
+    )
 
 
 def test_github_apply_refusal_reports_the_status_only(monkeypatch, capsys) -> None:
@@ -592,7 +595,10 @@ def test_gitlab_apply_on_existing_protection_deletes_then_posts(
         ("DELETE", f"{GL_PROJECT}/protected_branches/main", None),
         ("POST", f"{GL_PROJECT}/protected_branches", GL_POST_BODY),
     ]
-    assert "protection of main replaced; in force" in capsys.readouterr().out
+    assert (
+        "protection of main replaced (was not in force: push_no_one "
+        "force_push_disallowed); in force" in capsys.readouterr().out
+    )
 
 
 def test_gitlab_apply_when_in_force_issues_no_write(monkeypatch, capsys) -> None:
