@@ -79,6 +79,9 @@
       약해지지 않고, ruleset만으로 보호된 브랜치는 classic protection이 404라 exit 3이다.
       오너 결정 2026-10-31(PR #224 원장의 결정 댓글).
     - 읽기와 쓰기 사이의 동시 변경은 감지하지 않는다. 재읽기가 보여 주는 것이 판정이다.
+    - `GITHUB_BODY`는 `bypass_pull_request_allowances`를 보내지 않는다. 생략이 그 목록을
+      비우는지는 실포지에서 검증하지 않았다 — 비우지 않으면 `apply`는 돌릴 때마다 쓰고
+      exit 5다.
     - 쓰기 뒤 재읽기가 exit 5면 그대로 보고한다. 재시도하지 않는다.
     - CI에서는 돌지 않는다. CI 이미지에 gh·glab이 없고, 단위 테스트는 어떤 바이너리도
       띄우지 않는다. 실포지 검증은 GitLab은 `gitlab` 마커 테스트(meta/infra/gitlab)로,
