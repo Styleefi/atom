@@ -9,8 +9,9 @@
     - 대상은 `git remote get-url origin`이 돌려준 URL이 가리키는 저장소 하나다. host가
       `github.com`이면 `gh api`, 그 외 host는 전부 `glab api`로 부른다. API 경로는 그
       URL에서 뽑은 owner/repo(GitLab: 프로젝트 경로)로 **전부 풀어 쓴다** — gh의
-      `{owner}/{repo}` placeholder는 `upstream` 원격을 `origin`보다 먼저 고르므로, 자식
-      프로젝트에서는 atom 저장소를 가리킨다. 호스트도 매 호출 명시한다 — gh에는
+      `{owner}/{repo}` placeholder는 `gh repo set-default`를 쓰지 않은 저장소에서
+      `upstream` 원격을 `origin`보다 먼저 고르므로(2026-10-31 실측), 자식 프로젝트에서는
+      atom 저장소를 가리킨다. 호스트도 매 호출 명시한다 — gh에는
       `--hostname github.com`, glab에는 `GITLAB_HOST` 환경변수(glab의 `--hostname`은
       포트 붙은 값을 거부하고, 환경변수는 git 디렉터리 추론보다 우선한다 — 2026-10-31
       실측). 상속된 `GH_REPO`·`GH_HOST`·`GITLAB_HOST`는 그 둘에 덮여 대상을 고르지
