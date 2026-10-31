@@ -550,6 +550,26 @@ def test_printable_rejects_a_trailing_newline() -> None:
     assert protection._printable("release/1.0") == "release/1.0"
 
 
+def test_coloured_repository_answer_is_not_a_missing_default_branch(
+    monkeypatch, capsys
+) -> None:
+    # escape가 섞인 본문은 JSON이 아니다 — "기본 브랜치 없음"이 아니라 응답 형식으로 보고한다.
+    coloured = '\x1b[1;38m{\x1b[0m"default_branch": "main"}'
+
+    def _fake(argv, *, stdin_text=None, extra_env=None):
+        if argv[0] == "git":
+            return (0, GH_ORIGIN + "\n")
+        return (0, f"HTTP/2.0 200 OK\r\n\r\n{coloured}")
+
+    monkeypatch.setattr(protection, "run_cli", _fake)
+    assert protection._run(["check"]) == protection.EXIT_UNDECIDED
+    out = capsys.readouterr().out
+    assert (
+        "undecided: the forge answered with something other than a JSON object" in out
+    )
+    assert "default branch" not in out
+
+
 def test_repository_describe_refusal_is_undecided(monkeypatch, capsys) -> None:
     forge = _github([], repo=None)
     forge.responses[("gh", "GET", "repos/o/r")] = [(401, {"message": MARKER})]
@@ -866,6 +886,14 @@ def test_run_cli_closes_stderr_and_stdin_and_disables_prompts(monkeypatch) -> No
     assert seen["env"]["GIT_TERMINAL_PROMPT"] == "0"
     assert seen["env"]["GH_PROMPT_DISABLED"] == "1"
     assert seen["env"]["GLAB_SEND_TELEMETRY"] == "false"
+
+    seen.clear()
+    # 상속된 색 강제는 gh의 JSON에 escape를 섞는다 — `NO_COLOR=1`·`CLICOLOR_FORCE=0`을 얹는다.
+    monkeypatch.setenv("CLICOLOR_FORCE", "1")
+    monkeypatch.setenv("GH_FORCE_TTY", "1")
+    assert protection.run_cli(["x"]) == (0, "ok")
+    assert seen["env"]["NO_COLOR"] == "1"
+    assert seen["env"]["CLICOLOR_FORCE"] == "0"
 
     seen.clear()
     # 상속된 GIT_DIR은 `git remote get-url`을 다른 저장소로 돌린다 — 환경에서 뺀다.

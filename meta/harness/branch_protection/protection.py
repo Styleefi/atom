@@ -16,8 +16,11 @@
       포트 붙은 값을 거부하고, 환경변수는 git 디렉터리 추론보다 우선한다 — 2026-10-31
       실측). 상속된 `GH_REPO`·`GH_HOST`·`GITLAB_HOST`는 그 둘에 덮여 대상을 고르지
       못하고, 상속된 `GIT_DIR`·`GIT_WORK_TREE`는 환경에서 빼므로 origin을 읽는
-      저장소를 바꾸지 못한다. 그 밖의 호스트 변수(예: `GITLAB_API_HOST`)와 그 밖의
-      `GIT_*`(insteadOf를 싣는 `GIT_CONFIG_*` 등)는 중화하지 않는다.
+      저장소를 바꾸지 못한다. 색을 강제하는 `GH_FORCE_TTY`·`CLICOLOR_FORCE`는
+      `NO_COLOR=1`과 `CLICOLOR_FORCE=0`에 덮여 gh의 JSON에 escape를 섞지 못한다(gh
+      2.103.0 실측 — `NO_COLOR`만으로는 `CLICOLOR_FORCE=1`을 이기지 못한다). 그 밖의
+      호스트 변수(예: `GITLAB_API_HOST`)와 그 밖의 `GIT_*`(insteadOf를 싣는
+      `GIT_CONFIG_*` 등)는 중화하지 않는다.
     - 보호 대상 브랜치는 포지가 답한 `default_branch`다. `main`도 `master`도 가정하지
       않는다.
     - `check`는 읽기만 한다. 필요한 속성이 전부 켜져 있으면 exit 0, 보호가 없거나
@@ -172,7 +175,7 @@ def run_cli(
 
     stderr는 돌려주지 않는다(모듈 docstring의 출력 채널 항목). 환경은 상속한다 — gh·glab이
     자기 설정 디렉터리에서 인증을 읽어야 하기 때문이다 — 다만 저장소 위치를 바꾸는
-    `GIT_DIR`·`GIT_WORK_TREE`는 빼고, 그 위에 프롬프트를 끄는 변수와 `extra_env`를
+    `GIT_DIR`·`GIT_WORK_TREE`는 빼고, 그 위에 프롬프트와 색을 끄는 변수와 `extra_env`를
     얹는다(상속된 같은 이름의 값은 덮인다).
 
     Args:
@@ -205,6 +208,8 @@ def run_cli(
                 "GIT_TERMINAL_PROMPT": "0",
                 "GH_PROMPT_DISABLED": "1",
                 "GLAB_SEND_TELEMETRY": "false",
+                "NO_COLOR": "1",
+                "CLICOLOR_FORCE": "0",
                 **(extra_env or {}),
             },
             timeout=TIMEOUT_SECONDS,
@@ -371,7 +376,9 @@ def _default_branch(forge: str, host: str, path: str) -> str:
         raise _Undecided(
             f"the forge refused to describe the repository (HTTP {status})"
         )
-    name = data.get("default_branch") if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        raise _Undecided("the forge answered with something other than a JSON object")
+    name = data.get("default_branch")
     if not isinstance(name, str) or not name:
         raise _Undecided("the forge reports no default branch")
     return name
