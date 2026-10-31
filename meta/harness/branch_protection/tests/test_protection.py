@@ -777,6 +777,16 @@ def test_run_cli_closes_stderr_and_stdin_and_disables_prompts(monkeypatch) -> No
     assert seen["env"]["GLAB_SEND_TELEMETRY"] == "false"
 
     seen.clear()
+    # 상속된 GIT_DIR은 `git remote get-url`을 다른 저장소로 돌린다 — 환경에서 뺀다.
+    monkeypatch.setenv("GIT_DIR", "/elsewhere/.git")
+    monkeypatch.setenv("GIT_WORK_TREE", "/elsewhere")
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "0")
+    assert protection.run_cli(["x"]) == (0, "ok")
+    assert "GIT_DIR" not in seen["env"]
+    assert "GIT_WORK_TREE" not in seen["env"]
+    assert seen["env"]["GIT_CONFIG_COUNT"] == "0"
+
+    seen.clear()
     assert protection.run_cli(["x"], stdin_text="{}") == (0, "ok")
     assert seen["input"] == "{}"
     assert "stdin" not in seen
