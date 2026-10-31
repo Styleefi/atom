@@ -510,6 +510,12 @@ def test_unprintable_default_branch_is_replaced_in_output(monkeypatch, capsys) -
     assert MARKER not in out
 
 
+def test_printable_rejects_a_trailing_newline() -> None:
+    # `$`는 끝의 개행을 허용한다 — fullmatch여야 허용 목록이 정확하다.
+    assert protection._printable("main\n") == protection._UNPRINTABLE
+    assert protection._printable("release/1.0") == "release/1.0"
+
+
 def test_repository_describe_refusal_is_undecided(monkeypatch, capsys) -> None:
     forge = _github([], repo=None)
     forge.responses[("gh", "GET", "repos/o/r")] = [(401, {"message": MARKER})]

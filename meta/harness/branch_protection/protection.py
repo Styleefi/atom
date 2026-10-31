@@ -464,7 +464,7 @@ def _label(forge: str, host: str, path: str) -> str:
 
 
 def _printable(branch: str) -> str:
-    return branch if _PRINTABLE_BRANCH_RE.match(branch) else _UNPRINTABLE
+    return branch if _PRINTABLE_BRANCH_RE.fullmatch(branch) else _UNPRINTABLE
 
 
 def _run(argv: list[str]) -> int:
