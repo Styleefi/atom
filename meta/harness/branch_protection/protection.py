@@ -186,7 +186,8 @@ def run_cli(
         extra_env: 이 호출에만 얹을 환경 변수.
 
     Returns:
-        `(rc, stdout)`. 타임아웃은 rc 124, 실행 실패(바이너리 부재 등)는 rc 127 — 둘 다
+        `(rc, stdout)`. stdout은 locale과 무관하게 UTF-8로 읽는다(못 읽는 바이트는 치환).
+        타임아웃은 rc 124, 실행 실패(바이너리 부재 등)는 rc 127 — 둘 다
         CLI가 내지 않는 값이고 서로 달라야 한다.
     """
     stdin_kwargs = (
@@ -200,6 +201,7 @@ def run_cli(
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
+            encoding="utf-8",
             errors="replace",
             env={
                 **{

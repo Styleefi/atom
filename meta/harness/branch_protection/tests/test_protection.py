@@ -882,6 +882,8 @@ def test_run_cli_closes_stderr_and_stdin_and_disables_prompts(monkeypatch) -> No
     assert protection.run_cli(["x"]) == (0, "ok")
     assert seen["stderr"] is subprocess.DEVNULL
     assert seen["stdin"] is subprocess.DEVNULL
+    # gh는 locale과 무관하게 UTF-8을 낸다 — locale 인코딩으로 읽으면 비ASCII 경로가 깨진다.
+    assert seen["encoding"] == "utf-8"
     assert "input" not in seen
     assert seen["env"]["GIT_TERMINAL_PROMPT"] == "0"
     assert seen["env"]["GH_PROMPT_DISABLED"] == "1"
