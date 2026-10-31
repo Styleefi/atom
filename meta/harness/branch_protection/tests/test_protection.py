@@ -283,13 +283,14 @@ def test_github_apply_when_in_force_issues_no_write(monkeypatch, capsys) -> None
     assert "already in force" in capsys.readouterr().out
 
 
-def test_github_apply_on_mismatch_puts_once_then_rereads(monkeypatch) -> None:
+def test_github_apply_on_mismatch_puts_once_then_rereads(monkeypatch, capsys) -> None:
     drifted = {**ATOM_PROTECTION, "enforce_admins": {"enabled": False}}
     forge = _github([(200, drifted), (200, ATOM_PROTECTION)])
     assert _run(monkeypatch, forge, "apply") == protection.EXIT_IN_FORCE
     assert [m for m, _, _ in forge.writes()] == ["PUT"]
-    gets = [c for c in forge.calls if "protection" in c[0][-1] and "GET" in c[0]]
-    assert len(gets) == 2
+    assert len(_protection_gets(forge)) == 2
+    # 있던 보호를 통째로 바꾼 쓰기는 "written"이 아니라 "replaced"로 보고한다.
+    assert "protection of main replaced; in force" in capsys.readouterr().out
 
 
 def test_github_apply_refusal_reports_the_status_only(monkeypatch, capsys) -> None:
@@ -516,7 +517,9 @@ def test_gitlab_apply_on_absent_posts_with_the_encoded_project_path(
     )
 
 
-def test_gitlab_apply_on_existing_protection_deletes_then_posts(monkeypatch) -> None:
+def test_gitlab_apply_on_existing_protection_deletes_then_posts(
+    monkeypatch, capsys
+) -> None:
     # push·merge 모두 Maintainer에 force push 허용인 기존 보호(테스트가 만든 상태).
     # CE는 PATCH의 allowed_to_* 를 무시하므로 지우고 참조 집합으로 다시 만든다.
     existing = {
@@ -530,6 +533,7 @@ def test_gitlab_apply_on_existing_protection_deletes_then_posts(monkeypatch) -> 
         ("DELETE", f"{GL_PROJECT}/protected_branches/main", None),
         ("POST", f"{GL_PROJECT}/protected_branches", GL_POST_BODY),
     ]
+    assert "protection of main replaced; in force" in capsys.readouterr().out
 
 
 def test_gitlab_apply_when_in_force_issues_no_write(monkeypatch, capsys) -> None:

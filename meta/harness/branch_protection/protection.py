@@ -47,9 +47,11 @@
       그 결과다.
     - 인증은 gh·glab 자신의 것이다. 미로그인·권한 부족은 거부(exit 3)로만 보인다. glab은
       미인증이면 status 줄 없이 배너만 낸다(rc는 호스트에 따라 0 또는 1) — exit 3이다.
-    - GitHub PUT은 보호 설정 전체를 교체한다. 필요한 네 속성 밖의 설정(status check,
-      restrictions, linear history 등)이 있던 저장소에서 쓰기가 나가면 그것들은 PUT의
-      기본값으로 돌아간다. 쓰기는 네 속성 중 하나라도 꺼져 있을 때만 나간다.
+    - GitHub PUT은 보호 설정 전체를 `GITHUB_BODY`로 교체한다. 본문에 있는 값은 본문
+      값이 된다 — 더 엄격했던 승인 수 2도 0이 되고, 본문이 null로 두는 status check·
+      restrictions는 꺼진다 — 그리고 본문에 없는 설정(linear history 등)이 남는다고
+      보장하지 않는다. 쓰기는 보호가 없거나 필요한 속성 중 하나라도 미충족일 때만
+      나간다.
     - GitLab의 DELETE와 POST 사이에는 보호가 없는 짧은 구간이 있다. POST가 거부되면
       보호 없는 상태로 남고, 도구는 재읽기 없이 "refused the write"로 exit 3을 낸다.
       그때 `apply`를 다시 돌리면 "보호 없음" 경로(POST)로 간다. 참조 집합 밖의
@@ -486,16 +488,17 @@ def _run(argv: list[str]) -> int:
             print(f"{TAG} {label}: protection of {shown} is already in force")
             return EXIT_IN_FORCE
         wrote = True
+        verb = "written" if state is None else "replaced"
         _write(forge, host, path, branch, state)
         state = _read(forge, host, path, branch)
         unmet = _unmet(forge, state) if state is not None else ["absent"]
         if unmet:
             print(
-                f"{TAG} {label}: protection of {shown} written but not in force: "
+                f"{TAG} {label}: protection of {shown} {verb} but not in force: "
                 + " ".join(unmet)
             )
             return EXIT_NOT_IN_FORCE
-        print(f"{TAG} {label}: protection of {shown} written; in force")
+        print(f"{TAG} {label}: protection of {shown} {verb}; in force")
         return EXIT_IN_FORCE
     except _CallerError as exc:
         print(f"{TAG} {exc.reason}", file=sys.stderr)
