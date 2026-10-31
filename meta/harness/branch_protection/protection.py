@@ -51,8 +51,9 @@
     - origin URL의 scheme을 glab에 넘기지 않는다. glab은 `glab auth login`이 그 host에
       기록한 api_protocol을 쓴다. http·https URL의 기본값 아닌 포트만 host에 붙이고(API
       포트 — 테스트 스택의 `localhost:8929`가 그 경우다) 그 밖의 포트는 버린다.
-    - `git remote get-url`은 `url.<base>.insteadOf`를 적용한 결과를 돌려준다. 파싱 대상은
-      그 결과다.
+    - `git remote get-url`은 `url.<base>.insteadOf`를 적용한 fetch URL 하나를 돌려준다.
+      파싱 대상은 그 결과다. push URL(`set-url --push`)과 둘째 URL(`set-url --add`)은
+      읽지 않는다.
     - 인증은 gh·glab 자신의 것이다. 미로그인·권한 부족은 거부(exit 3)로만 보인다. glab은
       미인증이면 status 줄 없이 배너만 낸다(rc는 호스트에 따라 0 또는 1) — exit 3이다.
     - GitHub PUT은 보호 설정 전체를 `GITHUB_BODY`로 교체한다. 본문에 있는 값은 본문
