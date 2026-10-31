@@ -933,6 +933,18 @@ def test_git_timeout_is_undecided_not_a_caller_error(monkeypatch, capsys) -> Non
     assert "git did not answer" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("rc", [-1, -15])
+def test_signal_killed_git_is_undecided_not_a_caller_error(
+    monkeypatch, capsys, rc
+) -> None:
+    # 신호로 죽은 git의 rc는 음수다 — 호출자 잘못(exit 2)이 아니라 판정 불가다.
+    monkeypatch.setattr(protection, "run_cli", lambda argv, **_: (rc, ""))
+    assert protection._run(["check"]) == protection.EXIT_UNDECIDED
+    out = capsys.readouterr()
+    assert "undecided: git was killed by a signal" in out.out
+    assert out.err == ""
+
+
 def test_git_exit_128_is_a_caller_error_with_its_own_reason(
     monkeypatch, capsys
 ) -> None:

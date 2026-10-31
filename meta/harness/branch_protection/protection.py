@@ -99,7 +99,8 @@
     것만 그대로 찍고, 아니면 `(unprintable name)`으로 바꿔 찍는다(작업은 계속한다).
 
 종료 코드:
-    0 in force / 5 not in force / 3 판정 불가(포지 거부·CLI 부재·타임아웃·응답 형식·Ctrl-C) /
+    0 in force / 5 not in force / 3 판정 불가(포지 거부·CLI 부재·타임아웃·응답 형식·Ctrl-C·
+      신호로 직접 죽은 git — 음수 rc) /
     2 호출자 잘못 / 1 도구가 돌지 못함(uv·import 실패 — 의도적으로 내지 않는다).
 """
 
@@ -297,6 +298,8 @@ def _origin() -> tuple[str, str, str]:
         raise _Undecided("git could not be run")
     if rc == 124:
         raise _Undecided(f"git did not answer within {TIMEOUT_SECONDS}s")
+    if rc < 0:
+        raise _Undecided("git was killed by a signal")
     if rc == 2 or (rc == 0 and not out.strip()):
         raise _CallerError("no remote named origin")
     if rc != 0:
