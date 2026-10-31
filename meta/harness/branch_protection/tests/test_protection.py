@@ -229,6 +229,9 @@ def test_parse_origin_accepts_forge_urls(url, expected) -> None:
         "file://github.com/o/r",
         "git@gitlab.example.com:g/r?x=1",
         "git@evil\x1b7.com:g/r",
+        # `_origin()`은 첫 줄만 넘기지만, 직접 호출자(#27의 훅)는 개행을 넘길 수 있다.
+        "git@gitlab.example.com:g\n/r",
+        "git@gitlab.example.com\n:g/r",
     ],
 )
 def test_parse_origin_rejects_non_forge_urls(url) -> None:

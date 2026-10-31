@@ -265,10 +265,10 @@ def parse_origin(url: str) -> tuple[str, str, str]:
     path = path.strip("/").removesuffix(".git").strip("/")
     segments = path.split("/")
     if (
-        not _HOST_RE.match(hostname)
+        not _HOST_RE.fullmatch(hostname)
         or not path
         or not all(
-            _SEGMENT_RE.match(seg) and seg not in (".", "..") for seg in segments
+            _SEGMENT_RE.fullmatch(seg) and seg not in (".", "..") for seg in segments
         )
     ):
         raise _CallerError("origin is not a forge URL")
