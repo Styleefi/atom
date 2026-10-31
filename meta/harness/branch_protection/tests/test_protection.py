@@ -282,7 +282,15 @@ def test_github_apply_on_absent_puts_the_reference_body(monkeypatch, capsys) -> 
         "--input",
         "-",
     ]
-    assert json.loads(stdin_text) == protection.GITHUB_BODY
+    # 모듈 상수가 아니라 리터럴과 비교한다 — 상수가 변이해도 이 테스트가 잡아야 한다.
+    assert json.loads(stdin_text) == {
+        "required_status_checks": None,
+        "enforce_admins": True,
+        "required_pull_request_reviews": {"required_approving_review_count": 0},
+        "restrictions": None,
+        "allow_force_pushes": False,
+        "allow_deletions": False,
+    }
     assert all("{owner}" not in " ".join(argv) for argv, _ in forge.calls)
     assert "written; in force" in capsys.readouterr().out
 
