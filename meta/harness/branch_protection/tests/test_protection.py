@@ -958,10 +958,10 @@ def test_git_exit_128_is_a_caller_error_with_its_own_reason(
     assert MARKER not in err
 
 
-def test_write_timeout_is_reported_as_after_a_write_was_sent(
+def test_write_timeout_is_reported_as_after_a_write_was_attempted(
     monkeypatch, capsys
 ) -> None:
-    # PUT이 타임아웃하면 요청은 나갔고 결과를 모른다 — 쓰기 전 형태로 읽히면 안 된다.
+    # PUT이 타임아웃하면 요청이 닿았는지도 결과도 모른다 — 쓰기 전 형태로 읽히면 안 된다.
     forge = _github([(404, None)])
     monkeypatch.setattr(protection, "run_cli", _timing_out(forge, "PUT"))
     assert protection._run(["apply"]) == protection.EXIT_UNDECIDED
