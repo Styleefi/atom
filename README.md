@@ -36,6 +36,8 @@ Open questions (which agent roles, which pipelines, rule migration) are tracked 
 Same-account forks are impossible, and template/import features sever the upstream link (`git pull upstream main` stops working). Use the clone recipe instead — `origin` points wherever the child lives, GitHub or GitLab, while `upstream` stays on atom (git handles mixed-host remotes fine):
 
 ```bash
+# 0. once per machine: install uv (https://docs.astral.sh/uv/), which runs the meta harnesses, and gh or glab for your forge
+
 # 1. create an empty repository on your forge (e.g. myproject) — no README init
 #    (GitLab checks "Initialize repository with a README" by default; uncheck it), then:
 git clone https://github.com/Styleefi/atom.git myproject
@@ -45,14 +47,16 @@ git remote rename origin upstream
 git remote add origin https://github.com/<your-account>/myproject.git
 #   or: git remote add origin https://gitlab.example.com/<group>/myproject.git
 git push -u origin main
+# protect the default branch on the forge (needs `gh auth login` / `glab auth login` for that host):
+uv run --directory meta python -m harness.branch_protection apply
+uv run --directory meta python -m harness.branch_protection check   # exit 0 = in force
 
-# 2. adapt the skeleton
-#    - install uv once per machine (https://docs.astral.sh/uv/) — runs the meta harnesses
+# 2. adapt the skeleton — once step 1's check exits 0, main is protected: do this on a branch and merge it by PR
 #    - copy meta/templates/CLAUDE.template.md over the root CLAUDE.md and fill it in
 #    - clear atom's session records under docs/ and start your own
 #    - rewrite this README for your project
 
-# 3. later, pull rule/harness revisions from atom
+# 3. later, pull rule/harness revisions from atom — on a branch, merged by PR (main is protected once step 1's check exits 0)
 git pull upstream main
 ```
 
