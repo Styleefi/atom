@@ -190,6 +190,16 @@ GL_POST_BODY = {
             "git+ssh://git@gitlab.example.com:2222/g/r",
             ("gitlab", "gitlab.example.com", "g/r"),
         ),
+        # 명시된 기본 포트는 생략과 같은 URL이다 — 버린다.
+        (
+            "https://gitlab.example.com:443/g/r.git",
+            ("gitlab", "gitlab.example.com", "g/r"),
+        ),
+        ("http://gitlab.example.com:80/g/r", ("gitlab", "gitlab.example.com", "g/r")),
+        (
+            "http://gitlab.example.com:443/g/r",
+            ("gitlab", "gitlab.example.com:443", "g/r"),
+        ),
         (
             "http://localhost:8929/root/scratch.git",
             ("gitlab", "localhost:8929", "root/scratch"),
