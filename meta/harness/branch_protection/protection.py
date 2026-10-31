@@ -62,9 +62,8 @@
     - GitLab의 DELETE와 POST 사이에는 보호가 없는 짧은 구간이 있다(CE 19.2.0 로컬
       스택 실측 0.12초, 대부분 glab 기동). POST가 거부되거나 답이 없으면 보호 없는
       상태로 남을 수 있고, 도구는 재읽기 없이 "(landed: DELETE)"를 단 exit 3을 낸다.
-      그때 `apply`를 다시 돌리면 "보호 없음" 경로(POST)로 간다. 참조 집합 밖의
-      항목(유료판의 사용자·그룹 허용 등)은 DELETE로 사라진다 — GitHub의 PUT 전체 교체와
-      같은 성질이다.
+      참조 집합 밖의 항목(유료판의 사용자·그룹 허용 등)은 DELETE로 사라진다 — GitHub의
+      PUT 전체 교체와 같은 성질이다.
     - 쓰기 단계에 들어간 뒤의 판정 불가(거부·타임아웃·CLI 미기동·재읽기 실패)는
       "undecided after a write was attempted"로 보고하고, 성공 status가 돌아온 쓰기
       단계가 있으면 "(landed: DELETE)"처럼 그 이름을 순서대로 덧붙인다. 한 번의
