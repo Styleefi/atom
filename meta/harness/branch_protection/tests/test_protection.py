@@ -990,6 +990,23 @@ def test_http_parses_status_and_body_from_include_output() -> None:
     assert not protection._STATUS_LINE_RE.match("   ERROR  ")
 
 
+@pytest.mark.parametrize(
+    "body", ["<html>502 Bad Gateway</html>", '\x1b[1m{"a": 1}\x1b[0m', "not json"]
+)
+def test_http_returns_the_status_and_none_for_a_body_that_is_not_json(
+    monkeypatch, body
+) -> None:
+    monkeypatch.setattr(
+        protection,
+        "run_cli",
+        lambda argv, **_: (
+            1,
+            f"HTTP/2.0 502 X\r\nContent-Type: text/html\r\n\r\n{body}",
+        ),
+    )
+    assert protection._http(protection.GITHUB, "github.com", "GET", "x") == (502, None)
+
+
 def test_main_returns_undecided_on_an_internal_error(monkeypatch, capsys) -> None:
     def _boom(_argv):
         raise RuntimeError(MARKER)
