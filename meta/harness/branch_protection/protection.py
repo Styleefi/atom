@@ -43,8 +43,8 @@
       존재 이유다.
 
 주장하지 않는 것:
-    - `github.com` 밖의 GitHub 호스트(Enterprise, SSH over 443의 `ssh.github.com`)는
-      GitLab으로 오감지된다. 지원하지 않는다.
+    - `github.com` 밖의 GitHub 호스트(Enterprise, SSH over 443의 `ssh.github.com`, 호스트
+      문자 집합에 맞는 ssh 설정 별칭)는 GitLab으로 오감지된다. 지원하지 않는다.
     - origin URL의 scheme을 glab에 넘기지 않는다. glab은 `glab auth login`이 그 host에
       기록한 api_protocol을 쓴다. http·https URL의 기본값 아닌 포트만 host에 붙이고(API
       포트 — 테스트 스택의 `localhost:8929`가 그 경우다) 그 밖의 포트는 버린다.
