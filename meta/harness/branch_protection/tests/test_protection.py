@@ -687,6 +687,42 @@ def test_gitlab_delete_timeout_names_no_landed_step_and_posts_nothing(
     assert [m for m, _, _ in forge.writes()] == ["DELETE"]
 
 
+def _interrupting(forge: _Forge, method: str):
+    """`method` 호출 중 Ctrl-C가 들어온 것처럼 KeyboardInterrupt를 내는 seam."""
+
+    def _fake(argv, *, stdin_text=None, extra_env=None):
+        if method in argv:
+            forge.calls.append((list(argv), stdin_text))
+            raise KeyboardInterrupt
+        return forge(argv, stdin_text=stdin_text, extra_env=extra_env)
+
+    return _fake
+
+
+def test_interrupt_during_post_keeps_the_after_write_marker(
+    monkeypatch, capsys
+) -> None:
+    # DELETE 뒤 POST 중 Ctrl-C: traceback이 아니라 어디까지 반영됐는지 적힌 한 줄, exit 3.
+    forge = _gitlab([(200, {"allow_force_push": True})])
+    monkeypatch.setattr(protection, "run_cli", _interrupting(forge, "POST"))
+    assert protection._run(["apply"]) == protection.EXIT_UNDECIDED
+    out = capsys.readouterr()
+    assert (
+        "gitlab gitlab.example.com g/sub/r: interrupted after a write was attempted"
+        " (landed: DELETE)\n" in out.out
+    )
+    assert out.err == ""
+
+
+def test_interrupt_before_any_write_carries_no_marker(monkeypatch, capsys) -> None:
+    forge = _github([(404, None)])
+    monkeypatch.setattr(protection, "run_cli", _interrupting(forge, "repos/o/r"))
+    assert protection._run(["check"]) == protection.EXIT_UNDECIDED
+    out = capsys.readouterr().out
+    assert "interrupted\n" in out
+    assert "after a write" not in out
+
+
 def test_gitlab_post_refusal_on_absent_names_no_landed_step(
     monkeypatch, capsys
 ) -> None:

@@ -67,8 +67,9 @@
       같은 성질이다.
     - 쓰기 단계에 들어간 뒤의 판정 불가(거부·타임아웃·CLI 미기동·재읽기 실패)는
       "undecided after a write was attempted"로 보고하고, 성공 status가 돌아온 쓰기
-      단계가 있으면 "(landed: DELETE)"처럼 그 이름을 순서대로 덧붙인다. 쓰기 전의 판정
-      불가에는 이 표식이 없다.
+      단계가 있으면 "(landed: DELETE)"처럼 그 이름을 순서대로 덧붙인다. 한 번의
+      Ctrl-C(SIGINT)는 traceback 대신 "interrupted"에 같은 표식을 달아 exit 3이다. 쓰기
+      전의 판정 불가에는 이 표식이 없다.
     - IPv6 리터럴 호스트는 지원하지 않는다. 호스트는 `[A-Za-z0-9.-]`(+`:포트`), 경로
       세그먼트는 `[A-Za-z0-9._-]`로만 된 것만 포지 URL로 읽는다. 그 밖은 exit 2다.
     - 판정은 기본 브랜치와 정확히 같은 이름의 규칙(GitLab)·classic protection(GitHub)
@@ -96,7 +97,7 @@
     것만 그대로 찍고, 아니면 `(unprintable name)`으로 바꿔 찍는다(작업은 계속한다).
 
 종료 코드:
-    0 in force / 5 not in force / 3 판정 불가(포지 거부·CLI 부재·타임아웃·응답 형식) /
+    0 in force / 5 not in force / 3 판정 불가(포지 거부·CLI 부재·타임아웃·응답 형식·Ctrl-C) /
     2 호출자 잘못 / 1 도구가 돌지 못함(uv·import 실패 — 의도적으로 내지 않는다).
 """
 
@@ -556,12 +557,14 @@ def _run(argv: list[str]) -> int:
         print(f"{TAG} {exc.reason}", file=sys.stderr)
         print(_USAGE, file=sys.stderr)
         return EXIT_CALLER
-    except _Undecided as exc:
+    except (_Undecided, KeyboardInterrupt) as exc:
         where = f" {label}:" if label else ""
         when = " after a write was attempted" if wrote else ""
         if landed:
             when += f" (landed: {' '.join(landed)})"
-        print(f"{TAG}{where} undecided{when}: {exc.reason}")
+        kind = "interrupted" if isinstance(exc, KeyboardInterrupt) else "undecided"
+        reason = "" if isinstance(exc, KeyboardInterrupt) else f": {exc.reason}"
+        print(f"{TAG}{where} {kind}{when}{reason}")
         return EXIT_UNDECIDED
 
 
