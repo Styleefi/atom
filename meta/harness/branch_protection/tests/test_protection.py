@@ -433,6 +433,49 @@ def test_github_check_stricter_review_count_is_still_in_force(monkeypatch) -> No
     assert _run(monkeypatch, forge, "check") == protection.EXIT_IN_FORCE
 
 
+@pytest.mark.parametrize("actor", ["users", "teams", "apps"])
+def test_github_check_review_bypass_allowance_is_unmet(
+    monkeypatch, capsys, actor
+) -> None:
+    # 우회 목록에 누군가 있으면 그 행위자는 PR 없이 push할 수 있다 — in force가 아니다.
+    bypass = {"users": [], "teams": [], "apps": [], actor: [{"slug": MARKER}]}
+    bypassed = {
+        **ATOM_PROTECTION,
+        "required_pull_request_reviews": {
+            "required_approving_review_count": 0,
+            "bypass_pull_request_allowances": bypass,
+        },
+    }
+    forge = _github([(200, bypassed)])
+    assert _run(monkeypatch, forge, "check") == protection.EXIT_NOT_IN_FORCE
+    out = capsys.readouterr().out
+    assert "not in force: no_review_bypass" in out
+    assert MARKER not in out
+
+
+@pytest.mark.parametrize("value", [None, [], [{"login": "x"}], "x"])
+def test_github_check_non_object_bypass_is_unmet(monkeypatch, capsys, value) -> None:
+    odd = {
+        **ATOM_PROTECTION,
+        "required_pull_request_reviews": {"bypass_pull_request_allowances": value},
+    }
+    forge = _github([(200, odd)])
+    assert _run(monkeypatch, forge, "check") == protection.EXIT_NOT_IN_FORCE
+    assert "not in force: no_review_bypass" in capsys.readouterr().out
+
+
+def test_github_check_empty_bypass_lists_are_in_force(monkeypatch) -> None:
+    empty = {
+        **ATOM_PROTECTION,
+        "required_pull_request_reviews": {
+            "required_approving_review_count": 0,
+            "bypass_pull_request_allowances": {"users": [], "teams": [], "apps": []},
+        },
+    }
+    forge = _github([(200, empty)])
+    assert _run(monkeypatch, forge, "check") == protection.EXIT_IN_FORCE
+
+
 def test_default_branch_is_read_from_the_forge(monkeypatch, capsys) -> None:
     forge = _Forge(
         GH_ORIGIN,

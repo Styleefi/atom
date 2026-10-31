@@ -26,7 +26,8 @@
       `allowed_to_merge`를 무시한다(문서상 Premium·Ultimate 전용, CE 19.2.0 실측
       2026-10-31). 오너 결정 2026-10-31: 1안(DELETE 뒤 POST).
     - 필요한 속성. GitHub: PR 리뷰 필수(승인 수는 비교하지 않는다 — 더 엄격한 값도
-      통과), 관리자에게도 적용, force-push 금지, 삭제 금지. GitLab: push 권한 No one만,
+      통과), 리뷰 우회 허용 목록(`bypass_pull_request_allowances`) 비어 있음, 관리자에게도
+      적용, force-push 금지, 삭제 금지. GitLab: push 권한 No one만,
       merge 권한 Maintainer만, force-push 금지. merge를 No one으로 두면 MR이 전부
       막히므로 Maintainer를 요구한다.
     - 보호 읽기의 404는 브랜치를 한 번 더 읽어 가른다 — GitHub는 관리자가 아닌 토큰에도
@@ -394,8 +395,15 @@ def _unmet(forge: str, state: dict) -> list[str]:
     """켜져 있어야 하는데 꺼진(또는 없는) 속성의 상수 이름들. 비어 있으면 in force."""
     unmet: list[str] = []
     if forge == GITHUB:
-        if not isinstance(state.get("required_pull_request_reviews"), dict):
+        reviews = state.get("required_pull_request_reviews")
+        if not isinstance(reviews, dict):
             unmet.append("pull_request_reviews_required")
+        else:
+            bypass = reviews.get("bypass_pull_request_allowances", {})
+            if not isinstance(bypass, dict) or any(
+                bypass.get(k) for k in ("users", "teams", "apps")
+            ):
+                unmet.append("no_review_bypass")
         if _enabled(state, "enforce_admins") is not True:
             unmet.append("enforce_admins")
         if _enabled(state, "allow_force_pushes") is not False:
