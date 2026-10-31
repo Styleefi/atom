@@ -177,8 +177,7 @@ def run_cli(
 
     stderr는 돌려주지 않는다(모듈 docstring의 출력 채널 항목). 환경은 상속한다 — gh·glab이
     자기 설정 디렉터리에서 인증을 읽어야 하기 때문이다 — 다만 `GIT_DIR`·`GIT_WORK_TREE`·
-    `GIT_COMMON_DIR`은 빼고, 그 위에 프롬프트와 색을 끄는 변수와 `extra_env`를 얹는다(상속된
-    같은 이름의 값은 덮인다).
+    `GIT_COMMON_DIR`은 빼고, 그 위에 `extra_env`를 얹는다(상속된 같은 이름의 값은 덮인다).
 
     Args:
         argv: 실행할 명령 전체.
