@@ -777,6 +777,25 @@ def test_gitlab_check_user_push_entry_is_not_no_one(monkeypatch, capsys) -> None
     assert MARKER not in out
 
 
+@pytest.mark.parametrize(
+    ("key", "entry", "name"),
+    [
+        ("push_access_levels", "x", "push_no_one"),
+        ("push_access_levels", 0, "push_no_one"),
+        ("merge_access_levels", "x", "merge_maintainer"),
+        ("merge_access_levels", 40, "merge_maintainer"),
+    ],
+)
+def test_gitlab_check_non_object_level_entry_is_unmet(
+    monkeypatch, capsys, key, entry, name
+) -> None:
+    # 객체가 아닌 항목은 access_level을 알 수 없다 — 키 없음과 같이 미충족이다.
+    odd = {**GL_IN_FORCE, key: [*GL_IN_FORCE[key], entry]}
+    forge = _gitlab([(200, odd)])
+    assert _run(monkeypatch, forge, "check") == protection.EXIT_NOT_IN_FORCE
+    assert f"not in force: {name}" in capsys.readouterr().out
+
+
 def test_gitlab_check_empty_levels_are_unmet(monkeypatch, capsys) -> None:
     forge = _gitlab([(200, {"push_access_levels": [], "allow_force_push": False})])
     assert _run(monkeypatch, forge, "check") == protection.EXIT_NOT_IN_FORCE

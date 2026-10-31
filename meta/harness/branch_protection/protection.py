@@ -411,9 +411,13 @@ def _enabled(state: dict, key: str) -> object:
     return value.get("enabled") if isinstance(value, dict) else None
 
 
-def _levels(state: dict, key: str) -> list[dict]:
+def _levels(state: dict, key: str) -> list:
     value = state.get(key)
-    return [e for e in value if isinstance(e, dict)] if isinstance(value, list) else []
+    return value if isinstance(value, list) else []
+
+
+def _level(entry: object) -> object:
+    return entry.get("access_level") if isinstance(entry, dict) else None
 
 
 def _unmet(forge: str, state: dict) -> list[str]:
@@ -437,10 +441,10 @@ def _unmet(forge: str, state: dict) -> list[str]:
             unmet.append("deletion_disallowed")
         return unmet
     push = _levels(state, "push_access_levels")
-    if not push or any(e.get("access_level") != GITLAB_NO_ONE for e in push):
+    if not push or any(_level(e) != GITLAB_NO_ONE for e in push):
         unmet.append("push_no_one")
     merge = _levels(state, "merge_access_levels")
-    if not merge or any(e.get("access_level") != GITLAB_MAINTAINER for e in merge):
+    if not merge or any(_level(e) != GITLAB_MAINTAINER for e in merge):
         unmet.append("merge_maintainer")
     if state.get("allow_force_push") is not False:
         unmet.append("force_push_disallowed")
