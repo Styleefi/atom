@@ -36,7 +36,7 @@ Open questions (which agent roles, which pipelines, rule migration) are tracked 
 Same-account forks are impossible, and template/import features sever the upstream link (`git pull upstream main` stops working). Use the clone recipe instead — `origin` points wherever the child lives, GitHub or GitLab, while `upstream` stays on atom (git handles mixed-host remotes fine):
 
 ```bash
-# 0. once per machine: install uv (https://docs.astral.sh/uv/) — it runs the meta harnesses
+# 0. once per machine: install uv (https://docs.astral.sh/uv/), which runs the meta harnesses, and gh or glab for your forge
 
 # 1. create an empty repository on your forge (e.g. myproject) — no README init
 #    (GitLab checks "Initialize repository with a README" by default; uncheck it), then:
