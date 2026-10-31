@@ -240,8 +240,6 @@ def parse_origin(url: str) -> tuple[str, str, str]:
         if not sep or not head or head.startswith(("/", ".")) or "/" in head:
             raise _CallerError("origin is not a forge URL")
         hostname = head.rpartition("@")[2]
-        if "[" in hostname:
-            raise _CallerError("origin is not a forge URL")
     hostname = (hostname or "").lower()
     path = path.strip("/").removesuffix(".git").strip("/")
     segments = path.split("/")
