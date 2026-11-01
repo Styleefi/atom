@@ -54,8 +54,8 @@
     - `git remote get-url`은 `url.<base>.insteadOf`를 적용한 fetch URL 하나를 돌려준다.
       파싱 대상은 그 결과다. push URL(`set-url --push`)과 둘째 URL(`set-url --add`)은
       읽지 않는다.
-    - 인증은 gh·glab 자신의 것이다. 미로그인·권한 부족은 거부(exit 3)로만 보인다. glab은
-      미인증이면 status 줄 없이 배너만 낸다(rc는 호스트에 따라 0 또는 1) — exit 3이다.
+    - 인증은 gh·glab 자신의 것이다. 미로그인이면 gh도 glab도 status 줄 없이 끝나(gh는 rc 4,
+      glab은 배너만 내고 rc는 호스트에 따라 0 또는 1) exit 3이다.
     - GitHub PUT은 보호 설정 전체를 `GITHUB_BODY`로 교체한다. 본문에 있는 값은 본문
       값이 된다 — 더 엄격했던 승인 수 2도 0이 되고, 본문이 null로 두는 status check·
       restrictions는 꺼진다 — 그리고 본문에 없는 설정(linear history 등)이 남는다고
