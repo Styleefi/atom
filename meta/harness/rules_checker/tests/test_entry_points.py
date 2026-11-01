@@ -34,6 +34,7 @@ _HOST_PACKAGE = Path(__file__).resolve().parents[1].name
 # 없어 그대로 걸린다.
 ENTRY_POINTS = {
     "answer_first_reminder": (True, "[answer-first-reminder]"),
+    "branch_protection": (True, "[branch-protection]"),
     "commit_backstop": (True, "[commit-backstop]"),
     "commit_guard": (True, "[commit-guard]"),
     "commit_publication": (True, "[commit-publication]"),
