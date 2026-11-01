@@ -42,7 +42,7 @@ while text bash would not run (a comment, a heredoc body, a line inside a
 quotation spanning lines, `create"x`, `false && gh pr create`) still fires, as does a
 create whose `--help`/`-h`/`--dry-run` comes after an argument spanning
 lines; a foreground command that exits
-non-zero (PostToolUse does not fire — a failed create, or a create followed
-by a failing segment, gets no reminder; a background call is reminded at
+non-zero (PostToolUse does not fire — a create followed by a failing segment
+gets no reminder; a background call is reminded at
 launch whatever it exits); `glab mr create` until #10; whether a loop
 actually ran; `gh pr ready`.

@@ -26,9 +26,8 @@ Claude Code의 PostToolUse(Bash) hook으로 실행되어, 방금 실행된 명�
     줄이 보지 못해 그래도 발화한다.
 (c) PostToolUse는 포그라운드 Bash 호출이 0으로 끝났을 때, 그리고 백그라운드
     호출은 그 종료와 무관하게 시작 시점에 발화한다(실측 2026-11-01;
-    PostToolUseFailure는 배선하지 않았다). 실패한 포그라운드 `gh pr create`에는
-    리마인더가 없고, 생성은 됐지만 뒤 세그먼트가 실패해 전체가 nonzero로 끝난
-    명령에도 없다. `tool_response`는 읽지 않는다.
+    PostToolUseFailure는 배선하지 않았다). 생성은 됐지만 뒤 세그먼트가 실패해
+    전체가 nonzero로 끝난 명령에도 없다. `tool_response`는 읽지 않는다.
 (d) `glab mr create`는 #10이 끝날 때까지 매처에 없다.
 (e) 루프가 실제로 돌았는지는 검증하지 않는다. Stop 시점 검증안은 턴마다
     포지 호출이 드는 비용으로 기각됐다(#27, 2026-10-26).
