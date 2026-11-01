@@ -293,7 +293,7 @@ def _token_soup(rng: random.Random) -> str:
     return " ".join(rng.choice(words) for _ in range(rng.randint(0, 24)))
 
 
-def test_unclosed_quote_early_is_linear() -> None:
+def test_unclosed_quote_early_stays_under_two_seconds() -> None:
     # 셋째 공격: 닫히지 않는 작은따옴표 하나 뒤 3000줄이 누적 재토큰화로 140초였다.
     # 줄 단위 방식의 실측은 0.1초 미만(여유 20배). 한 토큰이 아주 길면(200KB 한 줄)
     # shlex 자체가 느려지는 것은 넷째 공격이 쟀고 여기서 잡지 않는다.
