@@ -39,6 +39,7 @@ ENTRY_POINTS = {
     "commit_guard": (True, "[commit-guard]"),
     "commit_publication": (True, "[commit-publication]"),
     "issue_duplicate_guard": (True, "[issue-duplicate-guard]"),
+    "review_loop_reminder": (True, "[review-loop-reminder]"),
     "review_loop_spawn_record": (True, "[review-loop-spawn-record]"),
     "review_loop_trailer_check": (True, "[review-loop-trailer-check]"),
     "rules_checker": (False, "rules_checker:"),
@@ -58,6 +59,7 @@ REMOVABLE = {
     "commit_publication",
     "commit_guard",
     "issue_duplicate_guard",
+    "review_loop_reminder",
     "review_loop_spawn_record",
     "review_loop_trailer_check",
 }

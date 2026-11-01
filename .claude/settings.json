@@ -26,6 +26,10 @@
           {
             "type": "command",
             "command": "if command -v uv >/dev/null 2>&1; then uv run --directory \"$CLAUDE_PROJECT_DIR/meta\" python -m harness.review_loop_trailer_check || exit 1; fi"
+          },
+          {
+            "type": "command",
+            "command": "if command -v uv >/dev/null 2>&1; then uv run --directory \"$CLAUDE_PROJECT_DIR/meta\" python -m harness.review_loop_reminder || exit 1; fi"
           }
         ]
       },
