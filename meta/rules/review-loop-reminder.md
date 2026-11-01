@@ -39,7 +39,7 @@ behind global flags or prefixes, in backticks, through `gh api`, with
 `--help`/`-h`/`--dry-run` in a value position, after an unbalanced quote on
 the same line, or after a comment line ending in a backslash (#52 freeze),
 while text bash would not run (a comment, a heredoc body, a line inside a
-quotation spanning lines, `false && gh pr create`) still fires, as does a
+quotation spanning lines, `create"x`, `false && gh pr create`) still fires, as does a
 create whose `--help`/`-h`/`--dry-run` comes after an argument spanning
 lines; a foreground command that exits
 non-zero (PostToolUse does not fire — a failed create, or a create followed
