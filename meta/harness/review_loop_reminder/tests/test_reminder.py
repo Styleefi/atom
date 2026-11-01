@@ -70,6 +70,7 @@ _HEREDOC_BODY = 'gh pr create --title "feat: x" --body "$(cat <<\'EOF\'\nbody li
         "git push -u origin HEAD\ngh pr create --fill",
         "gh pr new --fill",
         "gh pr create --fill --dry-run-not-really",
+        "gh pr create --dry-run=false --fill",  # 거짓값은 PR을 연다
         "git push -u origin HEAD\n" + _HEREDOC_BODY,  # 둘째 줄부터 히어독이 줄을 걸침
         "git push -u origin HEAD && \\\n  gh pr create --fill",  # 줄 연속
         "git push -u origin HEAD\r\ngh pr create --fill",
@@ -98,6 +99,8 @@ def test_pr_create_fires(command: str) -> None:
         "gh pr create -h",
         "gh pr create --dry-run --fill",
         "gh pr new --dry-run",
+        "gh pr create --dry-run=true --fill",
+        "gh pr create --help=true",
         "gh pr create-x",
         "gh issue create --title t",
         "glab mr create --fill",  # 비주장 (d)

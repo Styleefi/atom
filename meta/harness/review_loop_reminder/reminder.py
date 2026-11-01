@@ -36,10 +36,11 @@ Claude Code의 PostToolUse(Bash) hook으로 실행되어, 방금 실행된 명�
 
 매처는 세그먼트의 첫 토큰 `gh`, 둘째 `pr`, 셋째 `create` 또는 그 내장 별칭 `new`이고,
 같은 토큰화 단위의 그 세그먼트에 토큰 `--help`·`-h`·`--dry-run`이 있으면 발화하지
-않는다. 명령은 바로 앞이 백슬래시가 아닌 백슬래시+개행을 공백으로 이은 뒤 줄마다
-토큰화하고, 여러 줄이면 명령 전체로도 한 번 토큰화한다. 혼자 토큰화되지 않는 줄은
-마지막 따옴표부터 잘라 내며 최대 8회 다시 시도하고(인용된 히어독 본문이 다음
-줄로 이어지는 줄의 머리를 살린다), 그래도 안 되면 건너뛴다(fail-open).
+않는다(`--dry-run=true`처럼 참값이 붙은 꼴도 같고, `=false`가 붙으면 발화한다).
+명령은 바로 앞이 백슬래시가 아닌 백슬래시+개행을 공백으로 이은 뒤 줄마다 토큰화하고,
+여러 줄이면 명령 전체로도 한 번 토큰화한다. 혼자 토큰화되지 않는 줄은 마지막
+따옴표부터 잘라 내며 최대 8회 다시 시도하고(인용된 히어독 본문이 다음 줄로
+이어지는 줄의 머리를 살린다), 그래도 안 되면 건너뛴다(fail-open).
 
 설계 불변식: 어떤 입력에도 차단 코드(42)를 내지 않고, stdout은 비어 있거나
 정확히 REMINDER를 담은 JSON 한 줄이다 — 페이로드 내용이 주입 채널로 새지
@@ -71,6 +72,8 @@ REMINDER = (
 _PR_CREATE = ("gh", "pr")
 _CREATE_VERBS = frozenset({"create", "new"})
 _NO_PR_FLAGS = frozenset({"--help", "-h", "--dry-run"})
+# gh(Go pflag)가 불 플래그의 참값으로 받는 문자열. `--dry-run=false`는 PR을 연다.
+_TRUE_VALUES = frozenset({"1", "t", "T", "TRUE", "true", "True"})
 # 바로 앞이 백슬래시가 아닌 백슬래시+개행. 백슬래시 홀수 연속(`\\\`)은 bash와 달리 잇지 않는다.
 _CONTINUATION_RE = re.compile(r"(?<!\\)\\\n")
 _PREFIX_RETRIES = 8
@@ -111,13 +114,26 @@ def _groups(command: str) -> list[tuple[str, list[str]]]:
     return groups
 
 
+def _is_no_pr_flag(token: str) -> bool:
+    """토큰이 `--help`·`-h`·`--dry-run`인지 판정한다.
+
+    Args:
+        token: 세그먼트의 인자 토큰 하나.
+
+    Returns:
+        플래그 이름이 _NO_PR_FLAGS에 있고 값이 없거나 참값이면 True.
+    """
+    name, sep, value = token.partition("=")
+    return name in _NO_PR_FLAGS and (not sep or value in _TRUE_VALUES)
+
+
 def is_pr_create(command: str) -> bool:
     """명령 문자열에 PR을 여는 `gh pr create`/`gh pr new` 세그먼트가 있는지 판정한다.
 
     hookio의 세그먼테이션(tokenize · protected_flags · split_segments)으로
     복합 명령을 나누고, 어느 세그먼트든 첫 세 토큰이 `gh pr create`(또는 `new`)이고
-    토큰 `--help`·`-h`·`--dry-run`이 없으면 참이다. 인용된 리터럴(`echo "gh pr
-    create"`)은 한 토큰이라 매치되지 않는다.
+    토큰 `--help`·`-h`·`--dry-run`(참값 `=true` 꼴 포함)이 없으면 참이다. 인용된
+    리터럴(`echo "gh pr create"`)은 한 토큰이라 매치되지 않는다.
 
     Args:
         command: Bash 도구가 실행한 명령 전체.
@@ -131,7 +147,7 @@ def is_pr_create(command: str) -> bool:
                 tuple(segment[:2]) == _PR_CREATE
                 and len(segment) > 2
                 and segment[2] in _CREATE_VERBS
-                and not _NO_PR_FLAGS.intersection(segment[3:])
+                and not any(_is_no_pr_flag(token) for token in segment[3:])
             ):
                 return True
     return False
