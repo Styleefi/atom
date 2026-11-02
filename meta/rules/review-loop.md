@@ -205,14 +205,17 @@ to the PR title or body is recorded like a commit.
 The ledger is edited from a local copy: the agent fetches the comment to a
 file, applies the change there, posts the whole file by script, and checks
 that the posted comment carries the change by a grep or a count, not by
-reading it back whole. When a separate review session runs the passes, it
-writes its whole round report, Pass report answers included, to a file both
-sessions can read; its message to the agent running the loop carries that
-file's path and, as text, only the findings; the Pass report answers are
-appended to the ledger from the file. Every prompt or follow-up the review
-session writes to a subagent states a character cap for the report, names a
-file for whatever the cap leaves out, and asks for that file's path in the
-report.
+reading it back whole. Each pass is run by a fresh-context subagent (not a
+fork of the session running the loop) spawned by the agent running the loop,
+on the model the owner names for that round (default `opus`, whatever the
+session's own model); the agent running the loop never picks the model
+itself. The pass subagent may itself fork a skill such as `/code-review`.
+The subagent writes its whole report, Pass report answers included, to a
+file; its return carries that file's path and, as text, only the findings;
+the Pass report answers are appended to the ledger from the file. Every
+prompt or follow-up the agent running the loop writes to a pass subagent
+states a character cap for the report, names a file for whatever the cap
+leaves out, and asks for that file's path in the report.
 
 Trade-off acceptance is the owner's decision — the agent only proposes. A
 finding matching a recorded trade-off is closed at triage (not counted, not
@@ -340,9 +343,8 @@ names a round's passes, the part of the scope each reviews, and its tool
 ### Pass prompt opening
 
 A pass launched with the `Agent` tool opens its prompt with the sentence
-below; whoever launches it — the agent running the loop, or the review
-session it asks — fills only the angle-bracket slots, and the rest of the
-prompt is its own. A skill forked through the `Skill` tool is recorded from
+below; the agent running the loop fills only the angle-bracket slots, and
+the rest of the prompt is its own. A skill forked through the `Skill` tool is recorded from
 its launch, whatever its prompt, review or not; an inline skill, or a
 `/skill` the owner types, is not. See meta/rules/review-loop-spawn-record.md.
 
