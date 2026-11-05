@@ -143,7 +143,8 @@ def test_blocking_template_remaps_the_guards_sentinel(module_name: str) -> None:
     # 가드 상수 ↔ 래퍼 템플릿의 실결합(리뷰 발견: 트리비얼 ==42 단정은 아무
     # 것도 묶지 못함). 값이 갈라지면 차단이 조용히 비차단 경고로 강등되므로,
     # 템플릿 문자열이 나열된 가드들의 EXIT_BLOCK을 되매핑 조건으로 쓰는지
-    # 대조한다(목록은 수동 유지 — 새 가드는 여기 추가해야 커버된다).
+    # 대조한다(목록은 수동 유지 — 새 가드를 여기 추가할 의무는
+    # meta/rules/README.md의 `enforce: hook` 항목이 적는다; #99).
     # skip은 "가드를 정합하게 제거한 자식 프로젝트"만을 위한 완화이므로 그
     # 모듈(또는 그 가드 패키지) 자체의 부재로 좁힌다 — importorskip은 가드
     # 내부의 깨진 import까지 삼켜 결합 검증을 침묵 skip시켰다(#43). 가드별
@@ -156,6 +157,21 @@ def test_blocking_template_remaps_the_guards_sentinel(module_name: str) -> None:
             pytest.skip(f"guard module removed: {exc.name}")
         raise
     assert f"-eq {guard.EXIT_BLOCK} " in HOOK_COMMAND_BLOCKING
+
+
+def test_blocking_template_remaps_the_hookio_sentinel() -> None:
+    # 세 가드는 EXIT_BLOCK을 hookio에서 import하므로 위 대조는 hookio의 값을
+    # 가드를 거쳐 묶는다. 여기서는 그 값을 직접 대조해, 가드 패키지가 모두
+    # 제거되어 위 케이스가 전부 skip되는 자식 프로젝트에서도 템플릿 ↔ 공유
+    # 상수 결합은 남게 한다. skip은 위와 같은 이유로 그 모듈(또는 hookio
+    # 패키지) 자체의 부재로 좁힌다.
+    try:
+        payload = importlib.import_module("harness.hookio.payload")
+    except ModuleNotFoundError as exc:
+        if exc.name in ("harness.hookio.payload", "harness.hookio"):
+            pytest.skip(f"hookio module removed: {exc.name}")
+        raise
+    assert f"-eq {payload.EXIT_BLOCK} " in HOOK_COMMAND_BLOCKING
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv not installed")
