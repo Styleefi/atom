@@ -160,7 +160,7 @@ def test_blocking_template_remaps_the_guards_sentinel(module_name: str) -> None:
 
 
 def test_blocking_template_remaps_the_hookio_sentinel() -> None:
-    # 세 가드는 EXIT_BLOCK을 hookio에서 import하므로 위 대조는 hookio의 값을
+    # 위 가드들은 EXIT_BLOCK을 hookio에서 import하므로 위 대조는 hookio의 값을
     # 가드를 거쳐 묶는다. 여기서는 그 값을 직접 대조해, 가드 패키지가 모두
     # 제거되어 위 케이스가 전부 skip되는 자식 프로젝트에서도 템플릿 ↔ 공유
     # 상수 결합은 남게 한다. skip은 위와 같은 이유로 그 모듈(또는 hookio
