@@ -1194,9 +1194,11 @@ def _pulled_repo(monkeypatch, tmp_path):
         check=True,
     )
     pushed = _commit(other, "feat: published upstream")
-    _git(other, "push", "-q", "origin", "main")
+    _git(other, "push", "-q", "origin", "main", "main:master")
+    _git(repo, "fetch", "-q", "origin")
     _git(repo, "pull", "-q", "origin", "main")
     assert _git(repo, "rev-parse", "refs/remotes/origin/main") == pushed
+    assert _git(repo, "rev-parse", "refs/remotes/origin/master") == pushed
     return repo
 
 
