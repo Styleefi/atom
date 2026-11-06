@@ -336,6 +336,21 @@ def test_pushed_branch_named_like_main_does_not_widen_exclusion(
     assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
 
 
+def test_remote_ref_under_main_does_not_stand_in_for_main(
+    monkeypatch, capsys, tmp_path
+):
+    # `refs/remotes/origin/main`이 없고 `refs/remotes/origin/main/x`만 있으면
+    # 제외 집합은 비어야 한다 — for-each-ref 패턴은 접두 일치라 `main/x`를
+    # 내보내므로(#206 측정 B), 정확 일치로 걸러야 한다.
+    repo = _baseline(monkeypatch, tmp_path)
+    tip = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "update-ref", "-d", "refs/remotes/origin/main")
+    _git(repo, "update-ref", "refs/remotes/origin/main/x", tip)
+    _commit(repo, "feat: direct on main")
+    assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
+    assert "No remote 'main' exists here" in capsys.readouterr().err
+
+
 def test_master_repo_uses_parameterized_branch_name(monkeypatch, capsys, tmp_path):
     repo = _baseline(monkeypatch, tmp_path, name="mrepo", branch="master")
     _commit(repo, "feat: direct on master")
@@ -1162,6 +1177,59 @@ def test_git_remote_failure_fails_open(monkeypatch, capsys, tmp_path):
     _commit(repo, "feat: on main")
     monkeypatch.setattr(backstop, "_remote_names", lambda cwd: None)
     assert _run(monkeypatch, repo) == 1  # 스킵 (비차단)
+
+
+def _pulled_repo(monkeypatch, tmp_path):
+    """origin main이 다른 클론으로 전진한 뒤 repo가 pull로 따라잡은 상태.
+
+    전진한 커밋은 원격에 이미 있으므로 정당하다 — 제외 ref 조회가 실패해도
+    이 전진을 위반으로 보고하면 안 된다(#206).
+    """
+    repo = _baseline(monkeypatch, tmp_path)
+    other = tmp_path / "other"
+    subprocess.run(
+        ["git", "clone", "-q", _git(repo, "remote", "get-url", "origin"), str(other)],
+        capture_output=True,
+        env=_GIT_ENV,
+        check=True,
+    )
+    pushed = _commit(other, "feat: published upstream")
+    _git(other, "push", "-q", "origin", "main")
+    _git(repo, "pull", "-q", "origin", "main")
+    assert _git(repo, "rev-parse", "refs/remotes/origin/main") == pushed
+    return repo
+
+
+def _is_exclusion_lookup(argv) -> bool:
+    """제외 ref 조회 호출인가 — `refs/remotes/...` 인자를 가진 git 호출."""
+    return any(str(a).startswith("refs/remotes/") for a in argv)
+
+
+@pytest.mark.parametrize("failure", ["timeout", "rc128"])
+def test_exclusion_ref_lookup_failure_warns_log_only(
+    monkeypatch, capsys, tmp_path, failure
+):
+    # #206: 조회 실패가 "원격 main 부재"로 읽히면 pull한 커밋이 차단된다.
+    # 예외(timeout)와 비 0 종료 두 실패 종류 모두 통과 방향이어야 한다.
+    repo = _pulled_repo(monkeypatch, tmp_path)
+    real_run = subprocess.run
+
+    def flaky(argv, **kwargs):
+        if _is_exclusion_lookup(argv):
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired(argv, backstop.GIT_TIMEOUT_SECONDS)
+            return subprocess.CompletedProcess(argv, 128, "", "fatal: injected")
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(backstop.subprocess, "run", flaky)
+    assert _run(monkeypatch, repo) == 1
+    err = capsys.readouterr().err
+    assert "NOT checked" in err
+    assert "No remote 'main' exists here" not in err
+    entries = _ledger_entries(tmp_path)
+    assert [(e["event"], e["reason"]) for e in entries] == [
+        ("degraded", backstop.REASON_BRANCH_EVAL_FAILED)
+    ]
 
 
 # --- 지속 실패 시 강등 (#115) -------------------------------------------------
