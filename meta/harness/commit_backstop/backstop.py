@@ -425,20 +425,29 @@ def _remote_names(cwd: str | None) -> list[str] | None:
     return [line.strip() for line in out.splitlines() if line.strip()]
 
 
-def _exclusion_refs(cwd: str | None, remotes: list[str]) -> list[str]:
-    """보호 브랜치 판정의 제외 ref를 명시적으로 조립한다.
+def _exclusion_refs(cwd: str | None, remotes: list[str]) -> list[str] | None:
+    """보호 브랜치 판정의 제외 ref를 명시적으로 조립한다. 실패는 None.
 
     glob(`refs/remotes/*/main`)은 와일드카드가 `/`를 관통하면 `origin/backup/main`
     같은 브랜치까지 제외해 push-후-merge 구멍이 재개방되므로, remote 목록에서
     존재 확인된 원격 main/master만 정확히 나열한다.
+
+    존재 확인은 `for-each-ref` 한 번으로 한다 — 부재는 종료 0에 빈 출력이고
+    실패만 비 0이라, `rev-parse --verify`와 달리 부재와 실패가 갈린다. 부재를
+    실패와 합치면 조회가 한 번 실패한 호출이 "원격 main 없음"으로 판정해
+    이미 공개된 커밋을 차단한다(#206). 패턴은 접두 일치라 `origin/main`이
+    없고 `origin/main/x`만 있으면 그쪽이 나오므로 정확 일치로 거른다.
     """
-    refs = []
-    for remote in remotes:
-        for branch in PROTECTED_BRANCHES:
-            ref = f"refs/remotes/{remote}/{branch}"
-            if _rev_parse(cwd, ref) is not None:
-                refs.append(ref)
-    return refs
+    wanted = [
+        f"refs/remotes/{remote}/{branch}"
+        for remote in remotes
+        for branch in PROTECTED_BRANCHES
+    ]
+    out = _run_git(cwd, "for-each-ref", "--format=%(refname)", *wanted)
+    if out is None:
+        return None
+    found = {line.strip() for line in out.splitlines()}
+    return [ref for ref in wanted if ref in found]
 
 
 def _offending_commits(
@@ -707,6 +716,7 @@ def main() -> int:
         )
     if not override:
         exclusions: list[str] | None = None
+        looked_up = False
         for branch in PROTECTED_BRANCHES:
             ref = f"refs/heads/{branch}"
             if ref not in moved:
@@ -714,9 +724,15 @@ def main() -> int:
             old, new = moved[ref]
             if old is None:
                 continue  # 최초 관찰: 기록만
-            if exclusions is None:
+            if not looked_up:
                 exclusions = _exclusion_refs(cwd, remotes)
-            offending = _offending_commits(cwd, old, new, exclusions)
+                looked_up = True
+            # 제외 ref 조회 실패는 빈 제외 집합이 아니다 — 평가 실패로 흘린다(#206).
+            offending = (
+                None
+                if exclusions is None
+                else _offending_commits(cwd, old, new, exclusions)
+            )
             if offending is None:
                 warnings.append(
                     f"[commit-backstop] '{branch}' advanced but the previous tip "
