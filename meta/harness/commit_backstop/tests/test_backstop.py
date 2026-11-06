@@ -341,12 +341,12 @@ def test_remote_ref_under_main_does_not_stand_in_for_main(
 ):
     # `refs/remotes/origin/main`이 없고 `refs/remotes/origin/main/x`만 있으면
     # 제외 집합은 비어야 한다 — for-each-ref 패턴은 접두 일치라 `main/x`를
-    # 내보내므로(#206 측정 B), 정확 일치로 걸러야 한다.
+    # 내보내므로(#206 측정 B), 정확 일치로 걸러야 한다. `main/x`는 새 tip을
+    # 가리킨다 — 제외 집합에 새면 위반 커밋이 제외되어 차단이 사라진다.
     repo = _baseline(monkeypatch, tmp_path)
-    tip = _git(repo, "rev-parse", "HEAD")
     _git(repo, "update-ref", "-d", "refs/remotes/origin/main")
+    tip = _commit(repo, "feat: direct on main")
     _git(repo, "update-ref", "refs/remotes/origin/main/x", tip)
-    _commit(repo, "feat: direct on main")
     assert _run(monkeypatch, repo) == backstop.EXIT_BLOCK
     assert "No remote 'main' exists here" in capsys.readouterr().err
 
@@ -1201,8 +1201,8 @@ def _pulled_repo(monkeypatch, tmp_path):
 
 
 def _is_exclusion_lookup(argv) -> bool:
-    """제외 ref 조회 호출인가 — `refs/remotes/...` 인자를 가진 git 호출."""
-    return any(str(a).startswith("refs/remotes/") for a in argv)
+    """제외 ref 조회 호출인가 — `for-each-ref` 인자를 가진 git 호출."""
+    return "for-each-ref" in argv
 
 
 @pytest.mark.parametrize("failure", ["timeout", "rc128"])
