@@ -143,7 +143,8 @@ def _tokens(line: str) -> list[str]:
 
 
 def _same_token(a: str, b: str) -> bool:
-    if a == b:
+    # 영어 절 삭제는 다음 낱말을 문장 첫머리로 올려 대문자로 바꾼다(`every` → `Every`).
+    if a.casefold() == b.casefold():
         return True
     # 한국어 절 삭제는 살아남은 낱말의 조사를 바꾼다(`문구도` → `문구가`).
     return bool(_HANGUL_RE.match(a) and _HANGUL_RE.match(b)) and a[:2] == b[:2]

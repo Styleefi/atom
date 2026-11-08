@@ -142,6 +142,22 @@ REFLOW_CASES = {
             "  next fix and returns to the owner. (Origin: #125; #139.)\n"
         ),
     ),
+    # d8a9d6f — 절 삭제로 다음 낱말이 문장 첫머리에 올라와 대문자가 된다(every → Every)
+    "d8a9d6f": (
+        (
+            "while #45 had its cause, the regex fallback, deleted, and the detection gap\n"
+            "that deletion opened is absorbed the same way. All\n"
+            "failure paths are fail-open (never block unrelated Bash), and\n"
+            "every block message includes the `ATOM_COMMIT_OVERRIDE=1` re-run escape for\n"
+            "deliberate exceptions. Non-mechanical guidance (semantic units, branch naming,\n"
+        ),
+        (
+            "while #45 had its cause, the regex fallback, deleted, and the detection gap\n"
+            "that deletion opened is absorbed the same way.\n"
+            "Every block message includes the `ATOM_COMMIT_OVERRIDE=1` re-run escape for\n"
+            "deliberate exceptions. Non-mechanical guidance (semantic units, branch naming,\n"
+        ),
+    ),
 }
 
 
