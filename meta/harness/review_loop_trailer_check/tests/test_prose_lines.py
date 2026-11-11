@@ -332,6 +332,12 @@ def test_one_new_sentence_is_flagged(tmp_path: Path) -> None:
     assert _judge(tmp_path, {"rule.md": before}, {"rule.md": after}) is True
 
 
+def test_case_change_beyond_the_first_letter_is_flagged(tmp_path: Path) -> None:
+    before = "A hook rule must declare blocking.\n"
+    after = "A hook rule MUST declare blocking.\n"
+    assert _judge(tmp_path, {"rule.md": before}, {"rule.md": after}) is True
+
+
 def test_non_ascii_path_is_still_attributed(tmp_path: Path) -> None:
     assert (
         _judge(
