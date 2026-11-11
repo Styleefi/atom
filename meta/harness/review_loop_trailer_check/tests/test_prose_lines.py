@@ -175,6 +175,12 @@ def test_reflow_and_clause_deletion_pass(tmp_path: Path, name: str) -> None:
     assert _judge(tmp_path, {"rule.md": before}, {"rule.md": after}) is False
 
 
+def test_demotion_to_lowercase_passes(tmp_path: Path) -> None:
+    before = "Deliberate exceptions aside.\nEvery block message includes the escape.\n"
+    after = "Deliberate exceptions aside, every block message includes the escape.\n"
+    assert _judge(tmp_path, {"rule.md": before}, {"rule.md": after}) is False
+
+
 def test_paragraph_moved_earlier_passes(tmp_path: Path) -> None:
     first = "First paragraph stays exactly as it was written before.\n"
     second = "Second paragraph moves above the first one in this commit.\n"
