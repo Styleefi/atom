@@ -5,6 +5,14 @@
 `4081fb9`, `0e70c56` 등)는 atom 히스토리의 커밋이지만 여기서는 내용을 복사해 재구성하므로
 자식 프로젝트에서도 SHA 없이 돈다. 통과해야 하는 쪽(`Prose: none`이 정당한 편집)이
 주 표본이다 — 오탐이 이 훅의 신뢰를 깎는다.
+
+받아들인 경계(`_same_token`의 대소문자 접기). 두 토큰은 각자의 첫 코드 포인트만
+`casefold()`한 뒤 나머지와 이어 붙여 비교되며, 토큰이 문장의 어느 위치에 있는지는
+비교에 들어가지 않는다. 틀리는 방향은 둘이다. 첫 코드 포인트는 다르지만 그
+`casefold()` 결과와 나머지가 같은 토큰 쌍은 어느 위치에서든 같다고 보아 보고하지
+않고(과소 작동), 첫 코드 포인트가 글자가 아닌 토큰 쌍은 그 뒤 글자의 대소문자
+차이로 보고한다(과잉 작동). 수용: PR #231 라운드 2,
+https://github.com/Styleefi/atom/pull/231#issuecomment-6716256599
 """
 
 from __future__ import annotations
@@ -142,12 +150,34 @@ REFLOW_CASES = {
             "  next fix and returns to the owner. (Origin: #125; #139.)\n"
         ),
     ),
+    # d8a9d6f — 절 삭제로 다음 낱말이 문장 첫머리에 올라와 대문자가 된다(every → Every)
+    "d8a9d6f": (
+        (
+            "while #45 had its cause, the regex fallback, deleted, and the detection gap\n"
+            "that deletion opened is absorbed the same way. All\n"
+            "failure paths are fail-open (never block unrelated Bash), and\n"
+            "every block message includes the `ATOM_COMMIT_OVERRIDE=1` re-run escape for\n"
+            "deliberate exceptions. Non-mechanical guidance (semantic units, branch naming,\n"
+        ),
+        (
+            "while #45 had its cause, the regex fallback, deleted, and the detection gap\n"
+            "that deletion opened is absorbed the same way.\n"
+            "Every block message includes the `ATOM_COMMIT_OVERRIDE=1` re-run escape for\n"
+            "deliberate exceptions. Non-mechanical guidance (semantic units, branch naming,\n"
+        ),
+    ),
 }
 
 
 @pytest.mark.parametrize("name", sorted(REFLOW_CASES))
 def test_reflow_and_clause_deletion_pass(tmp_path: Path, name: str) -> None:
     before, after = REFLOW_CASES[name]
+    assert _judge(tmp_path, {"rule.md": before}, {"rule.md": after}) is False
+
+
+def test_demotion_to_lowercase_passes(tmp_path: Path) -> None:
+    before = "Deliberate exceptions aside.\nEvery block message includes the escape.\n"
+    after = "Deliberate exceptions aside, every block message includes the escape.\n"
     assert _judge(tmp_path, {"rule.md": before}, {"rule.md": after}) is False
 
 
@@ -313,6 +343,12 @@ def test_one_new_sentence_is_flagged(tmp_path: Path) -> None:
     # d0d301f
     before = "links to filed issues.\n"
     after = "links to filed issues. An edit the agent makes to the PR title or body is\nrecorded like a commit.\n"
+    assert _judge(tmp_path, {"rule.md": before}, {"rule.md": after}) is True
+
+
+def test_case_change_beyond_the_first_letter_is_flagged(tmp_path: Path) -> None:
+    before = "A hook rule must declare blocking.\n"
+    after = "A hook rule MUST declare blocking.\n"
     assert _judge(tmp_path, {"rule.md": before}, {"rule.md": after}) is True
 
 
