@@ -213,7 +213,7 @@ itself. The pass subagent may itself fork a skill such as `/code-review`.
 The subagent writes its whole report, Pass report answers included, to a
 file; its return carries that file's path and, as text, only the findings;
 the Pass report answers are appended to the ledger from the file. Every
-prompt or follow-up the agent running the loop writes to a pass subagent
+prompt or follow-up the agent running the loop writes to a subagent
 states a character cap for the report, names a file for whatever the cap
 leaves out, and asks for that file's path in the report.
 
