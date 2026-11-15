@@ -381,20 +381,28 @@ def _store_state(path: str, state: dict) -> None:
             pass
 
 
-def _main_refs(cwd: str | None) -> list[str]:
-    """존재하는 로컬·원격 main/master ref 목록 — 검사 제외집합."""
-    refs = []
-    for branch in PROTECTED_BRANCHES:
-        ref = f"refs/heads/{branch}"
-        if _rev_parse(cwd, ref) is not None:
-            refs.append(ref)
+def _main_refs(cwd: str | None) -> list[str] | None:
+    """존재하는 로컬·원격 main/master ref 목록 — 검사 제외집합. 조회 실패는 None.
+
+    존재 확인은 `for-each-ref` 한 번으로 한다 — 부재는 종료 0에 빈 출력이고
+    실패만 비 0이라 둘이 갈린다. 패턴은 접두 일치라 정확 일치로 거른다
+    (commit_backstop/backstop.py의 `_exclusion_refs`와 같은 근거, #206).
+    """
     remotes = _run_git(cwd, "remote")
-    for remote in (remotes or "").splitlines():
-        for branch in PROTECTED_BRANCHES:
-            ref = f"refs/remotes/{remote.strip()}/{branch}"
-            if remote.strip() and _rev_parse(cwd, ref) is not None:
-                refs.append(ref)
-    return refs
+    if remotes is None:
+        return None
+    wanted = [f"refs/heads/{branch}" for branch in PROTECTED_BRANCHES]
+    wanted += [
+        f"refs/remotes/{remote.strip()}/{branch}"
+        for remote in remotes.splitlines()
+        if remote.strip()
+        for branch in PROTECTED_BRANCHES
+    ]
+    out = _run_git(cwd, "for-each-ref", "--format=%(refname)", *wanted)
+    if out is None:
+        return None
+    found = {line.strip() for line in out.splitlines()}
+    return [ref for ref in wanted if ref in found]
 
 
 def _new_commits(
@@ -503,6 +511,13 @@ def main() -> int:
         _store_state(state_path, state)
         return 0
     exclusions = _main_refs(cwd)
+    if exclusions is None:
+        # 상태를 저장하지 않는다 — 다음 호출이 같은 구간을 다시 읽는다(#230).
+        print(
+            f"{TAG} main ref lookup failed - commits NOT checked (fail-open)",
+            file=sys.stderr,
+        )
+        return 1
     if old is None and not exclusions:
         _store_state(state_path, state)
         return 0
