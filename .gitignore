@@ -9,3 +9,6 @@ dist/
 
 # Claude Code
 .claude/settings.local.json
+
+# Measurement raw files (local, never committed)
+/measurements/
