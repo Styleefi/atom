@@ -413,6 +413,77 @@ def test_commit_already_on_main_is_not_checked(monkeypatch, tmp_path, capsys) ->
     assert _run(monkeypatch, repo, "git commit -m x", capsys) == (0, "")
 
 
+def _fail_git(monkeypatch, subcommand: str) -> None:
+    """`subcommand`로 시작하는 git 호출만 실패(None)로 바꾼다."""
+    real = check._run_git
+
+    def fake(cwd, *args):
+        return None if args[0] == subcommand else real(cwd, *args)
+
+    monkeypatch.setattr(check, "_run_git", fake)
+
+
+def _pull_defective_main_commit(repo: Path, tmp_path: Path) -> str:
+    """다른 클론이 main에 `Prose:` 없는 loop 커밋을 push하고 repo가 pull한다."""
+    other = tmp_path / "other"
+    subprocess.run(
+        ["git", "clone", "-q", str(tmp_path / "remote.git"), str(other)],
+        capture_output=True,
+        env=_GIT_ENV,
+        check=True,
+    )
+    sha = _commit(other, "feat: upstream", LOOP)
+    _git(other, "push", "-q", "origin", "main")
+    _git(repo, "pull", "-q", "--no-rebase", "origin", "main")
+    return sha
+
+
+@pytest.mark.parametrize("subcommand", ["for-each-ref", "remote"])
+def test_main_ref_lookup_failure_skips_the_check(
+    monkeypatch, tmp_path, capsys, subcommand
+) -> None:
+    repo = _baseline(monkeypatch, tmp_path)
+    path = repo / ".git" / check.STATE_FILENAME
+    before = path.read_text()
+    _commit(repo, "feat: local")
+    _pull_defective_main_commit(repo, tmp_path)
+    with monkeypatch.context() as patch:
+        _fail_git(patch, subcommand)
+        assert _run(patch, repo, "git pull origin main") == (1, "")
+    captured = capsys.readouterr()
+    assert captured.out == "" and check.TAG in captured.err
+    assert _ledger(tmp_path) == []
+    assert path.read_text() == before
+    assert _run(monkeypatch, repo, "ls", capsys) == (0, "")
+    assert _ledger(tmp_path) == []
+
+
+def test_span_skipped_on_lookup_failure_is_checked_by_the_next_call(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    repo = _baseline(monkeypatch, tmp_path)
+    sha = _commit(repo, "feat: x", LOOP)
+    with monkeypatch.context() as patch:
+        _fail_git(patch, "for-each-ref")
+        assert _run(patch, repo, "git commit -m x", capsys) == (1, "")
+    _, out = _run(monkeypatch, repo, "ls", capsys)
+    assert sha[:7] in _context(out)
+
+
+def test_absent_remote_main_still_reports_branch_commits(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    repo = _make_repo(tmp_path)
+    _commit(repo, "chore: init")
+    _git(repo, "checkout", "-q", "-b", "feat/x")
+    assert _run(monkeypatch, repo) == (0, "")
+    sha = _commit(repo, "feat: x", LOOP)
+    _git(repo, "branch", "-q", "-D", "main")
+    _git(repo, "update-ref", "refs/remotes/origin/main/x", "HEAD")
+    _, out = _run(monkeypatch, repo, "git commit -m x", capsys)
+    assert sha[:7] in _context(out)
+
+
 def test_non_bash_or_non_repo_cwd_is_silent(monkeypatch, tmp_path, capsys) -> None:
     payload = {"tool_name": "Read", "tool_input": {}, "cwd": str(tmp_path)}
     monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
